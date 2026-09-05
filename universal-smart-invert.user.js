@@ -20,6 +20,11 @@
 // @grant        GM.xmlHttpRequest
 // @connect      *
 // @run-at       document-end
+// @compatible   chrome
+// @compatible   edge
+// @compatible   firefox
+// @compatible   opera
+// @compatible   safari
 // ==/UserScript==
 
 (function () {
