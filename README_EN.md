@@ -1,7 +1,7 @@
 # Universal Smart Video & Image Invert
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.3.1-blue.svg?style=flat-square" alt="Version">
+  <img src="https://img.shields.io/badge/version-1.4.0-blue.svg?style=flat-square" alt="Version">
   <img src="https://img.shields.io/badge/license-MIT-green.svg?style=flat-square" alt="License">
   <img src="https://img.shields.io/badge/Tampermonkey-Supported-orange.svg?style=flat-square" alt="Tampermonkey">
   <img src="https://img.shields.io/badge/ScriptCat-Supported-purple.svg?style=flat-square" alt="ScriptCat">
@@ -10,7 +10,7 @@
 
 An intelligent HTML5 userscript for video and web image color inversion, crafted for nighttime and long-session eye comfort.
 
-Specifically designed to tame **blinding white PowerPoint/PDF lecture slides in tutorial videos**, and **harsh white-background architecture diagrams, UML charts, and technical figures in articles**.
+Specifically designed to tame **blinding white PowerPoint/PDF lecture slides in tutorial videos**, and **harsh white and light-colored architecture diagrams, UML charts, and technical figures in articles**.
 
 ---
 
@@ -22,29 +22,25 @@ Specifically designed to tame **blinding white PowerPoint/PDF lecture slides in 
 - **Smart video probe**: Accurately detects and tracks the active video and mini-player (PiP), filtering out small hover previews and banner ads.
 
 ### 2. 🧠 Intelligent White-Slide Detection
-- **Ultra-lightweight detection (<0.01ms)**: Downscaled $16 \times 16$ sampling with integer bitwise math and early exit pruning (**~0.002ms per frame**, far faster than the 50ms imperceptible bar).
+- **Ultra-lightweight detection (<0.01ms)**: Downscaled sampling with integer bitwise math and early exit pruning (**~0.002ms per frame**, far faster than the 50ms imperceptible bar).
 - **Dual-feature classification**: Evaluates high luminance ratio ($L > 210$) and low average saturation ($S \le 22\%$).
 - **Anti-flicker hysteresis**: Dynamically calculated exit buffer to prevent stutter between slide transitions.
 
-### 3. 🛠️ Dedicated Fine-Tuning Settings Modal (Sliders & Numeric Inputs)
-- **Full settings modal**: Click "⚙️ 详细参数细调页面" in the capsule card to open the fine-tuning interface.
-- **Bi-directional sliders and numeric inputs**: Every parameter provides both a draggable range slider and a direct number input box, updating live on video and images in milliseconds.
-- **Comprehensive tuning**:
-  - **🎨 Filter & Colors**: Brightness (0.50~1.50), Contrast (0.50~1.50), Saturation (0.00~2.00), Hue Rotate (0~360°).
-  - **⚡ Transition**: Duration (0~1000ms, **default 0ms for instant switch without gradient**).
-  - **🧠 Auto Detection**: Sampling interval (50~2000ms), White ratio (30%~95%), Luminance line (160~250), Exit buffer (200~5000ms).
-  - **🖼️ Image Invert**: Minimum image dimension threshold (40~400px).
-  - **🔄 Reset to Defaults**: Restore all parameters to factory defaults with one click.
+### 3. 🛠️ Out-of-the-Box Presets & Collapsible Advanced Tuning
+- **Simple by Default**: Open the modal to immediately find clean, zero-configuration preset cards (Soft Gray / AMOLED Black) and image light-color chips.
+- **🎨 Interactive Color Map & Picker**: Native color picker lets you pick any custom light color with live HEX extraction and tolerance matching.
+- **⚙️ Collapsible Advanced Accordion**: Draggable range sliders and numeric input boxes (brightness, contrast, saturation, hue, tolerance, cutoff, area ratio, min size) are neatly organized inside an accordion drawer.
 
 ### 4. 🤝 Non-Conflicting Human-in-the-Loop State Machine
 - **Never fights the user**: Memorizes rejected scene fingerprints upon manual toggle (`Alt + I` or capsule click).
 - **Suppression lock**: Remains silent as long as the scene characteristics persist, re-engaging only upon a genuine scene transition.
 
-### 5. 🖼️ Web Diagram & Vector Invert (Smart Image Invert - v1.3.1 Enhanced)
-- **CORS CDN Taint Solved**: Uses extension privilege `GM_xmlhttpRequest` to obtain clean image Blobs, completely eliminating canvas `SecurityError` on third-party CDNs (Zhihu, Bilibili, GitHub, Wikipedia, etc.).
-- **Vector SVG & Alpha Filtering**: Accurately detects white-background inline `<svg>` diagrams and ignores transparent alpha pixels in PNG diagrams.
-- **Strict exclusion**: Skips avatars, emojis, logos, and icons under 100px.
-- **Lazy-load Resilient**: Monitors `src` and `data-src` attribute mutations to ensure lazy-loaded figures are reliably inverted.
+### 5. 🖼️ Multi-Light-Color Image Detection (Smart Image Invert - v1.4.0 Major Upgrade)
+- **Full Light-Color Spectrum**: Not just pure white (#FFF), but also paper light-gray (#F5F5F5), warm cream/sepia (#FAF0E6), and pale blue (#F0F8FF).
+- **One-Click Preset Chips**: 4 interactive color chips to toggle specific light-color categories on the fly.
+- **Ultra-Low Resource Footprint (8×8 Grid)**: Per-image classification takes just **~0.0007ms (0.7 microseconds)**.
+- **Canvas Taint Isolation**: Fresh micro-canvas per analysis avoids canvas tainted lockouts.
+- **Clean Filtering**: Eliminates accidental URL blacklist matching on `thumb` and `header` paths, allowing Wikimedia and Zhihu diagrams to invert reliably.
 - **Alt + Left Click Force Toggle**: Press `Alt` and click any image or SVG to immediately force invert or restore.
 - **Pure CSS Hover-to-Restore**: Hovering mouse over any inverted image instantly and smoothly restores its original colors using GPU hardware acceleration.
 

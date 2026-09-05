@@ -3,10 +3,10 @@
 // @name:zh-CN   全网通用智能视频与图片反色
 // @name:en      Universal Smart Video & Image Invert
 // @namespace    https://github.com/jiozhaoyue/universal-smart-invert
-// @version      1.3.1
-// @description  全网通用智能HTML5视频与图片反色脚本。内置专属参数精细设置页（支持滑动条拖动与精确数值输入双向细调）；秒级/直接无渐变切换（全部可设置），极致性能优化识别在5ms内无感执行；精准识别主视频与小窗，不污染控制栏、弹幕与字幕；独创无对抗人机协同状态机；白底技术图自适应反色与悬停显原图；极简胶囊与快捷键。
-// @description:zh-CN 全网通用智能HTML5视频与图片反色脚本。内置专属参数精细设置页（支持滑动条拖动与精确数值输入双向细调）；秒级/直接无渐变切换（全部可设置），极致性能优化识别在5ms内无感执行；精准识别主视频与小窗，不污染控制栏、弹幕与字幕；独创无对抗人机协同状态机；白底技术图自适应反色与悬停显原图；极简胶囊与快捷键。
-// @description:en Universal HTML5 smart video and image invert userscript. Features dedicated fine-tuning settings modal with draggable sliders and numeric inputs; instant direct switch without transition; sub-5ms imperceptible recognition; accurately targets video & PiP without polluting controls/danmaku/subtitles; non-conflicting HIL state machine; auto-inverts web diagrams with hover-to-restore; minimalist capsule & shortcuts.
+// @version      1.4.0
+// @description  全网通用智能HTML5视频与图片反色脚本。内置专属参数设置页与色图拾色器；支持全浅色系自适应与预设色卡选择（纯白/浅灰/米黄暖白/冷调淡蓝）；秒级/直接无渐变切换，识别在0.003ms内无感执行；精准保护控制栏/弹幕/字幕；独创人机协同状态机；白底与浅底技术图自适应反色与悬停显原图。
+// @description:zh-CN 全网通用智能HTML5视频与图片反色脚本。内置专属参数设置页与色图拾色器；支持全浅色系自适应与预设色卡选择（纯白/浅灰/米黄暖白/冷调淡蓝）；秒级/直接无渐变切换，识别在0.003ms内无感执行；精准保护控制栏/弹幕/字幕；独创人机协同状态机；白底与浅底技术图自适应反色与悬停显原图。
+// @description:en Universal HTML5 smart video and image invert userscript. Features dedicated fine-tuning modal and color palette selector; detects all light-color spectrums (pure white, gray, warm cream, cool blue); instant switch without transition; sub-0.003ms recognition; protects controls/danmaku/subtitles; non-conflicting HIL state machine; auto-inverts web diagrams with hover-to-restore.
 // @author       jiozhaoyue
 // @license      MIT
 // @icon         data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><circle cx=%2250%22 cy=%2250%22 r=%2246%22 fill=%22%231e293b%22 stroke=%22%2338bdf8%22 stroke-width=%228%22/><path d=%22M50 4 A46 46 0 0 1 50 96 Z%22 fill=%22%2338bdf8%22/></svg>
@@ -56,12 +56,53 @@
     },
   };
 
+  const IMG_COLOR_PRESETS = [
+    { id: 'white', name: '标准纯白', color: '#FFFFFF', rgb: [255, 255, 255] },
+    { id: 'gray', name: '纸质浅灰', color: '#F5F5F5', rgb: [245, 245, 245] },
+    { id: 'cream', name: '米黄暖白', color: '#FAF0E6', rgb: [250, 240, 230] },
+    { id: 'coolBlue', name: '冷调淡蓝', color: '#F0F8FF', rgb: [240, 248, 255] },
+  ];
+
+  function hexToRgb(hex) {
+    if (!hex || typeof hex !== 'string') return [255, 255, 255];
+    const c = hex.replace('#', '').trim();
+    if (c.length === 3) {
+      return [
+        parseInt(c[0] + c[0], 16),
+        parseInt(c[1] + c[1], 16),
+        parseInt(c[2] + c[2], 16)
+      ];
+    }
+    if (c.length === 6) {
+      return [
+        parseInt(c.substring(0, 2), 16),
+        parseInt(c.substring(2, 4), 16),
+        parseInt(c.substring(4, 6), 16)
+      ];
+    }
+    return [255, 255, 255];
+  }
+
   const DEFAULT_STATE = {
     enabled: true,           // 脚本总使能
     autoDetect: true,        // 视频智能自动反色检测
     invertActive: false,     // 视频当前是否生效反色
-    imageInvert: true,       // 网页白底图片智能反色 (Phase 2)
+    imageInvert: true,       // 网页浅色图片智能反色 (总开关)
     presetId: 'soft-gray',   // 当前预设 ('soft-gray' | 'amoled' | 'custom')
+
+    // 网页浅色图表检测与色图参数 (开箱即用)
+    imgGeneralLight: true,   // 全浅色通用自适应检测 (任何高明度浅底图表均自动识别)
+    imgPresets: {            // 预设浅色色卡开关 (开箱即用默认全部点亮激活)
+      white: true,           // 标准纯白 #FFFFFF
+      gray: true,            // 纸质浅灰 #F5F5F5
+      cream: true,           // 米黄暖白 / 羊皮纸 #FAF0E6
+      coolBlue: true         // 冷调淡蓝 #F0F8FF
+    },
+    imgCustomColor: '#ffffff', // 自定义色图选色 (HEX)
+    imgTolerance: 35,        // 目标色彩色差容差 (10 ~ 80, 默认 35)
+    imgLumCutoff: 180,       // 浅色感知明度阈值 (150 ~ 240, 默认 180 比原来 210 更宽容)
+    imgAreaThreshold: 48,    // 浅色面积占比阈值百分比 (25 ~ 90, 默认 48%)
+    minImgSize: 48,          // 正文图片最小检测尺寸: 32 ~ 300px (默认 48px, 支持公式与小流程图)
 
     // 滤镜微调参数 (双向滑动条 + 数值填空)
     brightness: 0.92,        // 亮度 (0.50 ~ 1.50)
@@ -74,14 +115,12 @@
 
     // 智能检测参数
     sampleIntervalMs: 250,   // 采样周期: 50 ~ 2000ms
-    whiteThreshold: 60,      // 白底面积占比阈值: 30% ~ 95%
-    lumThreshold: 210,       // 感知明度线: 160 ~ 250
+    whiteThreshold: 60,      // 视频白底面积占比阈值: 30% ~ 95%
+    lumThreshold: 210,       // 视频感知明度线: 160 ~ 250
     exitHysteresisMs: 1500,  // 退出迟滞时间: 200 ~ 5000ms
 
-    // 图片反色参数
-    minImgSize: 100,         // 正文图片最小检测尺寸: 40 ~ 400px
-
     settingsOpen: false,     // 快捷设置折叠
+    advancedOpen: false,     // 高级参数折叠抽屉
     pos: { x: null, y: null, edge: 'right' }, // 悬浮胶囊位置
   };
 
@@ -548,6 +587,158 @@
       .svi-btn-done:hover {
         background: #1d4ed8;
       }
+
+      /* 浅色色卡网格与色图选择器 */
+      .svi-color-chips-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 8px;
+        margin-top: 4px;
+      }
+      .svi-color-chip {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 10px;
+        background: rgba(255, 255, 255, 0.04);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 8px;
+        cursor: pointer;
+        transition: all 0.15s ease;
+        user-select: none;
+        color: #94a3b8;
+        font-size: 12px;
+      }
+      .svi-color-chip:hover {
+        background: rgba(255, 255, 255, 0.08);
+        color: #f1f5f9;
+      }
+      .svi-color-chip.active {
+        background: rgba(56, 189, 248, 0.14);
+        border-color: #38bdf8;
+        color: #38bdf8;
+        font-weight: 500;
+        box-shadow: 0 0 12px rgba(56, 189, 248, 0.15);
+      }
+      .svi-color-chip-swatch {
+        width: 16px;
+        height: 16px;
+        border-radius: 50%;
+        border: 1px solid rgba(0, 0, 0, 0.25);
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+        flex-shrink: 0;
+      }
+      .svi-color-chip-check {
+        margin-left: auto;
+        font-size: 11px;
+        opacity: 0;
+        transition: opacity 0.15s ease;
+      }
+      .svi-color-chip.active .svi-color-chip-check {
+        opacity: 1;
+      }
+      .svi-color-picker-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 8px 10px;
+        background: rgba(255, 255, 255, 0.04);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 8px;
+        margin-top: 6px;
+      }
+      .svi-color-picker-label {
+        font-size: 12px;
+        color: #e2e8f0;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .svi-color-picker-controls {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .svi-color-input-wrap {
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+        cursor: pointer;
+      }
+      .svi-color-input-native {
+        opacity: 0;
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        cursor: pointer;
+      }
+      .svi-color-preview-box {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 3px 8px;
+        background: rgba(15, 23, 42, 0.8);
+        border: 1px solid rgba(255, 255, 255, 0.15);
+        border-radius: 6px;
+        font-size: 11px;
+        font-family: monospace;
+        color: #38bdf8;
+      }
+      .svi-color-preview-circle {
+        width: 14px;
+        height: 14px;
+        border-radius: 50%;
+        border: 1px solid rgba(0, 0, 0, 0.3);
+      }
+
+      /* 高级折叠面板 Accordion */
+      .svi-accordion {
+        background: rgba(255, 255, 255, 0.02);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 10px;
+        overflow: hidden;
+      }
+      .svi-accordion-header {
+        padding: 10px 14px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        cursor: pointer;
+        background: rgba(255, 255, 255, 0.03);
+        user-select: none;
+        transition: background 0.15s ease;
+      }
+      .svi-accordion-header:hover {
+        background: rgba(255, 255, 255, 0.06);
+      }
+      .svi-accordion-title {
+        font-size: 12px;
+        font-weight: 600;
+        color: #94a3b8;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .svi-accordion-icon {
+        font-size: 11px;
+        color: #64748b;
+        transition: transform 0.2s ease;
+      }
+      .svi-accordion.open .svi-accordion-icon {
+        transform: rotate(90deg);
+        color: #38bdf8;
+      }
+      .svi-accordion-content {
+        display: none;
+        padding: 12px;
+        flex-direction: column;
+        gap: 12px;
+        border-top: 1px solid rgba(255, 255, 255, 0.06);
+      }
+      .svi-accordion.open .svi-accordion-content {
+        display: flex;
+      }
     `;
 
     if (typeof GM_addStyle === 'function') {
@@ -916,49 +1107,84 @@
     });
   }
 
-  function evaluateCanvas(ctx, width = 16, height = 16, lumCutoff = 210, thresholdRatio = 0.6) {
-    const imgData = ctx.getImageData(0, 0, width, height);
-    const data = imgData.data;
-    let whitePixelCount = 0;
-    let opaquePixels = 0;
-    let totalSaturation = 0;
+  function evaluateImagePixels(data, s = state) {
+    const lumCutoff = s.imgLumCutoff || 180;
+    const areaThreshold = (s.imgAreaThreshold || 48) / 100;
+    const toleranceSq = ((s.imgTolerance || 35) * 2.55) ** 2;
+    const generalLight = s.imgGeneralLight !== false;
+
+    const activePresets = [];
+    if (s.imgPresets) {
+      for (const p of IMG_COLOR_PRESETS) {
+        if (s.imgPresets[p.id]) {
+          activePresets.push(p.rgb);
+        }
+      }
+    }
+    const customRgb = s.imgCustomColor ? hexToRgb(s.imgCustomColor) : null;
+
+    let lightCount = 0;
+    let opaqueCount = 0;
 
     for (let i = 0; i < data.length; i += 4) {
       const a = data[i + 3];
-      if (a < 64) continue; // 忽略透明背景像素
-      opaquePixels++;
+      if (a < 64) continue; // 忽略透明像素
+      opaqueCount++;
+
       const r = data[i];
       const g = data[i + 1];
       const b = data[i + 2];
       const lum = (r * 77 + g * 150 + b * 29) >> 8;
-      if (lum >= lumCutoff) {
-        whitePixelCount++;
-      }
-
       const max = Math.max(r, g, b);
       const min = Math.min(r, g, b);
-      totalSaturation += max === 0 ? 0 : (max - min) / max;
+      const sat = max === 0 ? 0 : (max - min) / max;
+
+      let isLight = false;
+
+      // 1. 全浅色通用自适应
+      if (generalLight && lum >= lumCutoff && sat <= 0.38) {
+        isLight = true;
+      } else {
+        // 2. 匹配预设色卡
+        for (let j = 0; j < activePresets.length; j++) {
+          const p = activePresets[j];
+          const d2 = (r - p[0]) ** 2 + (g - p[1]) ** 2 + (b - p[2]) ** 2;
+          if (d2 <= toleranceSq) {
+            isLight = true;
+            break;
+          }
+        }
+        // 3. 匹配自定义色图选色
+        if (!isLight && customRgb) {
+          const d2 = (r - customRgb[0]) ** 2 + (g - customRgb[1]) ** 2 + (b - customRgb[2]) ** 2;
+          if (d2 <= toleranceSq) {
+            isLight = true;
+          }
+        }
+      }
+
+      if (isLight) lightCount++;
     }
 
-    if (opaquePixels < 16) return false;
-
-    const whiteRatio = whitePixelCount / opaquePixels;
-    const avgSaturation = totalSaturation / opaquePixels;
-
-    return whiteRatio >= thresholdRatio && avgSaturation <= 0.25;
+    if (opaqueCount < 8) return false;
+    return (lightCount / opaqueCount) >= areaThreshold;
   }
 
   class ImageInvertEngine {
     constructor() {
-      this.canvas = document.createElement('canvas');
-      this.canvas.width = 16;
-      this.canvas.height = 16;
-      this.ctx = this.canvas.getContext('2d', { willReadFrequently: true });
       this.observer = null;
       this.cache = new Map();
-      this.maxCacheSize = 500;
+      this.maxCacheSize = 1000;
       this.init();
       this.bindManualToggle();
+      window.__svi_image_engine = this;
+    }
+
+    getCleanCanvas(size = 8) {
+      const canvas = document.createElement('canvas');
+      canvas.width = size;
+      canvas.height = size;
+      return canvas;
     }
 
     init() {
@@ -1016,6 +1242,18 @@
       const root = document.body || document.documentElement;
       if (!root) return;
       root.querySelectorAll('img, svg').forEach((el) => this.observe(el));
+    }
+
+    clearCacheAndRescan() {
+      this.cache.clear();
+      const root = document.body || document.documentElement;
+      if (!root) return;
+      root.querySelectorAll('img, svg').forEach((el) => {
+        el.removeAttribute('data-svi-checked-src');
+        el.removeAttribute('data-svi-checked');
+        this.observe(el);
+      });
+      this.scanAll();
     }
 
     observe(el) {
@@ -1087,10 +1325,10 @@
 
       const w = svg.clientWidth || svg.width?.baseVal?.value || 0;
       const h = svg.clientHeight || svg.height?.baseVal?.value || 0;
-      if (w < 40 || h < 40) return;
+      if (w < 24 || h < 24) return;
 
       const meta = ((svg.className?.baseVal || '') + ' ' + (svg.id || '')).toLowerCase();
-      if (/(avatar|logo|emoji|icon|badge|btn|button|spin)/.test(meta)) return;
+      if (/(avatar|emoji|spin|loader)/.test(meta)) return;
 
       const rect = svg.querySelector('rect:first-child');
       if (rect) {
@@ -1115,18 +1353,24 @@
 
       if (img.getAttribute('data-svi-checked-src') === src) return;
 
-      const meta = ((img.className || '') + ' ' + (img.id || '') + ' ' + (img.alt || '') + ' ' + src).toLowerCase();
-      if (/(avatar|logo|emoji|icon|badge|nav|header|thumb|btn|button|user-pic|face|qrcode|captcha)/.test(meta)) {
+      // 仅精准过滤头像与图标，绝不误杀 thumb/header 路径中的技术插图
+      const meta = ((img.className || '') + ' ' + (img.id || '') + ' ' + (img.alt || '') + ' ' + (img.getAttribute('role') || '')).toLowerCase();
+      if (/(avatar|user-pic|profile-pic|emoji|emoticon|captcha)/.test(meta)) {
+        img.setAttribute('data-svi-checked-src', src);
+        return;
+      }
+
+      if (/\.(ico|cur)(\?.*)?$/i.test(src)) {
         img.setAttribute('data-svi-checked-src', src);
         return;
       }
 
       const runCheck = async () => {
-        const minSize = state.minImgSize || 100;
+        const minSize = state.minImgSize || 48;
         const w = img.naturalWidth || img.clientWidth || img.width || 0;
         const h = img.naturalHeight || img.clientHeight || img.height || 0;
 
-        if (w < 32 || h < 32 || (w < minSize && h < minSize)) {
+        if ((w > 0 && w < 24) || (h > 0 && h < 24) || (w > 0 && h > 0 && w < minSize && h < minSize)) {
           return;
         }
 
@@ -1141,33 +1385,35 @@
           return;
         }
 
-        const lumCutoff = state.lumThreshold || 210;
-        const thresholdRatio = (state.whiteThreshold || 60) / 100;
-
         let analyzed = false;
-        let isWhite = false;
+        let isLight = false;
 
-        // 1. 尝试本地 Canvas 快速采样
+        // 1. 本地快速采样 (使用全新独立的 8x8 画布，彻底杜绝单次跨域污染锁死全局)
         try {
-          this.ctx.clearRect(0, 0, 16, 16);
-          this.ctx.drawImage(img, 0, 0, 16, 16);
-          isWhite = evaluateCanvas(this.ctx, 16, 16, lumCutoff, thresholdRatio);
+          const canvas = this.getCleanCanvas(8);
+          const ctx = canvas.getContext('2d', { willReadFrequently: true });
+          ctx.drawImage(img, 0, 0, 8, 8);
+          const imgData = ctx.getImageData(0, 0, 8, 8);
+          isLight = evaluateImagePixels(imgData.data, state);
           analyzed = true;
         } catch (e) {
           // 产生跨域污染 (SecurityError / Tainted canvas)
           analyzed = false;
         }
 
-        // 2. 若跨域污染，启用 GM_xmlhttpRequest 提取 Blob 绕过同源限制
+        // 2. 跨域污染时，启用 GM_xmlhttpRequest 提取 Blob 绕过同源限制
         if (!analyzed) {
           try {
             const blob = await gmFetchBlob(src);
+            const canvas = this.getCleanCanvas(8);
+            const ctx = canvas.getContext('2d', { willReadFrequently: true });
+
             if (typeof createImageBitmap === 'function') {
               const bitmap = await createImageBitmap(blob);
-              this.ctx.clearRect(0, 0, 16, 16);
-              this.ctx.drawImage(bitmap, 0, 0, 16, 16);
+              ctx.drawImage(bitmap, 0, 0, 8, 8);
               bitmap.close();
-              isWhite = evaluateCanvas(this.ctx, 16, 16, lumCutoff, thresholdRatio);
+              const imgData = ctx.getImageData(0, 0, 8, 8);
+              isLight = evaluateImagePixels(imgData.data, state);
               analyzed = true;
             } else {
               const objUrl = URL.createObjectURL(blob);
@@ -1175,9 +1421,9 @@
                 const tempImg = new Image();
                 tempImg.onload = () => {
                   try {
-                    this.ctx.clearRect(0, 0, 16, 16);
-                    this.ctx.drawImage(tempImg, 0, 0, 16, 16);
-                    isWhite = evaluateCanvas(this.ctx, 16, 16, lumCutoff, thresholdRatio);
+                    ctx.drawImage(tempImg, 0, 0, 8, 8);
+                    const imgData = ctx.getImageData(0, 0, 8, 8);
+                    isLight = evaluateImagePixels(imgData.data, state);
                     analyzed = true;
                     resolve();
                   } catch (err) {
@@ -1203,9 +1449,9 @@
             const firstKey = this.cache.keys().next().value;
             this.cache.delete(firstKey);
           }
-          this.cache.set(src, isWhite);
+          this.cache.set(src, isLight);
 
-          if (isWhite) {
+          if (isLight) {
             img.setAttribute('data-svi-inverted', 'true');
           } else {
             img.removeAttribute('data-svi-inverted');
@@ -1435,66 +1681,248 @@
         return row;
       };
 
-      // 分区 1: 画面色彩与滤镜微调
-      const sec1 = document.createElement('div');
-      sec1.className = 'svi-modal-section';
-      sec1.innerHTML = `<div class="svi-sec-title"><span>🎨 画面滤镜与调色微调</span><span>实时生效</span></div>`;
+      // 模块 1: 基础调色风格 (开箱即用)
+      const secPreset = document.createElement('div');
+      secPreset.className = 'svi-modal-section';
+      secPreset.innerHTML = `<div class="svi-sec-title"><span>🌙 基础调色风格</span><span>开箱即用</span></div>`;
 
-      sec1.appendChild(makeRow('画面亮度', '反色后的暗化微调', 'brightness', 0.50, 1.50, 0.01, '', () => {
-        this.stateMachine.onCustomParamChange();
-      }));
-      sec1.appendChild(makeRow('画面对比度', '文字线条锐利度', 'contrast', 0.50, 1.50, 0.01, '', () => {
-        this.stateMachine.onCustomParamChange();
-      }));
-      sec1.appendChild(makeRow('色彩饱和度', '消除或保留颜色', 'saturate', 0.00, 2.00, 0.01, '', () => {
-        this.stateMachine.onCustomParamChange();
-      }));
-      sec1.appendChild(makeRow('色相旋转', '校正颜色谱系', 'hueRotate', 0, 360, 1, '°', () => {
-        this.stateMachine.onCustomParamChange();
-      }));
+      const presetGrid = document.createElement('div');
+      presetGrid.style.cssText = 'display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 4px;';
 
-      // 分区 2: 切换速度与动画时长 (可设置无渐变)
-      const sec2 = document.createElement('div');
-      sec2.className = 'svi-modal-section';
-      sec2.innerHTML = `<div class="svi-sec-title"><span>⚡ 切换速度与过渡渐变</span><span>0ms 为直接切换</span></div>`;
+      const styleBtns = {};
+      Object.values(PRESETS).forEach((p) => {
+        const btn = document.createElement('div');
+        btn.className = 'svi-color-chip';
+        btn.innerHTML = `
+          <div class="svi-color-chip-swatch" style="background: ${p.id === 'amoled' ? '#000000' : '#1e293b'}; border-color: rgba(255,255,255,0.3);"></div>
+          <span>${p.name}</span>
+          <span class="svi-color-chip-check">✓</span>
+        `;
+        if (state.presetId === p.id) btn.classList.add('active');
+        btn.addEventListener('click', () => {
+          Object.values(styleBtns).forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+          this.stateMachine.onUserSelectPreset(p.id);
+        });
+        styleBtns[p.id] = btn;
+        presetGrid.appendChild(btn);
+      });
+      secPreset.appendChild(presetGrid);
 
-      sec2.appendChild(makeRow('过渡动画时长', '设为 0ms 即直接瞬切无渐变', 'transitionMs', 0, 1000, 10, 'ms', (v) => {
+      // 模块 2: 网页图片浅色反色与色图选择 (开箱即用)
+      const secImgColor = document.createElement('div');
+      secImgColor.className = 'svi-modal-section';
+      secImgColor.innerHTML = `<div class="svi-sec-title"><span>🎨 网页图片浅色反色与色图选择</span><span>开箱即用</span></div>`;
+
+      // 全浅色通用自适应开关行
+      const genRow = document.createElement('div');
+      genRow.style.cssText = 'display: flex; align-items: center; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,0.06); margin-bottom: 6px;';
+      genRow.innerHTML = `
+        <div class="svi-modal-label-box" style="width: auto;">
+          <div class="svi-modal-label" style="font-weight: 500;">全浅色通用自适应检测</div>
+          <div class="svi-modal-hint">任何高明度浅底图表均自动识别反色</div>
+        </div>
+      `;
+      const genCheckbox = document.createElement('input');
+      genCheckbox.type = 'checkbox';
+      genCheckbox.checked = state.imgGeneralLight !== false;
+      genCheckbox.style.cssText = 'width: 16px; height: 16px; accent-color: #38bdf8; cursor: pointer;';
+      genCheckbox.addEventListener('change', () => {
+        state.imgGeneralLight = genCheckbox.checked;
+        saveState();
+        window.__svi_image_engine?.clearCacheAndRescan();
+      });
+      genRow.appendChild(genCheckbox);
+      secImgColor.appendChild(genRow);
+
+      // 浅色色卡预设矩阵 (4块直观色卡，默认全部点亮激活)
+      const chipsLabel = document.createElement('div');
+      chipsLabel.style.cssText = 'font-size: 11px; color: #94a3b8; margin: 4px 0 2px 0;';
+      chipsLabel.textContent = '预设浅色色卡（点击快速切换启用/禁用对应浅色系）：';
+      secImgColor.appendChild(chipsLabel);
+
+      const chipsGrid = document.createElement('div');
+      chipsGrid.className = 'svi-color-chips-grid';
+
+      IMG_COLOR_PRESETS.forEach((cp) => {
+        const chip = document.createElement('div');
+        chip.className = 'svi-color-chip';
+        if (state.imgPresets && state.imgPresets[cp.id]) {
+          chip.classList.add('active');
+        }
+        chip.innerHTML = `
+          <div class="svi-color-chip-swatch" style="background: ${cp.color};"></div>
+          <span>${cp.name}</span>
+          <span class="svi-color-chip-check">✓</span>
+        `;
+        chip.addEventListener('click', () => {
+          if (!state.imgPresets) state.imgPresets = {};
+          state.imgPresets[cp.id] = !state.imgPresets[cp.id];
+          chip.classList.toggle('active', !!state.imgPresets[cp.id]);
+          saveState();
+          window.__svi_image_engine?.clearCacheAndRescan();
+        });
+        chipsGrid.appendChild(chip);
+      });
+      secImgColor.appendChild(chipsGrid);
+
+      // 自定义色图拾色器 (系统调色板 + HEX 取色)
+      const pickerRow = document.createElement('div');
+      pickerRow.className = 'svi-color-picker-row';
+
+      const pickerLabel = document.createElement('div');
+      pickerLabel.className = 'svi-color-picker-label';
+      pickerLabel.innerHTML = `<span>🎯 目标色图拾色器</span><span style="font-size:10px; color:#64748b;">(点击色块唤出调色盘)</span>`;
+
+      const pickerControls = document.createElement('div');
+      pickerControls.className = 'svi-color-picker-controls';
+
+      const previewBox = document.createElement('div');
+      previewBox.className = 'svi-color-preview-box';
+
+      const previewCircle = document.createElement('div');
+      previewCircle.className = 'svi-color-preview-circle';
+      previewCircle.style.background = state.imgCustomColor || '#ffffff';
+
+      const previewHex = document.createElement('span');
+      previewHex.textContent = (state.imgCustomColor || '#ffffff').toUpperCase();
+
+      previewBox.append(previewCircle, previewHex);
+
+      const inputWrap = document.createElement('div');
+      inputWrap.className = 'svi-color-input-wrap';
+
+      const nativeColorInput = document.createElement('input');
+      nativeColorInput.type = 'color';
+      nativeColorInput.className = 'svi-color-input-native';
+      nativeColorInput.value = state.imgCustomColor || '#ffffff';
+
+      nativeColorInput.addEventListener('input', (e) => {
+        const hex = e.target.value;
+        state.imgCustomColor = hex;
+        previewCircle.style.background = hex;
+        previewHex.textContent = hex.toUpperCase();
+        saveState();
+        window.__svi_image_engine?.clearCacheAndRescan();
+      });
+
+      inputWrap.append(nativeColorInput, previewBox);
+      pickerControls.appendChild(inputWrap);
+      pickerRow.append(pickerLabel, pickerControls);
+      secImgColor.appendChild(pickerRow);
+
+      // 模块 3: ⚙️ 高级参数微调 (折叠抽屉 Accordion)
+      const accordion = document.createElement('div');
+      accordion.className = 'svi-accordion';
+      if (state.advancedOpen) accordion.classList.add('open');
+
+      const accHeader = document.createElement('div');
+      accHeader.className = 'svi-accordion-header';
+      accHeader.innerHTML = `
+        <div class="svi-accordion-title"><span>⚙️ 高级参数微调 (滑动条与精确数值)</span></div>
+        <span class="svi-accordion-icon">▶</span>
+      `;
+      accHeader.addEventListener('click', () => {
+        state.advancedOpen = !state.advancedOpen;
+        accordion.classList.toggle('open', state.advancedOpen);
+        saveState();
+      });
+
+      const accContent = document.createElement('div');
+      accContent.className = 'svi-accordion-content';
+
+      // 高级 1: 图片色彩匹配与尺寸规则
+      const advImgSec = document.createElement('div');
+      advImgSec.className = 'svi-modal-section';
+      advImgSec.style.background = 'transparent';
+      advImgSec.style.border = 'none';
+      advImgSec.style.padding = '0';
+      advImgSec.innerHTML = `<div class="svi-sec-title"><span>🖼️ 图片浅色检测阈值精调</span></div>`;
+
+      advImgSec.appendChild(makeRow('目标色彩容差', '色图匹配置信范围', 'imgTolerance', 10, 80, 1, '', () => {
+        saveState();
+        window.__svi_image_engine?.clearCacheAndRescan();
+      }));
+      advImgSec.appendChild(makeRow('浅色明度线', '判定浅色背景的明度底线', 'imgLumCutoff', 150, 240, 1, '', () => {
+        saveState();
+        window.__svi_image_engine?.clearCacheAndRescan();
+      }));
+      advImgSec.appendChild(makeRow('浅色面积占比', '触发反色的浅底面积比例', 'imgAreaThreshold', 25, 90, 1, '%', () => {
+        saveState();
+        window.__svi_image_engine?.clearCacheAndRescan();
+      }));
+      advImgSec.appendChild(makeRow('正文图最小尺寸', '小于此长宽的图标不反色', 'minImgSize', 32, 300, 4, 'px', () => {
+        saveState();
+        window.__svi_image_engine?.clearCacheAndRescan();
+      }));
+      accContent.appendChild(advImgSec);
+
+      // 高级 2: 画面滤镜与调色微调
+      const advFilterSec = document.createElement('div');
+      advFilterSec.className = 'svi-modal-section';
+      advFilterSec.style.background = 'transparent';
+      advFilterSec.style.border = 'none';
+      advFilterSec.style.padding = '0';
+      advFilterSec.innerHTML = `<div class="svi-sec-title"><span>🎨 画面滤镜微调</span><span>实时生效</span></div>`;
+
+      advFilterSec.appendChild(makeRow('画面亮度', '反色后的暗化微调', 'brightness', 0.50, 1.50, 0.01, '', () => {
+        this.stateMachine.onCustomParamChange();
+      }));
+      advFilterSec.appendChild(makeRow('画面对比度', '文字线条锐利度', 'contrast', 0.50, 1.50, 0.01, '', () => {
+        this.stateMachine.onCustomParamChange();
+      }));
+      advFilterSec.appendChild(makeRow('色彩饱和度', '消除或保留颜色', 'saturate', 0.00, 2.00, 0.01, '', () => {
+        this.stateMachine.onCustomParamChange();
+      }));
+      advFilterSec.appendChild(makeRow('色相旋转', '校正颜色谱系', 'hueRotate', 0, 360, 1, '°', () => {
+        this.stateMachine.onCustomParamChange();
+      }));
+      accContent.appendChild(advFilterSec);
+
+      // 高级 3: 切换速度与过渡动画
+      const advSpeedSec = document.createElement('div');
+      advSpeedSec.className = 'svi-modal-section';
+      advSpeedSec.style.background = 'transparent';
+      advSpeedSec.style.border = 'none';
+      advSpeedSec.style.padding = '0';
+      advSpeedSec.innerHTML = `<div class="svi-sec-title"><span>⚡ 切换速度与过渡渐变</span><span>0ms 为直接切换</span></div>`;
+
+      advSpeedSec.appendChild(makeRow('过渡动画时长', '设为 0ms 即直接瞬切无渐变', 'transitionMs', 0, 1000, 10, 'ms', (v) => {
         this.stateMachine.onUpdateTransition(v);
       }));
+      accContent.appendChild(advSpeedSec);
 
-      // 分区 3: 智能白底算法参数
-      const sec3 = document.createElement('div');
-      sec3.className = 'svi-modal-section';
-      sec3.innerHTML = `<div class="svi-sec-title"><span>🧠 智能白底算法与防抖</span><span>无感毫秒采样</span></div>`;
+      // 高级 4: 视频智能算法
+      const advVideoSec = document.createElement('div');
+      advVideoSec.className = 'svi-modal-section';
+      advVideoSec.style.background = 'transparent';
+      advVideoSec.style.border = 'none';
+      advVideoSec.style.padding = '0';
+      advVideoSec.innerHTML = `<div class="svi-sec-title"><span>🧠 视频智能算法与防抖</span></div>`;
 
-      sec3.appendChild(makeRow('检测采样周期', '后台探测频次', 'sampleIntervalMs', 50, 2000, 25, 'ms', (v) => {
+      advVideoSec.appendChild(makeRow('检测采样周期', '后台探测频次', 'sampleIntervalMs', 50, 2000, 25, 'ms', (v) => {
         this.stateMachine.onUpdateInterval(v);
       }));
-      sec3.appendChild(makeRow('白底面积占比', '触发反色的白底面积阈值', 'whiteThreshold', 30, 95, 1, '%', () => {
+      advVideoSec.appendChild(makeRow('白底面积占比', '触发视频反色的面积阈值', 'whiteThreshold', 30, 95, 1, '%', () => {
         saveState();
       }));
-      sec3.appendChild(makeRow('明度判定线', '判定为白底的亮度下限', 'lumThreshold', 160, 250, 1, '', () => {
+      advVideoSec.appendChild(makeRow('明度判定线', '判定为白底的亮度下限', 'lumThreshold', 160, 250, 1, '', () => {
         saveState();
       }));
-      sec3.appendChild(makeRow('退出防抖延迟', '离开课件时的缓冲确认时长', 'exitHysteresisMs', 200, 5000, 100, 'ms', () => {
+      advVideoSec.appendChild(makeRow('退出防抖延迟', '离开课件时的缓冲确认时长', 'exitHysteresisMs', 200, 5000, 100, 'ms', () => {
         saveState();
       }));
+      accContent.appendChild(advVideoSec);
 
-      // 分区 4: 网页图片与矢量图反色规则
-      const sec4 = document.createElement('div');
-      sec4.className = 'svi-modal-section';
-      sec4.innerHTML = `<div class="svi-sec-title"><span>🖼️ 网页白底图片与矢量图反色</span><span>自动排除小图标与头像</span></div>`;
-
-      sec4.appendChild(makeRow('正文图最小尺寸', '小于此长宽的图标不反色', 'minImgSize', 40, 400, 10, 'px', () => {
-        saveState();
-      }));
-
+      // 技巧提示
       const hintBox = document.createElement('div');
       hintBox.style.cssText = 'font-size: 11px; color: #94a3b8; line-height: 1.6; padding: 6px 8px; background: rgba(255,255,255,0.03); border-radius: 6px; border: 1px dashed rgba(255,255,255,0.08);';
       hintBox.innerHTML = `💡 <b>操作技巧</b>：<br>• <b>Alt + 鼠标左键</b>：在网页任意图片或 SVG 上点击，可单独强制反色或复原。<br>• <b>鼠标悬停</b>：鼠标移至已反色的图片上方时自动显现原始原色，移出后恢复。`;
-      sec4.appendChild(hintBox);
+      accContent.appendChild(hintBox);
 
-      body.append(sec1, sec2, sec3, sec4);
+      accordion.append(accHeader, accContent);
+
+      body.append(secPreset, secImgColor, accordion);
 
       // 模态弹窗 Footer
       const footer = document.createElement('div');

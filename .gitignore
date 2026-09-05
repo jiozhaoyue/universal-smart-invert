@@ -8,10 +8,11 @@
 .trellis/**/__pycache__/
 .trellis/**/*.pyc
 
-# Node / OS
+# Node / OS / Test
 node_modules/
 .DS_Store
 Thumbs.db
+.chrome-test-profile/
 
 # AI & Editor Platform directories (Excluded from git tracking)
 .agent/
