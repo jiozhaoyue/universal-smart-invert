@@ -1,0 +1,39 @@
+# Trellis runtime and local developer configs
+.trellis/.developer
+.trellis/.current-task
+.trellis/.runtime/
+.trellis/.ralph-state.json
+.trellis/*.tmp
+.trellis/*.new
+.trellis/**/__pycache__/
+.trellis/**/*.pyc
+
+# Node / OS
+node_modules/
+.DS_Store
+Thumbs.db
+
+# AI & Editor Platform directories (Excluded from git tracking)
+.agent/
+.agents/
+.claude/
+.codebuddy/
+.codex/
+.cursor/
+.devin/
+.dsh/
+.factory/
+.gemini/
+.github/
+.grok/
+.kilocode/
+.kimi-code/
+.kiro/
+.omp/
+.opencode/
+.pi/
+.qoder/
+.reasonix/
+.snow/
+.trae/
+.zcode/
