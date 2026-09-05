@@ -66,3 +66,25 @@ Completed repository renaming, git history sanitization, open-source public rele
 ### Status
 
 [OK] **Completed**
+
+
+## Session 4: v1.4.0 Multi-Light-Color Image Detection & Browser Automation
+<!-- trellis-session: v=2 fp=a56909c339ef6a03 -->
+
+**Date**: 2026-09-06
+**Task**: v1.4.0 Multi-Light-Color Image Detection & Browser Automation
+**Branch**: `main`
+
+### Summary
+
+Fixed image auto-invert root causes (tainted canvas & URL filter), introduced 8x8 micro-canvas multi-light-color detection, color picker & preset chips UI with collapsible advanced drawer, and verified with CDP Chrome headless end-to-end automation.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `75e3401` | feat: multi-light-color background detection, color picker, taint-immune canvas, and browser automation test suite (v1.4.0) |
+
+### Status
+
+[OK] **Completed**
