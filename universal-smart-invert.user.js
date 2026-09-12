@@ -3,10 +3,10 @@
 // @name:zh-CN   全网通用智能视频与图片反色
 // @name:en      Universal Smart Video & Image Invert
 // @namespace    https://github.com/jiozhaoyue/universal-smart-invert
-// @version      3.1.0
-// @description  全网通用智能视频与图片反色脚本 (v3.1)。新增: 当前页媒体面板 (列出/反色/定位被遮挡无法点击的媒体)、智能图片策略 (平衡默认: 正文与大图反色, 封面网格跳过; 保守/激进可调)、悬停显示原图开关 (可关闭悬停还原)、放大镜/看图类浏览器插件适配 (浮图秀等: 阴影DOM Alt+点击 + 缓存决策即时投递)、GitHub 首屏即刻反色 (eager 初始处理 + 统一决策管线, 同图永不反复横跳); 保留 v3.0 全部能力 (部分反色特效管线/预测性反色/自学习规则/存储云同步/插件共存)。
-// @description:zh-CN 全网通用智能视频与图片反色脚本 (v3.1)。新增: 当前页媒体面板 (列出/反色/定位被遮挡媒体)、智能图片策略 (平衡默认, 封面网格不反色)、悬停显示原图开关、放大镜类插件适配、GitHub 首屏即刻反色 (eager 处理 + 统一决策管线); 保留 v3.0 全部能力。
-// @description:en Universal smart video and image invert userscript (v3.1). New: current-page media inspector (list/invert/locate overlay-hidden media), smart image policy (balanced default: content & large images invert, cover grids skip; conservative/aggressive modes), hover-restore on/off switch, image-viewer/zoom extension compatibility (FuTuXiu-like: shadow-DOM Alt+click + cached-decision instant delivery), GitHub first-paint inversion (eager initial pass + unified decision pipeline — identical inputs never flip decisions); all v3.0 capabilities retained (partial effects, predictive inversion, self-learning rules, storage sync, extension coexistence).
+// @version      3.2.0
+// @description  全网通用智能视频与图片反色脚本 (v3.2)。新增: 🎚️ 视频画面调节 (降低亮度/对比度/饱和度/暖色/黑白, 独立于反色并可自动叠加, 护眼/夜间/鲜艳/还原一键预设); 保留 v3.1 全部能力 (当前页媒体面板/智能图片策略/悬停原图开关/放大镜插件适配/GitHub 首屏即刻反色) 与 v3.0 (部分反色特效/预测性反色/自学习规则/存储云同步/插件共存)。
+// @description:zh-CN 全网通用智能视频与图片反色脚本 (v3.2)。新增: 视频画面调节 (降亮度/对比度/饱和度/暖色/黑白, 独立于反色, 一键护眼/夜间/鲜艳/还原); 保留 v3.1 与 v3.0 全部能力。
+// @description:en Universal smart video and image invert userscript (v3.2). New: independent video picture tuning (brightness/contrast/saturation/warmth/grayscale, composes with inversion; eye-comfort/night/vivid/reset presets); all v3.1 + v3.0 capabilities retained.
 // @author       jiozhaoyue
 // @license      MIT
 // @icon         data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><circle cx=%2250%22 cy=%2250%22 r=%2246%22 fill=%22%231e293b%22 stroke=%22%2338bdf8%22 stroke-width=%228%22/><path d=%22M50 4 A46 46 0 0 1 50 96 Z%22 fill=%22%2338bdf8%22/></svg>
@@ -159,6 +159,16 @@
     imagePolicy: 'balanced',   // 图片反色策略 (R4): 'balanced'(默认) | 'conservative' | 'aggressive'(=v3.0 仅尺寸门)
     hoverRestore: true,        // 悬停显示原图 (R5): false 时悬停已反色图片保持反色视图
     eagerScanBudget: 80,       // eager 初始处理预算 (R1): 启动时已加载完成的图片不等待视口交叉, 最多处理 N 张
+
+    // ===== v3.2 新增偏好: 独立视频画面调节 (与反色可组合) =====
+    videoTune: {
+      enabled: false,          // 总开关: 关闭时不施加任何画面调节 (零开销)
+      brightness: 1.0,         // 亮度 (0.30 ~ 1.70, 1 = 原样)
+      contrast: 1.0,           // 对比度 (0.30 ~ 1.70)
+      saturate: 1.0,           // 饱和度 (0.00 ~ 2.00)
+      warmth: 0,               // 暖色 (sepia 0 ~ 1, 夜间护眼)
+      grayscale: 0,            // 黑白 (0 ~ 1)
+    },
   };
 
   // 运行时状态 (仅存于内存, 每个标签页独立, 绝不写入存储 —— 标签页隔离)
@@ -821,6 +831,14 @@
     if (['balanced', 'conservative', 'aggressive'].indexOf(merged.imagePolicy) === -1) merged.imagePolicy = 'balanced';
     merged.hoverRestore = merged.hoverRestore !== false;
     merged.eagerScanBudget = Math.round(clampNumber(merged.eagerScanBudget, 10, 500, 80));
+    // v3.2 字段规范化: 视频画面调节对象逐字段钳制 (损坏数据回退默认)
+    merged.videoTune = { ...defaults.videoTune, ...(safeStored.videoTune || {}) };
+    merged.videoTune.enabled = merged.videoTune.enabled === true;
+    merged.videoTune.brightness = clampNumber(merged.videoTune.brightness, 0.3, 1.7, 1.0);
+    merged.videoTune.contrast = clampNumber(merged.videoTune.contrast, 0.3, 1.7, 1.0);
+    merged.videoTune.saturate = clampNumber(merged.videoTune.saturate, 0, 2, 1.0);
+    merged.videoTune.warmth = clampNumber(merged.videoTune.warmth, 0, 1, 0);
+    merged.videoTune.grayscale = clampNumber(merged.videoTune.grayscale, 0, 1, 0);
     // 标签页隔离: 运行时状态绝不入库
     delete merged.invertActive;
 
@@ -901,6 +919,43 @@
     }
     if (document.body) {
       document.body.classList.toggle('svi-img-invert-on', imgOn);
+    }
+  }
+
+  // ===== v3.2: 独立视频画面调节 (R1) =====
+  // 纯函数: 由 videoTune 偏好构建 CSS filter 链; 关闭或全中性时返回 '' (零开销)
+  function buildVideoTuneFilter(t) {
+    if (!t || t.enabled !== true) return '';
+    const clamp = (v, lo, hi, def) => {
+      const n = Number(v);
+      if (isNaN(n)) return def;
+      return Math.min(hi, Math.max(lo, n));
+    };
+    const parts = [];
+    const b = clamp(t.brightness, 0.3, 1.7, 1.0);
+    const c = clamp(t.contrast, 0.3, 1.7, 1.0);
+    const s = clamp(t.saturate, 0, 2, 1.0);
+    const w = clamp(t.warmth, 0, 1, 0);
+    const g = clamp(t.grayscale, 0, 1, 0);
+    if (Math.abs(b - 1) > 0.001) parts.push(`brightness(${b.toFixed(2)})`);
+    if (Math.abs(c - 1) > 0.001) parts.push(`contrast(${c.toFixed(2)})`);
+    if (Math.abs(s - 1) > 0.001) parts.push(`saturate(${s.toFixed(2)})`);
+    if (w > 0.001) parts.push(`sepia(${w.toFixed(2)})`);
+    if (g > 0.001) parts.push(`grayscale(${g.toFixed(2)})`);
+    return parts.join(' ');
+  }
+
+  // 应用器: 同步 CSS 变量 + 门控类, 并让活动视频的内联滤镜重组 (反色链 + 画面调节链)
+  function applyVideoTune() {
+    const tuneFilter = buildVideoTuneFilter(state.videoTune);
+    if (document.documentElement) {
+      document.documentElement.style.setProperty('--svi-video-tune', tuneFilter || 'none');
+      document.documentElement.classList.toggle('svi-video-tune', !!tuneFilter);
+    }
+    // 活动视频可能正被反色 (内联滤镜优先级高于样式表规则) → 重组内联链以叠加画面调节
+    const probe = (window.__svi && window.__svi.engines) ? window.__svi.engines.video : null;
+    if (probe && probe.currentVideo) {
+      probe.applyFilterToCurrent();
     }
   }
 
@@ -1540,6 +1595,12 @@
       :root {
         --svi-img-filter: invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.90);
         --svi-img-transition: none;
+        --svi-video-tune: none;
+      }
+      /* v3.2: 独立视频画面调节 (非反色视频经样式表生效; 反色活动视频由内联滤镜组合链覆盖) */
+      html.svi-video-tune video {
+        filter: var(--svi-video-tune, none) !important;
+        transition: filter 0.2s ease;
       }
       .svi-capsule-root {
         position: fixed;
@@ -2604,7 +2665,9 @@
       } else if (vfx && vfx.state) {
         vfx.teardown(); // 特效模式关闭: 释放覆盖层
       }
-      const filterString = getActiveFilter();
+      // v3.2: 内联滤镜 = 反色链 + 画面调节链 组合 (反色时画面调节不丢失)
+      const filterString = [getActiveFilter(), buildVideoTuneFilter(state.videoTune)]
+        .filter(Boolean).join(' ');
       const transitionVal = (state.transitionMs && state.transitionMs > 0)
         ? `filter ${state.transitionMs}ms cubic-bezier(0.4, 0, 0.2, 1)`
         : 'none';
@@ -3148,6 +3211,7 @@
       Object.assign(state, JSON.parse(JSON.stringify(DEFAULT_PREFS)));
       savePrefs();
       updateImageFilterCss();
+      applyVideoTune();
       this.onUpdateInterval(state.sampleIntervalMs);
       this.probe && this.probe.applyFilterToCurrent();
       this.ui && this.ui.syncVisuals();
@@ -5049,6 +5113,8 @@
         uniform float u_brightness;
         uniform float u_contrast;
         uniform float u_saturate;
+        uniform float u_sepia;
+        uniform float u_gray;
         void main() {
           vec3 c = texture2D(u_tex, v_uv).rgb;
           float lum = dot(c, vec3(0.299, 0.587, 0.114));
@@ -5080,6 +5146,15 @@
           outc = outc * u_brightness;
           outc = (outc - 0.5) * u_contrast + 0.5;
           outc = mix(vec3(lum), outc, u_saturate);
+          // v3.2: 画面调节合成 (暖色/黑白) —— 与 CSS 路径语义一致
+          if (u_sepia > 0.0) {
+            vec3 sep = vec3(
+              0.393 * outc.r + 0.769 * outc.g + 0.189 * outc.b,
+              0.349 * outc.r + 0.686 * outc.g + 0.168 * outc.b,
+              0.272 * outc.r + 0.534 * outc.g + 0.131 * outc.b);
+            outc = mix(outc, sep, u_sepia);
+          }
+          if (u_gray > 0.0) outc = mix(outc, vec3(dot(outc, vec3(0.299, 0.587, 0.114))), u_gray);
           gl_FragColor = vec4(clamp(outc, 0.0, 1.0), 1.0);
         }`;
       const compile = (type, src) => {
@@ -5115,7 +5190,7 @@
         gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
         gl.useProgram(prog);
         const uni = {};
-        for (const name of ['u_mode', 'u_lumCutoff', 'u_satCutoff', 'u_key', 'u_tol2', 'u_rect', 'u_brightness', 'u_contrast', 'u_saturate']) {
+        for (const name of ['u_mode', 'u_lumCutoff', 'u_satCutoff', 'u_key', 'u_tol2', 'u_rect', 'u_brightness', 'u_contrast', 'u_saturate', 'u_sepia', 'u_gray']) {
           uni[name] = gl.getUniformLocation(prog, name);
         }
         return { prog, uni };
@@ -5195,6 +5270,17 @@
       gl.uniform1f(uni.u_brightness, b);
       gl.uniform1f(uni.u_contrast, c);
       gl.uniform1f(uni.u_saturate, s);
+      // v3.2: 覆盖层接管时 CSS 滤镜被抑制 → 画面调节在着色器中合成
+      const tune = (state.videoTune && state.videoTune.enabled === true) ? state.videoTune : null;
+      const clampN = (v, lo, hi, def) => {
+        const n = Number(v);
+        return isNaN(n) ? def : Math.min(hi, Math.max(lo, n));
+      };
+      gl.uniform1f(uni.u_brightness, b * (tune ? clampN(tune.brightness, 0.3, 1.7, 1) : 1));
+      gl.uniform1f(uni.u_contrast, c * (tune ? clampN(tune.contrast, 0.3, 1.7, 1) : 1));
+      gl.uniform1f(uni.u_saturate, s * (tune ? clampN(tune.saturate, 0, 2, 1) : 1));
+      if (uni.u_sepia) gl.uniform1f(uni.u_sepia, tune ? clampN(tune.warmth, 0, 1, 0) : 0);
+      if (uni.u_gray) gl.uniform1f(uni.u_gray, tune ? clampN(tune.grayscale, 0, 1, 0) : 0);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     }
 
@@ -6779,7 +6865,39 @@
       actions.append(resetBtn, doneBtn);
       footer.append(this.modalPerf, actions);
 
-      body.append(secPreset.el, secImgColor.el, secSite, secFx, secSmart, secShield, accordion, secStats, secMedia, secStorage);
+      // ===== v3.2: 🎚️ 视频画面调节 (独立于反色, 可组合) =====
+      const secVideoTune = ui.section('🎚️ 视频画面调节', '降低亮度等画面调整; 独立于反色, 反色时自动叠加', 'svi-sec-tune');
+      const tuneChanged = () => { savePrefs(); applyVideoTune(); };
+      const tuneRows = [
+        ui.toggleRow('启用画面调节', '对所有视频生效: 降亮度/对比度/饱和度/暖色/黑白; 关闭时零开销',
+          () => state.videoTune && state.videoTune.enabled === true,
+          (v) => { state.videoTune.enabled = v; tuneChanged(); }),
+        ui.sliderRow('亮度', '降低亮度护眼 (1 = 原样)',
+          () => state.videoTune.brightness, (v) => { state.videoTune.brightness = v; tuneChanged(); },
+          0.3, 1.7, 0.01, ''),
+        ui.sliderRow('对比度', '画面明暗反差',
+          () => state.videoTune.contrast, (v) => { state.videoTune.contrast = v; tuneChanged(); },
+          0.3, 1.7, 0.01, ''),
+        ui.sliderRow('饱和度', '色彩浓淡 (0 = 黑白感)',
+          () => state.videoTune.saturate, (v) => { state.videoTune.saturate = v; tuneChanged(); },
+          0, 2, 0.01, ''),
+        ui.sliderRow('暖色', '暖黄夜读色调',
+          () => state.videoTune.warmth, (v) => { state.videoTune.warmth = v; tuneChanged(); },
+          0, 1, 0.05, ''),
+        ui.sliderRow('黑白', '去色程度',
+          () => state.videoTune.grayscale, (v) => { state.videoTune.grayscale = v; tuneChanged(); },
+          0, 1, 0.05, ''),
+      ];
+      for (const r of tuneRows) secVideoTune.add(r);
+      secVideoTune.add(ui.btnRow([
+        { label: '护眼', onClick: () => { Object.assign(state.videoTune, { enabled: true, brightness: 0.85, contrast: 1, saturate: 1, warmth: 0.15, grayscale: 0 }); tuneChanged(); this.modalControls && this.modalControls.syncAll(); } },
+        { label: '夜间', onClick: () => { Object.assign(state.videoTune, { enabled: true, brightness: 0.7, contrast: 1, saturate: 0.9, warmth: 0.25, grayscale: 0 }); tuneChanged(); this.modalControls && this.modalControls.syncAll(); } },
+        { label: '鲜艳', onClick: () => { Object.assign(state.videoTune, { enabled: true, brightness: 1, contrast: 1.05, saturate: 1.35, warmth: 0, grayscale: 0 }); tuneChanged(); this.modalControls && this.modalControls.syncAll(); } },
+        { label: '还原', onClick: () => { Object.assign(state.videoTune, { enabled: false, brightness: 1, contrast: 1, saturate: 1, warmth: 0, grayscale: 0 }); tuneChanged(); this.modalControls && this.modalControls.syncAll(); } },
+      ]));
+      for (const r of tuneRows) this.rowSyncs.push(() => r.sync());
+
+      body.append(secPreset.el, secImgColor.el, secSite, secVideoTune.el, secFx, secSmart, secShield, accordion, secStats, secMedia, secStorage);
 
       win.append(header, body, footer);
       this.modalMask.appendChild(win);
@@ -7943,6 +8061,8 @@
     passesImagePolicy,
     countGridGroup,
     ImageInvertEngine,
+    // v3.2 纯函数导出 (单测契约): 视频画面调节滤镜链构建
+    buildVideoTuneFilter,
     // 调试句柄: 站点档案按 (host, 偏好版本) 缓存 —— 运行时注入/变更内置规则后需显式失效
     invalidateProfileCache: () => { try { profileCache.clear(); } catch (e) { /* ignore */ } },
     Store,
@@ -7970,6 +8090,7 @@
         state = loadState();
         window.__svi.prefs = state;
         updateImageFilterCss();
+        applyVideoTune();
       } catch (e) { /* ignore */ }
     };
     Store.init();
@@ -8002,6 +8123,8 @@
     try {
       probeManager = new VideoProbeManager();
       window.__svi.engines.video = probeManager;
+      // v3.2: 引擎就绪后应用视频画面调节 (此时才有活动视频可重组内联链)
+      applyVideoTune();
     } catch (e) {
       console.warn('[SmartInvert] VideoProbeManager init failed:', e);
     }

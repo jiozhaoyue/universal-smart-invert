@@ -1,7 +1,7 @@
 # 全网通用智能视频与图片反色 (Universal Smart Video & Image Invert)
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-3.1.0-blue.svg?style=flat-square" alt="Version">
+  <img src="https://img.shields.io/badge/version-3.2.0-blue.svg?style=flat-square" alt="Version">
   <img src="https://img.shields.io/badge/license-MIT-green.svg?style=flat-square" alt="License">
   <img src="https://img.shields.io/badge/Tampermonkey-Supported-orange.svg?style=flat-square" alt="Tampermonkey">
   <img src="https://img.shields.io/badge/ScriptCat-Supported-purple.svg?style=flat-square" alt="ScriptCat">
@@ -128,6 +128,15 @@
 - **共存握手**：油猴脚本与插件版可同时安装，先启动者认领页面（5 秒心跳），后到者休眠启动，绝不双重滤镜；
 - **GitHub Actions**：`ci.yml`（单测 + 构建冒烟 + 独立 headless Chrome 基准）与 `release.yml`（推送 `v*` 标签 → 测试 → 构建 → zip/CRX → GitHub Release → Chrome Web Store 上传与发布，secrets 缺失时自动跳过）；
 - 详细配置见 [PUBLISHING.md](./PUBLISHING.md) 「浏览器插件发布 (Extension)」章节。
+
+---
+
+## 🆕 v3.2 重大升级 (视频画面调节)
+
+### 🎚️ 视频画面调节 (降低亮度等, 独立于反色)
+- 新增设置板块「🎚️ 视频画面调节」：**亮度 / 对比度 / 饱和度 / 暖色 / 黑白** 五个滑动条独立调节所有视频，不开启反色也能用；
+- **与反色自动组合**：视频进入反色时内联滤镜 = 反色链 + 画面调节链，退出反色后画面调节经样式表继续生效，全程无双重处理；GPU 覆盖层（视频特效模式）下同样在着色器中合成；
+- **一键预设**：护眼（降亮 + 暖色）/ 夜间（更低亮度）/ 鲜艳（提升饱和）/ 还原，即点即生效并持久记忆，刷新后仍保持。
 
 ---
 

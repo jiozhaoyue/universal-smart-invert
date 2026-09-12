@@ -1,7 +1,7 @@
 # Universal Smart Video & Image Invert
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-3.1.0-blue.svg?style=flat-square" alt="Version">
+  <img src="https://img.shields.io/badge/version-3.2.0-blue.svg?style=flat-square" alt="Version">
   <img src="https://img.shields.io/badge/license-MIT-green.svg?style=flat-square" alt="License">
   <img src="https://img.shields.io/badge/Tampermonkey-Supported-orange.svg?style=flat-square" alt="Tampermonkey">
   <img src="https://img.shields.io/badge/ScriptCat-Supported-purple.svg?style=flat-square" alt="ScriptCat">
@@ -122,6 +122,15 @@ Specifically designed to tame **blinding white PowerPoint/PDF lecture slides in 
 - **Coexistence handshake**: the userscript and the extension may both be installed — the first booter claims the page (5 s heartbeat) and the other boots dormant, so filters are never applied twice;
 - **GitHub Actions**: `ci.yml` (unit tests + build smoke + an isolated headless-Chrome bench job) and `release.yml` (push a `v*` tag → tests → build → zip/CRX → GitHub Release → Chrome Web Store upload & publish, skipping cleanly when secrets are absent);
 - See [PUBLISHING.md](./PUBLISHING.md) "浏览器插件发布 (Extension)" for the full setup guide.
+
+---
+
+## 🆕 What's New in v3.2 (Video Picture Tuning)
+
+### 🎚️ Video Tune (independent of inversion)
+- New modal section "🎚️ 视频画面调节 (Video Tune)": **brightness / contrast / saturation / warmth / grayscale** sliders applied to ALL videos — works with inversion OFF;
+- **Composes with inversion**: when a video inverts, its inline filter = inversion chain + tune chain; when inversion exits, the tune keeps applying via a stylesheet rule; the WebGL overlay path synthesizes the same tune in-shader (no double processing anywhere);
+- **One-click presets**: 护眼 Eye-Comfort (dim + warm) / 夜间 Night / 鲜艳 Vivid / 还原 Reset — instant apply, persisted across reloads.
 
 ---
 

@@ -1151,6 +1151,28 @@ const sameParentSibs = (self, n, w, h) => {
   process.exit(1);
 });
 
+// ===== v3.2: 视频画面调节滤镜链构建 (buildVideoTuneFilter) =====
+(() => {
+  const build = svi.buildVideoTuneFilter;
+  // 关闭或缺失 → 空串 (零开销)
+  assert.strictEqual(build(null), '', 'null tune → empty filter');
+  assert.strictEqual(build({ enabled: false, brightness: 0.5 }), '', 'disabled tune → empty filter');
+  // 开启但全中性 → 空串
+  assert.strictEqual(build({ enabled: true, brightness: 1, contrast: 1, saturate: 1, warmth: 0, grayscale: 0 }), '', 'neutral tune → empty filter');
+  // 部分调节 → 仅包含非中性项, 数值格式化两位小数
+  assert.strictEqual(build({ enabled: true, brightness: 0.8 }), 'brightness(0.80)', 'brightness only');
+  assert.strictEqual(
+    build({ enabled: true, brightness: 0.7, warmth: 0.25, saturate: 0.9 }),
+    'brightness(0.70) saturate(0.90) sepia(0.25)',
+    'composed partial chain (brightness/saturate/sepia)'
+  );
+  assert.strictEqual(build({ enabled: true, grayscale: 1 }), 'grayscale(1.00)', 'grayscale only');
+  // 越界钳制
+  assert.strictEqual(build({ enabled: true, brightness: 9, contrast: 0.1 }), 'brightness(1.70) contrast(0.30)', 'out-of-range values clamped');
+  assert.strictEqual(build({ enabled: true, brightness: 'abc' }), '', 'NaN falls back to neutral (dropped)');
+  console.log('✓ v3.2 unit tests passed: buildVideoTuneFilter (disabled/neutral/partial/clamp)');
+})();
+
 console.log('✓ v3.0 core unit tests passed: transformPixel / mergeSegments / lookupSegment / selectorStem / RuleLearner / Store / mediaDominantViewport / rect / hash32');
 
 // 显式退出: 脚本启动桩中的常驻定时器 (统计落盘 interval、3s 后的引擎初始化循环) 会阻止进程自然退出

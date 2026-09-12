@@ -266,6 +266,30 @@ const VIDEO_TL_HTML = `<!DOCTYPE html>
   <\/script>
 </body></html>`;
 
+// —— v3.2 Scenario 18: 视频画面调节 (CSS 路径 + 与反色组合 + 持久化) ——
+const TUNE_HTML = `<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><title>Video Tune Bench</title>
+<script>${SEED_SNIPPET};
+  // 场景确定性: 仅在本标签会话首次进入时播种 (刷新持久化断言不能被种子重置)
+  try {
+    if (!sessionStorage.getItem('sviTuneSeeded')) {
+      sviSeed({ autoDetect: false, videoFxMode: 'off', videoTune: { enabled: false, brightness: 1, contrast: 1, saturate: 1, warmth: 0, grayscale: 0 } });
+      sessionStorage.setItem('sviTuneSeeded', '1');
+    }
+  } catch (e) {}
+<\/script>
+<style>body { background: #121212; margin: 0; padding: 16px; } #player { position: relative; width: 640px; height: 360px; } #bench-video { width: 100%; height: 100%; display: block; }</style>
+</head><body>
+  <div id="player"><video id="bench-video" muted playsinline></video></div>
+  <script>
+    ${CANVAS_VIDEO_SNIPPET}
+  <\/script>
+  <script>
+    ${executableScript}
+  <\/script>
+</body></html>`;
+
 // —— v3.0 Scenario 8: 自学习规则 (3 次 Alt+点击修正 .thumb-x 深色图 → 学习规则让第 4 张自动反色) ——
 const LEARN_HTML = `<!DOCTYPE html>
 <html lang="zh-CN">
@@ -515,6 +539,7 @@ const PAGES = {
   '/policy-page': POLICY_HTML,
   '/hover-page': HOVER_HTML,
   '/viewer-page': VIEWER_HTML,
+  '/tune-page': TUNE_HTML,
 };
 
 const server = http.createServer((req, res) => {
@@ -607,6 +632,9 @@ async function main() {
   } catch (e) { /* ignore */ }
 
   console.log(`[Browser] Launching Headless Chrome: ${CHROME_PATH}`);
+  // 固定 profile 目录跨运行持久化 (localStorage/overrides) —— 场景 1 断言假设全新存储,
+  // 每次运行前清空保证确定性; 运行内的刷新持久化场景 (2b/18) 不受影响
+  try { fs.rmSync(path.join(__dirname, '.chrome-test-profile'), { recursive: true, force: true }); } catch (e) { /* ignore */ }
   const chromeProc = spawn(CHROME_PATH, [
     `--remote-debugging-port=${CDP_PORT}`,
     '--headless=new',
@@ -1813,6 +1841,112 @@ async function main() {
     assert.ok(located, '定位 must scrollIntoView the target element (img-white back in view)');
     const flashOk = await waitForExpr(`document.getElementById('img-white').classList.contains('svi-locate-flash')`, 2000);
     assert.ok(flashOk, '定位 must flash the outline highlight class');
+
+    // ============================================================
+    // Scenario 18 (v3.2 R1-R3): 视频画面调节 —— CSS 路径 / 反色组合 / 预设 / 持久化
+    // ============================================================
+    console.log('[Test] Scenario 18: navigating to /tune-page (video tune) ...');
+    await sendCdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/tune-page` });
+    await new Promise((r) => setTimeout(r, 3500));
+    const tuneBaseline = (await sendCdp('Runtime.evaluate', {
+      expression: `(() => {
+        const v = document.getElementById('bench-video');
+        return { computed: getComputedStyle(v).filter, cls: document.documentElement.classList.contains('svi-video-tune') };
+      })()`,
+      returnByValue: true
+    })).result.value;
+    assert.strictEqual(tuneBaseline.computed, 'none', 'tune disabled by default → video filter none');
+    assert.strictEqual(tuneBaseline.cls, false, 'svi-video-tune class absent by default');
+
+    const tuneOpen = (await sendCdp('Runtime.evaluate', {
+      expression: `(() => {
+        window.__svi.ui.openSettingsModal();
+        const sec = document.getElementById('svi-sec-tune');
+        if (!sec) return { section: false };
+        return {
+          section: true,
+          sliders: sec.querySelectorAll('input[type="range"]').length,
+          presets: ['护眼', '夜间', '鲜艳', '还原'].map((t) => !!Array.from(sec.querySelectorAll('button')).find((b) => b.textContent === t)),
+        };
+      })()`,
+      returnByValue: true
+    })).result.value;
+    assert.strictEqual(tuneOpen.section, true, '视频画面调节 section must exist');
+    assert.strictEqual(tuneOpen.sliders, 5, 'video tune section must expose 5 sliders');
+    assert.deepStrictEqual(tuneOpen.presets, [true, true, true, true], 'preset buttons 护眼/夜间/鲜艳/还原 present');
+
+    const tuneEye = (await sendCdp('Runtime.evaluate', {
+      expression: `(() => {
+        const sec = document.getElementById('svi-sec-tune');
+        Array.from(sec.querySelectorAll('button')).find((b) => b.textContent === '护眼').click();
+        const v = document.getElementById('bench-video');
+        return {
+          cls: document.documentElement.classList.contains('svi-video-tune'),
+          computed: getComputedStyle(v).filter,
+        };
+      })()`,
+      returnByValue: true
+    })).result.value;
+    assert.strictEqual(tuneEye.cls, true, '护眼 preset must enable the tune class');
+    assert.ok(tuneEye.computed.includes('brightness(0.85)'), 'non-inverted video must carry tune filter via stylesheet, got: ' + tuneEye.computed);
+    assert.ok(tuneEye.computed.includes('sepia(0.15)'), 'warmth must apply via stylesheet rule');
+
+    // 反色组合: 点击面板 视频反色 → 内联滤镜 = 反色链 + 画面调节链
+    const tuneCompose = (await sendCdp('Runtime.evaluate', {
+      expression: `(() => {
+        const btn = Array.from(document.querySelectorAll('.svi-capsule-root .svi-action-btn')).find((b) => b.textContent.indexOf('视频') !== -1);
+        btn.click();
+        const v = document.getElementById('bench-video');
+        return { inline: v.style.filter };
+      })()`,
+      returnByValue: true
+    })).result.value;
+    assert.ok(tuneCompose.inline.includes('invert(1)'), 'active video must invert');
+    assert.ok(tuneCompose.inline.includes('brightness(0.85)'), 'inverted video inline filter must compose the tune chain, got: ' + tuneCompose.inline);
+    // 关闭反色 → 内联移除, 样式表画面调节仍然生效
+    const tuneAfterOff = (await sendCdp('Runtime.evaluate', {
+      expression: `(() => {
+        const btn = Array.from(document.querySelectorAll('.svi-capsule-root .svi-action-btn')).find((b) => b.textContent.indexOf('视频') !== -1);
+        btn.click();
+        const v = document.getElementById('bench-video');
+        return { inline: v.style.filter || '(none)', computed: getComputedStyle(v).filter };
+      })()`,
+      returnByValue: true
+    })).result.value;
+    assert.strictEqual(tuneAfterOff.inline, '(none)', 'inversion off → inline filter removed');
+    assert.ok(tuneAfterOff.computed.includes('brightness(0.85)'), 'stylesheet tune still applies after inversion off');
+
+    // 还原 + 持久化: 护眼 → 重载 → 仍然生效
+    await sendCdp('Runtime.evaluate', {
+      expression: `(() => {
+        const sec = document.getElementById('svi-sec-tune');
+        Array.from(sec.querySelectorAll('button')).find((b) => b.textContent === '还原').click();
+        return document.documentElement.classList.contains('svi-video-tune');
+      })()`,
+      returnByValue: true
+    });
+    const tuneResetOk = await waitForExpr(`!document.documentElement.classList.contains('svi-video-tune')`, 3000);
+    assert.ok(tuneResetOk, '还原 preset must clear the tune class');
+    await sendCdp('Runtime.evaluate', {
+      expression: `(() => {
+        const sec = document.getElementById('svi-sec-tune');
+        Array.from(sec.querySelectorAll('button')).find((b) => b.textContent === '夜间').click();
+        return true;
+      })()`,
+      returnByValue: true
+    });
+    await new Promise((r) => setTimeout(r, 800)); // 等待防抖落盘
+    await sendCdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/tune-page` });
+    await new Promise((r) => setTimeout(r, 3500));
+    const tunePersist = (await sendCdp('Runtime.evaluate', {
+      expression: `(() => {
+        const v = document.getElementById('bench-video');
+        return { computed: getComputedStyle(v).filter, cls: document.documentElement.classList.contains('svi-video-tune') };
+      })()`,
+      returnByValue: true
+    })).result.value;
+    assert.strictEqual(tunePersist.cls, true, 'video tune must persist across reload');
+    assert.ok(tunePersist.computed.includes('brightness(0.7)'), 'persisted tune must re-apply after reload, got: ' + tunePersist.computed);
 
     console.log('\n🎉 ALL BROWSER AUTOMATION TESTS PASSED 100% SUCCESFULLY!\n');
 
