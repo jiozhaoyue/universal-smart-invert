@@ -1,7 +1,7 @@
 # Universal Smart Video & Image Invert
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-3.2.0-blue.svg?style=flat-square" alt="Version">
+  <img src="https://img.shields.io/badge/version-3.3.0-blue.svg?style=flat-square" alt="Version">
   <img src="https://img.shields.io/badge/license-MIT-green.svg?style=flat-square" alt="License">
   <img src="https://img.shields.io/badge/Tampermonkey-Supported-orange.svg?style=flat-square" alt="Tampermonkey">
   <img src="https://img.shields.io/badge/ScriptCat-Supported-purple.svg?style=flat-square" alt="ScriptCat">
@@ -122,6 +122,34 @@ Specifically designed to tame **blinding white PowerPoint/PDF lecture slides in 
 - **Coexistence handshake**: the userscript and the extension may both be installed — the first booter claims the page (5 s heartbeat) and the other boots dormant, so filters are never applied twice;
 - **GitHub Actions**: `ci.yml` (unit tests + build smoke + an isolated headless-Chrome bench job) and `release.yml` (push a `v*` tag → tests → build → zip/CRX → GitHub Release → Chrome Web Store upload & publish, skipping cleanly when secrets are absent);
 - See [PUBLISHING.md](./PUBLISHING.md) "浏览器插件发布 (Extension)" for the full setup guide.
+
+---
+
+## 🆕 What's New in v3.3 (Settings Panel Overhaul)
+
+### 🪟 Three Panel Layouts (no more forced fullscreen overlay)
+- Layout switcher in the settings header: **centered window / dock left / dock right**, remembered across sessions;
+- Docked mode is a full-height side drawer: **no fullscreen mask**, the rest of the page stays visible and interactive; click outside or press `Esc` to close;
+- Drawer width is draggable between 320–600px and remembered; the centered window widens to 600px and adapts to the viewport.
+
+### 📐 Reordered Information Architecture + Layout Robustness
+- Sections reordered by frequency of use: **Appearance → Image Invert → Video → Sites & Rules → Color Protection → Page Media → Data & Backup → Tips**;
+- The old "Advanced" accordion is dissolved — every slider now lives in its matching section;
+- Rows stack vertically (title + description above, control below): **no horizontal scrolling and no clipped controls at any window width**.
+
+### 🀄 Fully Localized (Chinese) Wording
+- Every dropdown option is a short Chinese name (no more parenthetical explanations); a dynamic description line below the select explains the current choice;
+- Code/English terms in the UI (filter paths, hex values, storage backends, data keys) are reworded in Chinese (hex values moved to tooltips).
+
+### 📁 Rule File Import / Export
+- New "Export rule file": site lists, per-site overrides, element rules, learned rules and shielded colors saved as a JSON file;
+- New "Import (merge) / Import (replace)": migrate rules across pages and devices with automatic dedup; learned rules keep the higher hit count;
+- Coexists with the existing full backup: rule files carry rules, full backups carry everything.
+
+### 🧩 Element-Level Rules (beyond site black/white lists)
+- New "Element rules": target any element by **scope (this site / all sites) + selector + action (force invert / keep original)**;
+- Decision priority rises to the top tier: **manual Alt+click > element rule > decision snapshot > learned rule > seed rule > detection gates > pixel analysis**;
+- Honored by both the image and background-image engines, applied immediately on change; capped at 200 rules with oldest-first eviction.
 
 ---
 

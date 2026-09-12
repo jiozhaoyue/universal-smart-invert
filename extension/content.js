@@ -3,7 +3,7 @@
  * universal-smart-invert — browser extension content script
  * GENERATED FILE — DO NOT EDIT.
  * Built by scripts/build-extension.js from universal-smart-invert.user.js
- * Source version: 3.2.0
+ * Source version: 3.3.0
  *
  * Prelude contract (see scripts/build-extension.js header):
  *   - EXT_MODE (wrapper scope)   → core claims coexistence kind 'ext'
@@ -75,7 +75,7 @@
   // ==========================================
   // 1. 配置与常量定义
   // ==========================================
-  const SCRIPT_VERSION = '3.1.0';
+  const SCRIPT_VERSION = '3.3.0';
   const PREFS_KEY = 'universal_smart_invert_v4';   // v2.0 遗留偏好键 (迁移源, 迁移后原样保留以便回滚)
   const LEGACY_KEY = 'universal_smart_invert_v3';  // v1.x 旧键 (仅读取迁移, 保留不删以便回滚)
   const STATS_KEY = 'universal_smart_invert_stats_v1'; // v2.0 遗留统计键 (保留写入以兼容回滚)
@@ -107,6 +107,18 @@
     { id: 'gray', name: '纸质浅灰', color: '#F5F5F5', rgb: [245, 245, 245] },
     { id: 'cream', name: '米黄暖白', color: '#FAF0E6', rgb: [250, 240, 230] },
     { id: 'coolBlue', name: '冷调淡蓝', color: '#F0F8FF', rgb: [240, 248, 255] },
+  ];
+
+  // v3.3: 图片特效模式清单 (设置页图片区与本站覆盖两处下拉共用; describe 为选中后的动态说明)
+  const IMG_FX_MODES = [
+    { v: 'full', label: '完整反色', describe: '整图经标准滤镜反色，悬停可查看原图。' },
+    { v: 'luma', label: '亮度反色', describe: '仅反色高于明度线且低饱和的浅色像素。' },
+    { v: 'key', label: '键色反色', describe: '仅反色接近目标键色的像素。' },
+    { v: 'rect', label: '区域反色', describe: '按 Alt+Shift+拖拽框选的区域反色。' },
+    { v: 'grayscale', label: '灰度化', describe: '整图去色成为黑白。' },
+    { v: 'sepia', label: '怀旧泛黄', describe: '整图呈泛黄暖调。' },
+    { v: 'brightness', label: '提亮', describe: '整图提升亮度。' },
+    { v: 'custom', label: '自定义', describe: '按画面滤镜参数逐像素处理。' },
   ];
 
   function hexToRgb(hex) {
@@ -207,6 +219,11 @@
       warmth: 0,               // 暖色 (sepia 0 ~ 1, 夜间护眼)
       grayscale: 0,            // 黑白 (0 ~ 1)
     },
+
+    // ===== v3.3 新增偏好: 设置页布局 + 元素级规则 =====
+    settingsLayout: 'center',  // 设置页布局: 'center'(居中窗口) | 'left'(靠左停靠) | 'right'(靠右停靠)
+    settingsWidth: 420,        // 停靠形态宽度 px (320 ~ 600)
+    elementRules: [],          // 元素级规则: [{ id, pattern, selector, action: 'invert'|'protect', note, createdAt }]
   };
 
   // 运行时状态 (仅存于内存, 每个标签页独立, 绝不写入存储 —— 标签页隔离)
@@ -877,6 +894,10 @@
     merged.videoTune.saturate = clampNumber(merged.videoTune.saturate, 0, 2, 1.0);
     merged.videoTune.warmth = clampNumber(merged.videoTune.warmth, 0, 1, 0);
     merged.videoTune.grayscale = clampNumber(merged.videoTune.grayscale, 0, 1, 0);
+    // v3.3 字段规范化: 设置页布局 / 停靠宽度 / 元素级规则
+    if (['center', 'left', 'right'].indexOf(merged.settingsLayout) === -1) merged.settingsLayout = 'center';
+    merged.settingsWidth = Math.round(clampNumber(merged.settingsWidth, 320, 600, 420));
+    merged.elementRules = normalizeElementRules(merged.elementRules);
     // 标签页隔离: 运行时状态绝不入库
     delete merged.invertActive;
 
@@ -899,6 +920,28 @@
     const n = Number(v);
     if (!isFinite(n)) return def;
     return Math.max(min, Math.min(max, n));
+  }
+
+  // 元素级规则归一化 (纯函数, 可单测): 过滤坏条目, 补齐 id, FIFO 上限 200 (保留最新)
+  function normalizeElementRules(list) {
+    const src = Array.isArray(list) ? list.slice(-200) : [];
+    const out = [];
+    for (const raw of src) {
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
+      const pattern = String(raw.pattern || '').trim();
+      const selector = String(raw.selector || '').trim();
+      const action = raw.action === 'protect' ? 'protect' : (raw.action === 'invert' ? 'invert' : '');
+      if (!pattern || !selector || !action) continue;
+      out.push({
+        id: String(raw.id || hash32(pattern + '|' + selector + '|' + action)),
+        pattern,
+        selector,
+        action,
+        note: typeof raw.note === 'string' ? raw.note : '',
+        createdAt: Number(raw.createdAt) || 0,
+      });
+    }
+    return out;
   }
 
   let savePrefsTimer = null;
@@ -1186,6 +1229,15 @@
     }
   }
 
+  // 元素级规则首条命中 (数组顺序即优先级; 规则列表来自站点档案, pattern 已按主机过滤)
+  function firstMatchingElementRule(el, rules) {
+    if (!el || !Array.isArray(rules) || rules.length === 0) return null;
+    for (const rule of rules) {
+      if (rule && safeMatches(el, [rule.selector])) return rule;
+    }
+    return null;
+  }
+
   function debounce(fn, waitMs) {
     let t = null;
     return function (...args) {
@@ -1364,6 +1416,57 @@
       };
       im.src = url;
     });
+  }
+
+  // JSON 文件落盘 (统一下载通道): 全量备份 / 统计导出 / 规则文件共用
+  function downloadJsonFile(filename, obj) {
+    try {
+      const data = JSON.stringify(obj, null, 2);
+      const blob = new Blob([data], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      (document.body || document.documentElement).appendChild(a);
+      a.click();
+      setTimeout(() => {
+        URL.revokeObjectURL(url);
+        a.remove();
+      }, 500);
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  // JSON 文件选取 (统一上传通道): 读入文本解析后回调; 解析/读取失败走 onFail
+  function pickJsonFile(onParsed, onFail) {
+    try {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = 'application/json,.json';
+      input.addEventListener('change', () => {
+        const file = input.files && input.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = () => {
+          try {
+            onParsed(JSON.parse(String(reader.result)));
+          } catch (e) {
+            if (typeof onFail === 'function') onFail(e);
+          }
+        };
+        reader.onerror = () => {
+          if (typeof onFail === 'function') onFail(reader.error || new Error('file read failed'));
+        };
+        reader.readAsText(file);
+      });
+      input.click();
+      return true;
+    } catch (e) {
+      if (typeof onFail === 'function') onFail(e);
+      return false;
+    }
   }
 
   // ==========================================
@@ -1585,7 +1688,14 @@
       bgImageSelectors: rule ? (rule.bgImageSelectors || []).slice() : [],
       excludeSelectors: [],
       shieldColors: (state.shieldColors || []).slice(),
+      elementRules: [],   // v3.3: 命中本机的用户元素级规则 (数组顺序即优先级)
     };
+
+    // v3.3: 用户元素级规则 ('*' 为全站, 其余与黑/白名单同语义匹配)
+    const erAll = Array.isArray(state.elementRules) ? state.elementRules : [];
+    for (const er of erAll) {
+      if (er && (er.pattern === '*' || hostMatchesPattern(host, er.pattern))) profile.elementRules.push(er);
+    }
 
     if (rule && rule.bgReplace) profile.bgReplace = true;
     if (rule && Array.isArray(rule.excludeSelectors)) profile.excludeSelectors.push(...rule.excludeSelectors);
@@ -1893,6 +2003,8 @@
         padding: 4px 6px;
         outline: none;
         cursor: pointer;
+        max-width: 100%;
+        min-width: 0;
       }
       .svi-modal-textarea {
         width: 100%;
@@ -1999,9 +2111,22 @@
       .svi-modal-mask.show {
         display: flex;
       }
+      /* v3.3 停靠形态: 无遮罩不拦截页面交互, 仅侧边抽屉本身可交互 */
+      .svi-modal-mask.docked {
+        background: transparent;
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
+        pointer-events: none;
+        align-items: stretch;
+        justify-content: flex-end;
+      }
+      .svi-modal-mask.docked .svi-modal-window {
+        pointer-events: auto;
+        background: #161922; /* 停靠形态无遮罩模糊, 用实底防页面内容透底 */
+      }
       .svi-modal-window {
-        width: 480px;
-        max-width: 92vw;
+        width: min(600px, 94vw);
+        max-width: 94vw;
         max-height: 86vh;
         background: rgba(22, 25, 34, 0.98);
         border: 1px solid rgba(255, 255, 255, 0.14);
@@ -2012,6 +2137,72 @@
         overflow: hidden;
         color: #f1f5f9;
         animation: sviFadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+      }
+      /* v3.3 停靠形态: 全高侧边抽屉, 宽度可拖拽并记忆 */
+      .svi-modal-window.layout-left,
+      .svi-modal-window.layout-right {
+        position: fixed;
+        top: 0;
+        bottom: 0;
+        height: 100vh;
+        max-height: 100vh;
+        width: var(--svi-settings-w, 420px);
+        max-width: 92vw;
+        border-radius: 0;
+        animation: sviSlideIn 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+      }
+      .svi-modal-window.layout-left {
+        left: 0;
+        right: auto;
+        --svi-slide-from: -32px;
+        border-right: 1px solid rgba(255, 255, 255, 0.14);
+      }
+      .svi-modal-window.layout-right {
+        right: 0;
+        left: auto;
+        --svi-slide-from: 32px;
+        border-left: 1px solid rgba(255, 255, 255, 0.14);
+      }
+      @keyframes sviSlideIn {
+        from { opacity: 0; transform: translateX(var(--svi-slide-from, 24px)); }
+        to { opacity: 1; transform: none; }
+      }
+      .svi-drag-handle {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        width: 7px;
+        cursor: col-resize;
+        z-index: 3;
+        transition: background 0.15s ease;
+      }
+      .svi-drag-handle.left-edge { left: 0; }
+      .svi-drag-handle.right-edge { right: 0; }
+      .svi-drag-handle:hover { background: rgba(56, 189, 248, 0.28); }
+      .svi-layout-switch {
+        display: flex;
+        gap: 2px;
+        background: rgba(255, 255, 255, 0.06);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 8px;
+        padding: 2px;
+      }
+      .svi-layout-btn {
+        border: none;
+        background: transparent;
+        color: #94a3b8;
+        font-size: 11px;
+        padding: 3px 9px;
+        border-radius: 6px;
+        cursor: pointer;
+        transition: all 0.15s ease;
+        white-space: nowrap;
+      }
+      .svi-layout-btn:hover { color: #e2e8f0; }
+      .svi-layout-btn.active {
+        background: #2563eb;
+        color: #fff;
+        font-weight: 600;
       }
       @keyframes sviFadeIn {
         from { opacity: 0; transform: scale(0.96); }
@@ -2049,9 +2240,25 @@
       .svi-modal-body {
         padding: 16px 18px;
         overflow-y: auto;
+        overflow-x: hidden;
         display: flex;
         flex-direction: column;
         gap: 16px;
+        scrollbar-width: thin;
+        scrollbar-color: rgba(148, 163, 184, 0.35) transparent;
+      }
+      .svi-modal-body::-webkit-scrollbar {
+        width: 8px;
+      }
+      .svi-modal-body::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      .svi-modal-body::-webkit-scrollbar-thumb {
+        background: rgba(148, 163, 184, 0.35);
+        border-radius: 4px;
+      }
+      .svi-modal-body::-webkit-scrollbar-thumb:hover {
+        background: rgba(148, 163, 184, 0.55);
       }
       .svi-modal-section {
         background: rgba(255, 255, 255, 0.03);
@@ -2061,6 +2268,7 @@
         display: flex;
         flex-direction: column;
         gap: 10px;
+        min-width: 0;
       }
       .svi-sec-title {
         font-size: 12px;
@@ -2070,15 +2278,18 @@
         align-items: center;
         justify-content: space-between;
       }
+      /* v3.3: 行布局纵向堆叠 —— 标题说明在上, 控件在下, 任何窗宽不出界 */
       .svi-modal-row {
         display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 10px;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 6px;
+        min-width: 0;
       }
       .svi-modal-label-box {
-        width: 140px;
-        flex-shrink: 0;
+        width: auto;
+        flex-shrink: 1;
+        min-width: 0;
       }
       .svi-modal-label {
         font-size: 12px;
@@ -2087,12 +2298,70 @@
       .svi-modal-hint {
         font-size: 10px;
         color: #64748b;
+        line-height: 1.5;
       }
       .svi-modal-controls {
         flex: 1;
         display: flex;
         align-items: center;
         gap: 8px;
+        min-width: 0;
+        flex-wrap: wrap;
+      }
+      /* v3.3: 选中项的动态说明行 */
+      .svi-row-describe {
+        font-size: 10px;
+        color: #7dd3fc;
+        line-height: 1.5;
+        background: rgba(56, 189, 248, 0.07);
+        border-left: 2px solid rgba(56, 189, 248, 0.4);
+        padding: 3px 8px;
+        border-radius: 0 6px 6px 0;
+      }
+      /* v3.3: 区块内子分组标题 (元素级规则 / 学习规则) */
+      .svi-sub-title {
+        font-size: 11px;
+        font-weight: 600;
+        color: #94a3b8;
+        letter-spacing: 0.4px;
+        padding-top: 8px;
+        border-top: 1px dashed rgba(255, 255, 255, 0.1);
+      }
+      /* v3.3: 元素规则添加表单 */
+      .svi-er-form {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        align-items: center;
+      }
+      .svi-er-form .svi-modal-select {
+        flex: 0 0 auto;
+      }
+      .svi-modal-text {
+        flex: 1;
+        min-width: 140px;
+        background: rgba(15, 23, 42, 0.8);
+        border: 1px solid rgba(255, 255, 255, 0.15);
+        border-radius: 6px;
+        color: #cbd5e1;
+        font-size: 11px;
+        padding: 5px 8px;
+        outline: none;
+      }
+      .svi-modal-text:focus {
+        border-color: #38bdf8;
+      }
+      /* v3.3: 操作技巧行 */
+      .svi-tip-line {
+        font-size: 11px;
+        color: #94a3b8;
+        line-height: 1.7;
+        display: flex;
+        gap: 8px;
+      }
+      .svi-tip-line b {
+        color: #cbd5e1;
+        flex-shrink: 0;
       }
       .svi-modal-slider {
         flex: 1;
@@ -4416,7 +4685,7 @@
 
     // ==========================================
     // v3.1 统一决策管线 (R1/R2/R4) —— 唯一决策函数, 全部处理入口共用。
-    // 优先级: 手动覆盖 > 学习规则 > 种子保护/强制反色 > 小元素门 + 策略门 > 像素分析。
+    // 优先级: 手动覆盖 > 元素规则(v3.3) > 学习规则 > 种子保护/强制反色 > 小元素门 + 策略门 > 像素分析。
     // decide-once: 决策一经达成即冻结 (decisionBySrc), 仅 clearCacheAndRescan 显式重置。
     // ==========================================
     async decideImage(img, src) {
@@ -4438,6 +4707,13 @@
       }
       if (ov === 'restore') {
         this.applyDecision(img, src, this.recordDecision(src, 'keep', 'manual', true));
+        return;
+      }
+
+      // 1.5 用户元素规则 (v3.3 显式配置, 优先于快照/学习/种子): 命中即强制决策并刷新快照
+      const erule = firstMatchingElementRule(img, profile.elementRules);
+      if (erule) {
+        this.applyDecision(img, src, this.recordDecision(src, erule.action === 'invert' ? 'invert' : 'keep', 'element-rule', true));
         return;
       }
 
@@ -5512,11 +5788,6 @@
       const profile = getSiteProfile();
       if (state.imageInvert === false || profile.enabled === false || profile.imageInvert === false) return;
 
-      // 元素门槛: 渲染尺寸 ≥ 32×32
-      const w = el.clientWidth || 0;
-      const h = el.clientHeight || 0;
-      if (w > 0 && h > 0 && (w < 32 || h < 32)) return;
-
       let bg = '';
       try {
         bg = window.getComputedStyle(el).backgroundImage || '';
@@ -5524,6 +5795,22 @@
         return;
       }
       if (!bg || bg.indexOf('url(') === -1) return;
+
+      // v3.3 用户元素规则: 显式保护/强制反色优先于尺寸门槛与亮度判定
+      const erule = firstMatchingElementRule(el, profile.elementRules);
+      if (erule) {
+        if (erule.action === 'protect') {
+          el.removeAttribute('data-svi-bginv');
+        } else {
+          el.setAttribute('data-svi-bginv', 'true');
+        }
+        return;
+      }
+
+      // 元素门槛: 渲染尺寸 ≥ 32×32
+      const w = el.clientWidth || 0;
+      const h = el.clientHeight || 0;
+      if (w > 0 && h > 0 && (w < 32 || h < 32)) return;
 
       const urls = extractCssUrls(bg);
       if (!urls.length) return;
@@ -6340,7 +6627,7 @@
       };
     },
 
-    // 下拉选择行
+    // 下拉选择行 (v3.3: 选项只留短名, 说明经 describe 字段在选项下方动态呈现)
     selectRow(label, hint, options, getVal, onSet) {
       const row = this.h('div', { class: 'svi-modal-row' });
       const select = this.h('select', { class: 'svi-modal-select' });
@@ -6349,12 +6636,23 @@
         o.textContent = opt.label;
         select.appendChild(o);
       }
+      const describe = this.h('div', { class: 'svi-row-describe' });
+      const syncDescribe = () => {
+        const cur = options.find((o) => String(o.v) === String(select.value));
+        const text = (cur && cur.describe) ? cur.describe : '';
+        describe.textContent = text;
+        describe.style.display = text ? '' : 'none';
+      };
       select.addEventListener('change', () => onSet(select.value));
-      row.append(this.labelBox(label, hint), select);
+      select.addEventListener('change', syncDescribe);
+      row.append(this.labelBox(label, hint), select, describe);
       return {
         row,
         select,
-        sync() { select.value = String(getVal()); },
+        sync() {
+          select.value = String(getVal());
+          syncDescribe();
+        },
       };
     },
 
@@ -6430,15 +6728,14 @@
       };
     },
 
-    // 拾色器行 (label + native color input + HEX 预览)
+    // 拾色器行 (label + native color input; v3.3: 色值仅悬浮提示, 界面不显示十六进制)
     pickerRow(label, hint, getVal, onSet) {
       const row = this.h('div', { class: 'svi-color-picker-row' });
       const labelBox = this.h('div', { class: 'svi-color-picker-label' },
         this.h('span', { text: label }),
         hint ? this.h('span', { text: hint, style: 'font-size:10px; color:#64748b;' }) : null);
       const previewCircle = this.h('div', { class: 'svi-color-preview-circle' });
-      const previewHex = this.h('span');
-      const previewBox = this.h('div', { class: 'svi-color-preview-box' }, previewCircle, previewHex);
+      const previewBox = this.h('div', { class: 'svi-color-preview-box' }, previewCircle);
       const native = this.h('input', { type: 'color', class: 'svi-color-input-native' });
       native.addEventListener('input', () => onSet(native.value));
       const wrap = this.h('div', { class: 'svi-color-input-wrap' }, native, previewBox);
@@ -6450,7 +6747,7 @@
           const v = getVal() || '#ffffff';
           native.value = v;
           previewCircle.style.background = v;
-          previewHex.textContent = v.toUpperCase();
+          previewBox.title = v.toUpperCase();
         },
       };
     },
@@ -6598,7 +6895,7 @@
       // 行3: 打开详细参数设置页面按钮
       const modalBtn = document.createElement('button');
       modalBtn.className = 'svi-open-modal-btn';
-      modalBtn.textContent = '⚙️ 详细参数细调页面 (滑动条+数值)';
+      modalBtn.textContent = '⚙️ 打开设置面板';
       modalBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         this.openSettingsModal();
@@ -6639,8 +6936,8 @@
     }
 
     // ==========================================
-    // 高级参数精细设置模态窗口 (全部区块经 ui 组件库构建)
-    // 顺序: 🌙基础 → 🌐站点与规则 → ✨效果 → 🧠智能 → ⚙️高级(折叠) → 📊数据与反馈 → 💾存储
+    // 高级设置模态窗口 (全部区块经 ui 组件库构建; v3.3 信息架构重排)
+    // 顺序: 🎨外观与画面 → 🖼️图片反色 → 🎬视频 → 🌐站点与规则 → 🛡️颜色保护 → 🖥️当前页媒体 → 💾数据与备份 → 💡操作技巧
     // ==========================================
     buildSettingsModal() {
       this.modalMask = document.createElement('div');
@@ -6648,230 +6945,58 @@
 
       const win = document.createElement('div');
       win.className = 'svi-modal-window';
+      this.modalWindow = win;
 
       // 模态弹窗 Header
       const header = document.createElement('div');
       header.className = 'svi-modal-header';
       header.innerHTML = `
-        <div class="svi-modal-title"><span>⚙️ 智能反色高级参数细调</span></div>
+        <div class="svi-modal-title"><span>⚙️ 智能反色设置</span></div>
         <button class="svi-modal-close" title="关闭">✕</button>
       `;
       header.querySelector('.svi-modal-close').addEventListener('click', () => {
         this.closeSettingsModal();
       });
 
+      // v3.3: 布局形态切换 (居中窗口 / 靠左停靠 / 靠右停靠), 选择持久化
+      this.layoutBtns = {};
+      const layoutSwitch = document.createElement('div');
+      layoutSwitch.className = 'svi-layout-switch';
+      for (const [key, label] of [['center', '居中'], ['left', '靠左'], ['right', '靠右']]) {
+        const b = document.createElement('button');
+        b.className = 'svi-layout-btn';
+        b.textContent = label;
+        b.addEventListener('click', () => {
+          state.settingsLayout = key;
+          savePrefs();
+          this.applySettingsLayout();
+        });
+        this.layoutBtns[key] = b;
+        layoutSwitch.appendChild(b);
+      }
+      header.insertBefore(layoutSwitch, header.querySelector('.svi-modal-close'));
+
       const body = document.createElement('div');
       body.className = 'svi-modal-body';
 
-      // 模块 1: 🌙 基础调色风格 (开箱即用)
-      const secPreset = ui.section('🌙 基础调色风格', '开箱即用');
-      const presetChipRow = ui.chipRow(
-        Object.values(PRESETS).map((p) => ({
-          id: p.id,
-          label: p.name,
-          color: p.id === 'amoled' ? '#000000' : '#1e293b',
-          dark: true,
-        })),
-        (id) => state.presetId === id,
-        (id) => this.stateMachine.onUserSelectPreset(id)
-      );
-      secPreset.add(presetChipRow);
-      this.rowSyncs.push(() => presetChipRow.sync());
-
-      // v3.1 R5: 悬停显示原图开关 (默认开)
-      secPreset.add(ui.toggleRow('悬停显示原图', '悬停已反色图片时临时显示原图; 关闭后悬停保持反色 (适配放大镜/看图类插件)',
-        () => state.hoverRestore !== false,
-        (v) => {
-          state.hoverRestore = v;
-          savePrefs();
-          updateImageFilterCss();
-        }));
-
-      // 模块 2: 🎨 网页图片浅色反色与色图选择 (并入基础区块之后)
-      const secImgColor = ui.section('🎨 网页图片浅色反色与色图选择', '开箱即用');
-
-      secImgColor.add(ui.toggleRow('全浅色通用自适应检测', '任何高明度浅底图表均自动识别反色',
-        () => state.imgGeneralLight !== false,
-        (v) => {
-          state.imgGeneralLight = v;
-          savePrefs();
-          window.__svi_image_engine?.clearCacheAndRescan();
-        }));
-
-      secImgColor.add(ui.infoLine('预设浅色色卡（点击快速切换启用/禁用对应浅色系）：'));
-      const colorChipRow = ui.chipRow(
-        IMG_COLOR_PRESETS.map((cp) => ({ id: cp.id, label: cp.name, color: cp.color })),
-        (id) => !!(state.imgPresets && state.imgPresets[id]),
-        (id) => {
-          if (!state.imgPresets) state.imgPresets = {};
-          state.imgPresets[id] = !state.imgPresets[id];
-          savePrefs();
-          window.__svi_image_engine?.clearCacheAndRescan();
-        }
-      );
-      secImgColor.add(colorChipRow);
-      this.rowSyncs.push(() => colorChipRow.sync());
-
-      const customPicker = ui.pickerRow('🎯 目标色图拾色器', '(点击色块唤出调色盘)',
-        () => state.imgCustomColor || '#ffffff',
-        (hex) => {
-          state.imgCustomColor = hex;
-          savePrefs();
-          window.__svi_image_engine?.clearCacheAndRescan();
-        });
-      secImgColor.add(customPicker);
-      this.rowSyncs.push(() => customPicker.sync());
-
-      // 模块 3: 🌐 站点与规则 (v2.0)
+      // 模块 1: 🎨 外观与画面
+      const secAppearance = this.buildAppearanceSection();
+      // 模块 2: 🖼️ 图片反色
+      const secImage = this.buildImageSection();
+      // 模块 3: 🎬 视频
+      const secVideo = this.buildVideoSection();
+      // 模块 4: 🌐 站点与规则
       const secSite = this.buildSiteSection();
-
-      // 模块 4: ✨ 效果 (v3.0)
-      const secFx = this.buildFxSection();
-
-      // 模块 5: 🧠 智能 (v3.0)
-      const secSmart = this.buildSmartSection();
-
-      // 模块 6: 🛡️ 原色屏蔽 (v2.0)
+      // 模块 5: 🛡️ 颜色保护
       const secShield = this.buildShieldSection();
-
-      // 模块 7: 📊 数据与反馈 (v2.0)
-      const secStats = this.buildStatsSection();
-
-      // 模块 7.5: 🖼️ 当前页媒体 (v3.1 R3)
+      // 模块 6: 🖥️ 当前页媒体
       const secMedia = this.buildMediaSection();
+      // 模块 7: 💾 数据与备份
+      const secData = this.buildDataSection();
+      // 模块 8: 💡 操作技巧
+      const secTips = this.buildTipsBlock();
 
-      // 模块 8: 💾 存储 (v3.0)
-      const secStorage = this.buildStorageSection();
-
-      // 模块 9: ⚙️ 高级参数微调 (折叠抽屉 Accordion)
-      const accordion = document.createElement('div');
-      accordion.className = 'svi-accordion';
-      if (state.advancedOpen) accordion.classList.add('open');
-
-      const accHeader = document.createElement('div');
-      accHeader.className = 'svi-accordion-header';
-      accHeader.innerHTML = `
-        <div class="svi-accordion-title"><span>⚙️ 高级参数微调 (滑动条与精确数值)</span></div>
-        <span class="svi-accordion-icon">▶</span>
-      `;
-      accHeader.addEventListener('click', () => {
-        state.advancedOpen = !state.advancedOpen;
-        accordion.classList.toggle('open', state.advancedOpen);
-        savePrefs();
-      });
-
-      const accContent = document.createElement('div');
-      accContent.className = 'svi-accordion-content';
-
-      // 高级 1: 图片色彩匹配与尺寸规则
-      const advImgSec = document.createElement('div');
-      advImgSec.className = 'svi-modal-section';
-      advImgSec.style.cssText = 'background: transparent; border: none; padding: 0;';
-      advImgSec.innerHTML = `<div class="svi-sec-title"><span>🖼️ 图片浅色检测阈值精调</span></div>`;
-
-      const imgTolRow = ui.sliderRow('目标色彩容差', '色图匹配置信范围', () => state.imgTolerance, (n) => {
-        state.imgTolerance = n;
-        savePrefs();
-        window.__svi_image_engine?.clearCacheAndRescan();
-      }, 10, 80, 1, '');
-      const imgLumRow = ui.sliderRow('浅色明度线', '判定浅色背景的明度底线', () => state.imgLumCutoff, (n) => {
-        state.imgLumCutoff = n;
-        savePrefs();
-        window.__svi_image_engine?.clearCacheAndRescan();
-      }, 150, 240, 1, '');
-      const imgAreaRow = ui.sliderRow('浅色面积占比', '触发反色的浅底面积比例', () => state.imgAreaThreshold, (n) => {
-        state.imgAreaThreshold = n;
-        savePrefs();
-        window.__svi_image_engine?.clearCacheAndRescan();
-      }, 25, 90, 1, '%');
-      const minSizeRow = ui.sliderRow('正文图最小尺寸', '小于此长宽的图标不反色', () => state.minImgSize, (n) => {
-        state.minImgSize = n;
-        savePrefs();
-        window.__svi_image_engine?.clearCacheAndRescan();
-      }, 32, 300, 4, 'px');
-      [imgTolRow, imgLumRow, imgAreaRow, minSizeRow].forEach((r) => {
-        advImgSec.appendChild(r.row);
-        this.rowSyncs.push(() => r.sync());
-      });
-      accContent.appendChild(advImgSec);
-
-      // 高级 2: 画面滤镜与调色微调
-      const advFilterSec = document.createElement('div');
-      advFilterSec.className = 'svi-modal-section';
-      advFilterSec.style.cssText = 'background: transparent; border: none; padding: 0;';
-      advFilterSec.innerHTML = `<div class="svi-sec-title"><span>🎨 画面滤镜微调</span><span>实时生效</span></div>`;
-
-      const bRow = ui.sliderRow('画面亮度', '反色后的暗化微调', () => state.brightness, (n) => {
-        state.brightness = n;
-        this.stateMachine.onCustomParamChange();
-      }, 0.50, 1.50, 0.01, '');
-      const cRow = ui.sliderRow('画面对比度', '文字线条锐利度', () => state.contrast, (n) => {
-        state.contrast = n;
-        this.stateMachine.onCustomParamChange();
-      }, 0.50, 1.50, 0.01, '');
-      const sRow = ui.sliderRow('色彩饱和度', '消除或保留颜色', () => state.saturate, (n) => {
-        state.saturate = n;
-        this.stateMachine.onCustomParamChange();
-      }, 0.00, 2.00, 0.01, '');
-      const hRow = ui.sliderRow('色相旋转', '校正颜色谱系', () => state.hueRotate, (n) => {
-        state.hueRotate = n;
-        this.stateMachine.onCustomParamChange();
-      }, 0, 360, 1, '°');
-      [bRow, cRow, sRow, hRow].forEach((r) => {
-        advFilterSec.appendChild(r.row);
-        this.rowSyncs.push(() => r.sync());
-      });
-      accContent.appendChild(advFilterSec);
-
-      // 高级 3: 切换速度与过渡动画
-      const advSpeedSec = document.createElement('div');
-      advSpeedSec.className = 'svi-modal-section';
-      advSpeedSec.style.cssText = 'background: transparent; border: none; padding: 0;';
-      advSpeedSec.innerHTML = `<div class="svi-sec-title"><span>⚡ 切换速度与过渡渐变</span><span>0ms 为直接切换</span></div>`;
-
-      const transRow = ui.sliderRow('过渡动画时长', '设为 0ms 即直接瞬切无渐变', () => state.transitionMs, (n) => {
-        state.transitionMs = n;
-        this.stateMachine.onUpdateTransition(n);
-      }, 0, 1000, 10, 'ms');
-      advSpeedSec.appendChild(transRow.row);
-      this.rowSyncs.push(() => transRow.sync());
-      accContent.appendChild(advSpeedSec);
-
-      // 高级 4: 视频智能算法
-      const advVideoSec = document.createElement('div');
-      advVideoSec.className = 'svi-modal-section';
-      advVideoSec.style.cssText = 'background: transparent; border: none; padding: 0;';
-      advVideoSec.innerHTML = `<div class="svi-sec-title"><span>🧠 视频智能算法与防抖</span></div>`;
-
-      const intervalRow = ui.sliderRow('检测采样周期', '后台探测频次 (rVFC 可用时逐帧检测)', () => state.sampleIntervalMs, (n) => {
-        state.sampleIntervalMs = n;
-        this.stateMachine.onUpdateInterval(n);
-      }, 50, 2000, 25, 'ms');
-      const whiteRow = ui.sliderRow('白底面积占比', '触发视频反色的面积阈值', () => state.whiteThreshold, (n) => {
-        state.whiteThreshold = n;
-        savePrefs();
-      }, 30, 95, 1, '%');
-      const lumRow = ui.sliderRow('明度判定线', '判定为白底的亮度下限', () => state.lumThreshold, (n) => {
-        state.lumThreshold = n;
-        savePrefs();
-      }, 160, 250, 1, '');
-      const hystRow = ui.sliderRow('退出防抖延迟', '离开课件时的缓冲确认时长', () => state.exitHysteresisMs, (n) => {
-        state.exitHysteresisMs = n;
-        savePrefs();
-      }, 200, 5000, 100, 'ms');
-      [intervalRow, whiteRow, lumRow, hystRow].forEach((r) => {
-        advVideoSec.appendChild(r.row);
-        this.rowSyncs.push(() => r.sync());
-      });
-      accContent.appendChild(advVideoSec);
-
-      // 技巧提示
-      const hintBox = document.createElement('div');
-      hintBox.style.cssText = 'font-size: 11px; color: #94a3b8; line-height: 1.6; padding: 6px 8px; background: rgba(255,255,255,0.03); border-radius: 6px; border: 1px dashed rgba(255,255,255,0.08);';
-      hintBox.innerHTML = `💡 <b>操作技巧</b>：<br>• <b>Alt + 鼠标左键</b>：在网页任意图片或 SVG 上点击，可单独强制反色或复原（选择会被记住）。<br>• <b>Alt + Shift + 拖拽</b>：区域反色模式下在图片上框选局部反色区域。<br>• <b>鼠标悬停</b>：鼠标移至已反色的图片上方时自动显现原始原色，移出后恢复。`;
-      accContent.appendChild(hintBox);
-
-      accordion.append(accHeader, accContent);
+      body.append(secAppearance, secImage, secVideo, secSite, secShield, secMedia, secData, secTips);
 
       // 模态弹窗 Footer
       const footer = document.createElement('div');
@@ -6903,47 +7028,29 @@
       actions.append(resetBtn, doneBtn);
       footer.append(this.modalPerf, actions);
 
-      // ===== v3.2: 🎚️ 视频画面调节 (独立于反色, 可组合) =====
-      const secVideoTune = ui.section('🎚️ 视频画面调节', '降低亮度等画面调整; 独立于反色, 反色时自动叠加', 'svi-sec-tune');
-      const tuneChanged = () => { savePrefs(); applyVideoTune(); };
-      const tuneRows = [
-        ui.toggleRow('启用画面调节', '对所有视频生效: 降亮度/对比度/饱和度/暖色/黑白; 关闭时零开销',
-          () => state.videoTune && state.videoTune.enabled === true,
-          (v) => { state.videoTune.enabled = v; tuneChanged(); }),
-        ui.sliderRow('亮度', '降低亮度护眼 (1 = 原样)',
-          () => state.videoTune.brightness, (v) => { state.videoTune.brightness = v; tuneChanged(); },
-          0.3, 1.7, 0.01, ''),
-        ui.sliderRow('对比度', '画面明暗反差',
-          () => state.videoTune.contrast, (v) => { state.videoTune.contrast = v; tuneChanged(); },
-          0.3, 1.7, 0.01, ''),
-        ui.sliderRow('饱和度', '色彩浓淡 (0 = 黑白感)',
-          () => state.videoTune.saturate, (v) => { state.videoTune.saturate = v; tuneChanged(); },
-          0, 2, 0.01, ''),
-        ui.sliderRow('暖色', '暖黄夜读色调',
-          () => state.videoTune.warmth, (v) => { state.videoTune.warmth = v; tuneChanged(); },
-          0, 1, 0.05, ''),
-        ui.sliderRow('黑白', '去色程度',
-          () => state.videoTune.grayscale, (v) => { state.videoTune.grayscale = v; tuneChanged(); },
-          0, 1, 0.05, ''),
-      ];
-      for (const r of tuneRows) secVideoTune.add(r);
-      secVideoTune.add(ui.btnRow([
-        { label: '护眼', onClick: () => { Object.assign(state.videoTune, { enabled: true, brightness: 0.85, contrast: 1, saturate: 1, warmth: 0.15, grayscale: 0 }); tuneChanged(); this.modalControls && this.modalControls.syncAll(); } },
-        { label: '夜间', onClick: () => { Object.assign(state.videoTune, { enabled: true, brightness: 0.7, contrast: 1, saturate: 0.9, warmth: 0.25, grayscale: 0 }); tuneChanged(); this.modalControls && this.modalControls.syncAll(); } },
-        { label: '鲜艳', onClick: () => { Object.assign(state.videoTune, { enabled: true, brightness: 1, contrast: 1.05, saturate: 1.35, warmth: 0, grayscale: 0 }); tuneChanged(); this.modalControls && this.modalControls.syncAll(); } },
-        { label: '还原', onClick: () => { Object.assign(state.videoTune, { enabled: false, brightness: 1, contrast: 1, saturate: 1, warmth: 0, grayscale: 0 }); tuneChanged(); this.modalControls && this.modalControls.syncAll(); } },
-      ]));
-      for (const r of tuneRows) this.rowSyncs.push(() => r.sync());
-
-      body.append(secPreset.el, secImgColor.el, secSite, secVideoTune.el, secFx, secSmart, secShield, accordion, secStats, secMedia, secStorage);
-
       win.append(header, body, footer);
       this.modalMask.appendChild(win);
       document.body.appendChild(this.modalMask);
 
-      // 点击遮罩外部关闭
+      // 点击遮罩外部关闭 (仅居中形态; 停靠形态遮罩透明, 由下方 document 监听处理)
       this.modalMask.addEventListener('click', (e) => {
         if (e.target === this.modalMask) {
+          this.closeSettingsModal();
+        }
+      });
+
+      // v3.3 停靠形态: 点击面板外部即关闭 (遮罩不拦截页面交互)
+      document.addEventListener('click', (e) => {
+        if (!this.modalMask.classList.contains('show')) return;
+        if (!this.modalMask.classList.contains('docked')) return;
+        if (this.modalWindow.contains(e.target)) return;
+        if (this.root && this.root.contains(e.target)) return;
+        this.closeSettingsModal();
+      }, true);
+
+      // Esc 关闭
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && this.modalMask.classList.contains('show')) {
           this.closeSettingsModal();
         }
       });
@@ -6956,20 +7063,119 @@
           }
         },
       };
+
+      // v3.3: 停靠宽度拖拽把手 (320 ~ 600px, 松手记忆)
+      this.dragHandle = document.createElement('div');
+      this.dragHandle.className = 'svi-drag-handle';
+      win.appendChild(this.dragHandle);
+      this.dragHandle.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        const layout = state.settingsLayout === 'left' ? 'left' : 'right';
+        const startX = e.clientX;
+        const startW = this.modalWindow.getBoundingClientRect().width;
+        const onMove = (ev) => {
+          const delta = layout === 'left' ? (ev.clientX - startX) : (startX - ev.clientX);
+          const w = Math.max(320, Math.min(600, Math.round(startW + delta)));
+          state.settingsWidth = w;
+          this.modalWindow.style.setProperty('--svi-settings-w', w + 'px');
+        };
+        const onUp = () => {
+          document.removeEventListener('pointermove', onMove);
+          document.removeEventListener('pointerup', onUp);
+          savePrefs();
+          showToast('面板宽度已记忆');
+        };
+        document.addEventListener('pointermove', onMove);
+        document.addEventListener('pointerup', onUp);
+      });
+
+      this.applySettingsLayout();
+    }
+
+    // v3.3: 应用设置页布局形态 (居中 / 靠左停靠 / 靠右停靠)
+    applySettingsLayout() {
+      if (!this.modalMask || !this.modalWindow) return;
+      const layout = ['left', 'right'].indexOf(state.settingsLayout) !== -1 ? state.settingsLayout : 'center';
+      this.modalWindow.classList.toggle('layout-left', layout === 'left');
+      this.modalWindow.classList.toggle('layout-right', layout === 'right');
+      this.modalMask.classList.toggle('docked', layout !== 'center');
+      this.modalWindow.style.setProperty('--svi-settings-w', (state.settingsWidth || 420) + 'px');
+      if (this.dragHandle) {
+        this.dragHandle.className = 'svi-drag-handle ' + (layout === 'left' ? 'right-edge' : 'left-edge');
+        this.dragHandle.style.display = layout === 'center' ? 'none' : '';
+      }
+      for (const key of Object.keys(this.layoutBtns || {})) {
+        this.layoutBtns[key].classList.toggle('active', key === layout);
+      }
     }
 
     // ==========================================
-    // v3.0 模态区块: ✨ 效果 (图片特效模式 + 阈值 + 键色 + 视频特效引擎)
+    // v3.3 模态区块: 🎨 外观与画面 (预设 + 悬停还原 + 画面滤镜 + 过渡)
     // ==========================================
-    buildFxSection() {
-      const sec = ui.section('✨ 效果', '部分反色 / 指定色反色 / 特效', 'svi-sec-fx');
+    buildAppearanceSection() {
+      const sec = ui.section('🎨 外观与画面', '整体反色风格与观感微调', 'svi-sec-appearance');
 
-      // v3.1 R4: 智能图片策略 (balanced 默认: 正文/大图反色, 封面网格与页面骨架跳过)
-      sec.add(ui.selectRow('智能图片策略', '决定哪些网页图片自动反色 (手动 Alt+点击 与学习规则始终优先)',
+      const presetChipRow = ui.chipRow(
+        Object.values(PRESETS).map((p) => ({
+          id: p.id,
+          label: p.name,
+          color: p.id === 'amoled' ? '#000000' : '#1e293b',
+          dark: true,
+        })),
+        (id) => state.presetId === id,
+        (id) => this.stateMachine.onUserSelectPreset(id)
+      );
+      sec.add(presetChipRow);
+      this.rowSyncs.push(() => presetChipRow.sync());
+
+      sec.add(ui.toggleRow('悬停显示原图', '悬停已反色图片时临时显示原图，移出后恢复反色视图',
+        () => state.hoverRestore !== false,
+        (v) => {
+          state.hoverRestore = v;
+          savePrefs();
+          updateImageFilterCss();
+        }));
+
+      // 画面滤镜微调 (原折叠抽屉并入, 反色预设选「自定义」时逐项生效)
+      const bRow = ui.sliderRow('画面亮度', '反色后的暗化微调', () => state.brightness, (n) => {
+        state.brightness = n;
+        this.stateMachine.onCustomParamChange();
+      }, 0.50, 1.50, 0.01, '');
+      const cRow = ui.sliderRow('画面对比度', '文字线条锐利度', () => state.contrast, (n) => {
+        state.contrast = n;
+        this.stateMachine.onCustomParamChange();
+      }, 0.50, 1.50, 0.01, '');
+      const sRow = ui.sliderRow('色彩饱和度', '消除或保留颜色', () => state.saturate, (n) => {
+        state.saturate = n;
+        this.stateMachine.onCustomParamChange();
+      }, 0.00, 2.00, 0.01, '');
+      const hRow = ui.sliderRow('色相旋转', '校正颜色谱系', () => state.hueRotate, (n) => {
+        state.hueRotate = n;
+        this.stateMachine.onCustomParamChange();
+      }, 0, 360, 1, '°');
+      const transRow = ui.sliderRow('过渡动画时长', '设为 0 毫秒即直接切换无渐变', () => state.transitionMs, (n) => {
+        state.transitionMs = n;
+        this.stateMachine.onUpdateTransition(n);
+      }, 0, 1000, 10, '毫秒');
+      [bRow, cRow, sRow, hRow, transRow].forEach((r) => {
+        sec.add(r);
+        this.rowSyncs.push(() => r.sync());
+      });
+      return sec.el;
+    }
+
+    // ==========================================
+    // v3.3 模态区块: 🖼️ 图片反色 (策略 + 浅色检测 + 色图 + 特效参数)
+    // ==========================================
+    buildImageSection() {
+      const sec = ui.section('🖼️ 图片反色', '决定哪些图片反色以及反色方式', 'svi-sec-image');
+
+      // 智能图片策略 (v3.3 选项净化: 短名 + 动态说明)
+      sec.add(ui.selectRow('智能图片策略', '手动 Alt+点击 与学习规则始终优先',
         [
-          { v: 'balanced', label: '平衡 (默认: 正文与大图反色, 封面网格跳过)' },
-          { v: 'conservative', label: '保守 (仅正文上下文与 ≥200px 大图)' },
-          { v: 'aggressive', label: '激进 (v3.0 行为: 仅尺寸门)' },
+          { v: 'balanced', label: '平衡', describe: '默认。正文与大图反色，封面网格与页面骨架跳过。' },
+          { v: 'conservative', label: '保守', describe: '仅正文上下文与不小于 200 像素的大图参与。' },
+          { v: 'aggressive', label: '激进', describe: '仅按尺寸判断，最接近早期版本的行为。' },
         ],
         () => state.imagePolicy || 'balanced',
         (v) => {
@@ -6978,17 +7184,67 @@
           window.__svi_image_engine?.clearCacheAndRescan();
         }));
 
-      sec.add(ui.selectRow('图片特效模式', '部分反色与特效 (content:url 投递, 悬停还原)',
-        [
-          { v: 'full', label: '完整反色 (CSS 滤镜)' },
-          { v: 'luma', label: '亮度反色 (仅反浅色像素)' },
-          { v: 'key', label: '键色反色 (指定颜色)' },
-          { v: 'rect', label: '区域反色 (Alt+Shift+拖拽)' },
-          { v: 'grayscale', label: '灰度化' },
-          { v: 'sepia', label: '怀旧泛黄' },
-          { v: 'brightness', label: '提亮' },
-          { v: 'custom', label: '自定义滤镜' },
-        ],
+      sec.add(ui.toggleRow('全浅色通用自适应检测', '任何高明度浅底图表均自动识别反色',
+        () => state.imgGeneralLight !== false,
+        (v) => {
+          state.imgGeneralLight = v;
+          savePrefs();
+          window.__svi_image_engine?.clearCacheAndRescan();
+        }));
+
+      sec.add(ui.infoLine('预设浅色色卡，点击启用或禁用对应浅色系：'));
+      const colorChipRow = ui.chipRow(
+        IMG_COLOR_PRESETS.map((cp) => ({ id: cp.id, label: cp.name, color: cp.color })),
+        (id) => !!(state.imgPresets && state.imgPresets[id]),
+        (id) => {
+          if (!state.imgPresets) state.imgPresets = {};
+          state.imgPresets[id] = !state.imgPresets[id];
+          savePrefs();
+          window.__svi_image_engine?.clearCacheAndRescan();
+        }
+      );
+      sec.add(colorChipRow);
+      this.rowSyncs.push(() => colorChipRow.sync());
+
+      const customPicker = ui.pickerRow('🎯 目标色图拾色器', '点击色块唤出调色盘',
+        () => state.imgCustomColor || '#ffffff',
+        (hex) => {
+          state.imgCustomColor = hex;
+          savePrefs();
+          window.__svi_image_engine?.clearCacheAndRescan();
+        });
+      sec.add(customPicker);
+      this.rowSyncs.push(() => customPicker.sync());
+
+      // 浅色检测阈值精调 (原折叠抽屉并入)
+      const imgTolRow = ui.sliderRow('目标色容差', '色图匹配置信范围', () => state.imgTolerance, (n) => {
+        state.imgTolerance = n;
+        savePrefs();
+        window.__svi_image_engine?.clearCacheAndRescan();
+      }, 10, 80, 1, '');
+      const imgLumRow = ui.sliderRow('浅色明度线', '判定浅色背景的明度底线', () => state.imgLumCutoff, (n) => {
+        state.imgLumCutoff = n;
+        savePrefs();
+        window.__svi_image_engine?.clearCacheAndRescan();
+      }, 150, 240, 1, '');
+      const imgAreaRow = ui.sliderRow('浅色面积占比', '触发反色的浅底面积比例', () => state.imgAreaThreshold, (n) => {
+        state.imgAreaThreshold = n;
+        savePrefs();
+        window.__svi_image_engine?.clearCacheAndRescan();
+      }, 25, 90, 1, '%');
+      const minSizeRow = ui.sliderRow('正文图最小尺寸', '小于此长宽的图标不反色', () => state.minImgSize, (n) => {
+        state.minImgSize = n;
+        savePrefs();
+        window.__svi_image_engine?.clearCacheAndRescan();
+      }, 32, 300, 4, '像素');
+      [imgTolRow, imgLumRow, imgAreaRow, minSizeRow].forEach((r) => {
+        sec.add(r);
+        this.rowSyncs.push(() => r.sync());
+      });
+
+      // 图片特效模式与参数 (v3.3 选项净化: 短名 + 动态说明)
+      sec.add(ui.selectRow('图片特效模式', '部分反色与特效的呈现方式',
+        IMG_FX_MODES,
         () => state.imgFxMode,
         (v) => {
           state.imgFxMode = v;
@@ -7012,7 +7268,7 @@
       sec.add(satRow);
       this.rowSyncs.push(() => satRow.sync());
 
-      const keyPicker = ui.pickerRow('键色反色 · 目标色', '(仅反色接近该颜色的像素)',
+      const keyPicker = ui.pickerRow('键色反色 · 目标色', '仅反色接近该颜色的像素',
         () => state.imgFxParams.keyColor || '#ffffff',
         (hex) => {
           state.imgFxParams.keyColor = hex;
@@ -7030,16 +7286,26 @@
       sec.add(tolRow);
       this.rowSyncs.push(() => tolRow.sync());
 
-      // 视频特效引擎 (GPU); WebGL 不可用时隐藏 GPU 选项
+      sec.add(ui.infoLine('特效以替换图方式呈现：悬停查看原图，Alt+点击临时还原，Alt+Shift+拖拽框选区域。'));
+      return sec.el;
+    }
+
+    // ==========================================
+    // v3.3 模态区块: 🎬 视频 (特效引擎 + 智能算法 + 画面调节 + 时间线记忆)
+    // ==========================================
+    buildVideoSection() {
+      const sec = ui.section('🎬 视频', '视频反色引擎与画面调节', 'svi-sec-video');
+
+      // 视频特效引擎 (显卡加速不可用时隐藏选项, 自动走标准滤镜路径)
       const vfx = (window.__svi && window.__svi.engines) ? window.__svi.engines.videoFx : null;
       const gpuOk = !vfx || vfx.available;
       if (gpuOk) {
-        const vfxRow = ui.selectRow('视频特效引擎', 'GPU 覆盖层逐帧渲染 (关闭时走 CSS 滤镜)',
+        sec.add(ui.selectRow('视频特效引擎', '决定视频反色的呈现路径',
           [
-            { v: 'off', label: '关闭 (CSS 滤镜路径)' },
-            { v: 'full', label: '完整反色 (GPU)' },
-            { v: 'luma', label: '亮度反色 (GPU)' },
-            { v: 'key', label: '键色反色 (GPU)' },
+            { v: 'off', label: '关闭', describe: '走标准滤镜路径，兼容性最好。' },
+            { v: 'full', label: '完整反色', describe: '显卡加速逐帧呈现完整反色。' },
+            { v: 'luma', label: '亮度反色', describe: '显卡加速逐帧仅反色浅色像素。' },
+            { v: 'key', label: '键色反色', describe: '显卡加速逐帧反色接近键色的像素。' },
           ],
           () => state.videoFxMode,
           (v) => {
@@ -7049,63 +7315,113 @@
               const hil = window.__svi && window.__svi.engines ? window.__svi.engines.hil : null;
               if (hil) hil.probe && hil.probe.applyFilterToCurrent();
             } catch (e) { /* ignore */ }
-          });
-        sec.add(vfxRow);
-        this.rowSyncs.push(() => vfxRow.sync());
+          }));
       } else {
-        sec.add(ui.infoLine('⚠️ 当前环境 WebGL 不可用, 视频特效引擎已停用 (自动走 CSS 滤镜路径)。'));
+        sec.add(ui.infoLine('当前环境不支持显卡加速，视频特效引擎已停用，将走标准滤镜路径。'));
       }
 
-      sec.add(ui.infoLine('💡 图片特效经 content:url 投递: 悬停还原原图, Alt+点击临时还原, Alt+Shift+拖拽框选区域。'));
-      return sec.el;
-    }
-
-    // ==========================================
-    // v3.0 模态区块: 🧠 智能 (学习规则列表 / 阈值 / 时间线记忆 / 种子规则)
-    // ==========================================
-    buildSmartSection() {
-      const sec = ui.section('🧠 智能', '自学习规则与预测性反色', 'svi-sec-smart');
-
-      sec.add(ui.toggleRow('种子规则 (兜底)', '内置站点规则库降级为兜底层, 学习规则优先',
-        () => state.rulesEnabled !== false,
-        (v) => {
-          state.rulesEnabled = v;
-          savePrefs();
-        }));
-
-      const learnRow = ui.sliderRow('学习命中阈值', '同一词干手动修正达此次数后自动生效', () => state.learnHits, (n) => {
-        state.learnHits = Math.round(n);
+      // 视频智能算法与防抖 (原折叠抽屉并入)
+      const intervalRow = ui.sliderRow('检测采样周期', '后台探测频次，支持逐帧检测时自动逐帧', () => state.sampleIntervalMs, (n) => {
+        state.sampleIntervalMs = n;
+        this.stateMachine.onUpdateInterval(n);
+      }, 50, 2000, 25, '毫秒');
+      const whiteRow = ui.sliderRow('白底面积占比', '触发视频反色的面积阈值', () => state.whiteThreshold, (n) => {
+        state.whiteThreshold = n;
         savePrefs();
-      }, 2, 6, 1, '次');
-      sec.add(learnRow);
-      this.rowSyncs.push(() => learnRow.sync());
+      }, 30, 95, 1, '%');
+      const lumRow = ui.sliderRow('明度判定线', '判定为白底的亮度下限', () => state.lumThreshold, (n) => {
+        state.lumThreshold = n;
+        savePrefs();
+      }, 160, 250, 1, '');
+      const hystRow = ui.sliderRow('退出防抖延迟', '离开白底画面时的缓冲确认时长', () => state.exitHysteresisMs, (n) => {
+        state.exitHysteresisMs = n;
+        savePrefs();
+      }, 200, 5000, 100, '毫秒');
+      [intervalRow, whiteRow, lumRow, hystRow].forEach((r) => {
+        sec.add(r);
+        this.rowSyncs.push(() => r.sync());
+      });
 
-      sec.add(ui.selectRow('时间线记忆', '反色片段按视频指纹记忆, 重放时提前布防',
+      // v3.2 视频画面调节 (独立于反色, 可组合)
+      const tuneChanged = () => { savePrefs(); applyVideoTune(); };
+      const tuneRows = [
+        ui.toggleRow('启用画面调节', '对所有视频生效：调亮度对比度饱和度暖色黑白，关闭时零开销',
+          () => state.videoTune && state.videoTune.enabled === true,
+          (v) => { state.videoTune.enabled = v; tuneChanged(); }),
+        ui.sliderRow('画面调节 · 亮度', '降低亮度护眼，1 为原样',
+          () => state.videoTune.brightness, (v) => { state.videoTune.brightness = v; tuneChanged(); },
+          0.3, 1.7, 0.01, ''),
+        ui.sliderRow('画面调节 · 对比度', '画面明暗反差',
+          () => state.videoTune.contrast, (v) => { state.videoTune.contrast = v; tuneChanged(); },
+          0.3, 1.7, 0.01, ''),
+        ui.sliderRow('画面调节 · 饱和度', '色彩浓淡，0 为黑白感',
+          () => state.videoTune.saturate, (v) => { state.videoTune.saturate = v; tuneChanged(); },
+          0, 2, 0.01, ''),
+        ui.sliderRow('画面调节 · 暖色', '暖黄夜读色调',
+          () => state.videoTune.warmth, (v) => { state.videoTune.warmth = v; tuneChanged(); },
+          0, 1, 0.05, ''),
+        ui.sliderRow('画面调节 · 黑白', '去色程度',
+          () => state.videoTune.grayscale, (v) => { state.videoTune.grayscale = v; tuneChanged(); },
+          0, 1, 0.05, ''),
+      ];
+      for (const r of tuneRows) sec.add(r);
+      sec.add(ui.btnRow([
+        { label: '护眼', onClick: () => { Object.assign(state.videoTune, { enabled: true, brightness: 0.85, contrast: 1, saturate: 1, warmth: 0.15, grayscale: 0 }); tuneChanged(); this.modalControls && this.modalControls.syncAll(); } },
+        { label: '夜间', onClick: () => { Object.assign(state.videoTune, { enabled: true, brightness: 0.7, contrast: 1, saturate: 0.9, warmth: 0.25, grayscale: 0 }); tuneChanged(); this.modalControls && this.modalControls.syncAll(); } },
+        { label: '鲜艳', onClick: () => { Object.assign(state.videoTune, { enabled: true, brightness: 1, contrast: 1.05, saturate: 1.35, warmth: 0, grayscale: 0 }); tuneChanged(); this.modalControls && this.modalControls.syncAll(); } },
+        { label: '还原', onClick: () => { Object.assign(state.videoTune, { enabled: false, brightness: 1, contrast: 1, saturate: 1, warmth: 0, grayscale: 0 }); tuneChanged(); this.modalControls && this.modalControls.syncAll(); } },
+      ]));
+      for (const r of tuneRows) this.rowSyncs.push(() => r.sync());
+
+      // 时间线记忆 (v3.3 选项净化: 短名 + 动态说明)
+      sec.add(ui.selectRow('时间线记忆', '反色片段按视频指纹记忆，重放时提前布防',
         [
-          { v: 'off', label: '关闭' },
-          { v: 'reference', label: '参考 (自动预布防, 手动优先)' },
-          { v: 'takeover', label: '接管 (时间线直接控制反色)' },
+          { v: 'off', label: '关闭', describe: '不做时间线记忆。' },
+          { v: 'reference', label: '参考', describe: '自动提前布防，手动操作始终优先。' },
+          { v: 'takeover', label: '接管', describe: '时间线记忆直接控制反色。' },
         ],
         () => state.timelineMode,
         (v) => {
           state.timelineMode = v;
           savePrefs();
         }));
-
-      // 学习规则列表 (本站)
-      const listLabel = ui.infoLine('本站已学习规则 (来自 Alt+点击修正):');
-      sec.add(listLabel);
-
-      this.smartRulesBox = document.createElement('div');
-      sec.el.appendChild(this.smartRulesBox);
-
-      this.smartHint = ui.infoLine('');
-      sec.add(this.smartHint);
-
-      this.refreshSmartSection();
       return sec.el;
     }
 
+    // ==========================================
+    // v3.3 模态区块: 💡 操作技巧
+    // ==========================================
+    buildTipsBlock() {
+      const sec = document.createElement('div');
+      sec.className = 'svi-modal-section';
+      sec.id = 'svi-sec-tips';
+
+      const secTitle = document.createElement('div');
+      secTitle.className = 'svi-sec-title';
+      secTitle.innerHTML = `<span>💡 操作技巧</span>`;
+      sec.appendChild(secTitle);
+
+      const tips = [
+        ['Alt + 鼠标左键', '在网页任意图片或矢量图上点击，可单独强制反色或复原，选择会被记住。'],
+        ['Alt + Shift + 拖拽', '区域反色模式下在图片上框选局部反色区域。'],
+        ['鼠标悬停', '移至已反色的图片上方时自动显示原始颜色，移出后恢复。'],
+      ];
+      for (const [key, desc] of tips) {
+        const line = document.createElement('div');
+        line.className = 'svi-tip-line';
+        const k = document.createElement('b');
+        k.textContent = key;
+        const d = document.createElement('span');
+        d.textContent = desc;
+        line.append(k, d);
+        sec.appendChild(line);
+      }
+      return sec;
+    }
+
+    // ==========================================
+    // v3.0 学习规则列表刷新 (区块并入站点与规则; v3.3 保留刷新逻辑)
+    // ==========================================
     refreshSmartSection() {
       if (!this.smartRulesBox) return;
       this.smartRulesBox.textContent = '';
@@ -7154,90 +7470,132 @@
     }
 
     // ==========================================
-    // v3.0 模态区块: 💾 存储 (后端徽章 / 键管理 / 导出导入清理 / file: 提示)
+    // v3.3 模态区块: 💾 数据与备份 (规则文件 / 全量备份 / 本地统计, 合并原「存储」+「数据与反馈」)
     // ==========================================
-    buildStorageSection() {
-      const sec = ui.section('💾 存储', '浏览器存储与云同步', 'svi-sec-storage');
+    buildDataSection() {
+      const sec = document.createElement('div');
+      sec.className = 'svi-modal-section';
+      sec.id = 'svi-sec-stats';
 
-      // 后端徽章行
+      const secTitle = document.createElement('div');
+      secTitle.className = 'svi-sec-title';
+      secTitle.innerHTML = `<span>💾 数据与备份</span>`;
+      sec.appendChild(secTitle);
+
+      // 存储后端徽章行
       this.storageBadgeLine = document.createElement('div');
       this.storageBadgeLine.className = 'svi-modal-row';
-      sec.el.appendChild(this.storageBadgeLine);
+      sec.appendChild(this.storageBadgeLine);
 
-      // 键管理列表
-      this.storageKeysBox = document.createElement('div');
-      sec.el.appendChild(this.storageKeysBox);
+      // —— 规则文件 ——
+      sec.appendChild(ui.infoLine('规则文件：站点名单、本站设置、元素规则、学习规则与屏蔽色，可在任意页面之间传递。').row);
+      sec.appendChild(ui.btnRow([
+        { label: '导出规则文件', onClick: () => this.exportRulesFile() },
+        { label: '导入并合并', onClick: () => this.importRulesFile(false) },
+        { label: '导入并替换', onClick: () => this.importRulesFile(true) },
+      ]).row);
 
-      sec.add(ui.btnRow([
+      // —— 全量备份 ——
+      sec.appendChild(ui.infoLine('全量备份：全部偏好与本地数据的完整存档。').row);
+      sec.appendChild(ui.btnRow([
+        { label: '导出备份', onClick: () => this.exportStorageJson() },
+        { label: '导入备份', onClick: () => this.importStorageJson() },
         {
-          label: '导出 JSON',
-          onClick: () => this.exportStorageJson(),
-        },
-        {
-          label: '导入 JSON',
-          onClick: () => this.importStorageJson(),
-        },
-        {
-          label: '清空存储',
+          label: '清空本地数据',
           danger: true,
           onClick: () => {
-            if (confirm('确认清空全部 svi: 命名空间存储吗？\n(学习规则/时间线记忆/偏好将重置, 遗留键保留)')) {
+            if (confirm('确认清空全部本地数据吗？\n(学习规则、时间线记忆与偏好将重置, 早期版本遗留键保留)')) {
               Store.clearNamespace();
               ruleLearner.data = {};
               timelineLearner.data = {};
-              this.refreshStorageSection();
-              showToast('存储已清空 (学习数据与时间线已重置)');
+              this.refreshDataSection();
+              showToast('本地数据已清空 (学习数据与时间线已重置)');
             }
           },
         },
-      ]));
+      ]).row);
+
+      // 键管理列表
+      this.storageKeysBox = document.createElement('div');
+      sec.appendChild(this.storageKeysBox);
+
+      // —— 本地统计 ——
+      this.statsSummary = document.createElement('div');
+      this.statsSummary.className = 'svi-stats-summary';
+      sec.appendChild(this.statsSummary);
+
+      sec.appendChild(ui.btnRow([
+        { label: '复制统计', onClick: () => this.copyStatsJson() },
+        { label: '下载统计', onClick: () => this.downloadStatsJson() },
+        {
+          label: '清空统计',
+          danger: true,
+          onClick: () => {
+            if (confirm('确认清空本地统计数据吗？(偏好设置不受影响)')) {
+              StatsManager.clear();
+              this.refreshDataSection();
+              showToast('本地统计已清空');
+            }
+          },
+        },
+      ]).row);
 
       // file:// 访问提示 (一次性, 按需显示)
       this.fileHintLine = ui.infoLine('');
-      sec.add(this.fileHintLine);
+      sec.appendChild(this.fileHintLine.row);
 
-      sec.add(ui.infoLine('🔒 数据仅保存在浏览器本地 (支持 chrome.storage/GM 云同步通道), 绝不自动上传; 导出完全由你手动触发。'));
+      sec.appendChild(ui.infoLine('数据仅保存在浏览器本地并支持云同步通道，绝不自动上传；导出完全由你手动触发。').row);
 
-      this.refreshStorageSection();
-      return sec.el;
+      this.refreshDataSection();
+      return sec;
     }
 
-    refreshStorageSection() {
+    refreshDataSection() {
+      // 后端徽章 (v3.3: 后端名中文呈现)
       if (this.storageBadgeLine) {
         this.storageBadgeLine.textContent = '';
         const label = document.createElement('span');
         label.className = 'svi-modal-label';
-        label.textContent = '存储后端';
+        label.textContent = '存储位置';
         const badge = document.createElement('span');
         badge.className = 'svi-backend-badge';
         const names = {
-          'chrome-sync': 'chrome.storage.sync (云同步)',
-          'chrome-local': 'chrome.storage.local',
-          'gm': '油猴 GM 存储 (可云同步)',
-          'local': 'localStorage (本地)',
-          'memory': '内存 (无持久化)',
+          'chrome-sync': '浏览器云同步',
+          'chrome-local': '浏览器本地',
+          'gm': '油猴脚本存储',
+          'local': '页面本地存储',
+          'memory': '临时内存',
         };
-        badge.textContent = names[Store.backend] || Store.backend;
+        badge.textContent = names[Store.backend] || '浏览器本地';
         this.storageBadgeLine.append(label, badge);
       }
+      // 键管理列表 (v3.3: 逻辑名中文呈现, 原键名进悬浮提示)
       if (this.storageKeysBox) {
         this.storageKeysBox.textContent = '';
         const entries = Store.describe();
         if (!entries.length) {
           const empty = document.createElement('div');
           empty.className = 'svi-hint-line';
-          empty.textContent = '暂无存储键';
+          empty.textContent = '暂无本地数据';
           this.storageKeysBox.appendChild(empty);
         }
+        const KEY_ZH = {
+          'svi:prefs': '偏好设置',
+          'svi:overrides': '手动覆盖记忆',
+          'svi:learned': '学习规则',
+          'svi:timeline': '时间线记忆',
+          'svi:stats': '本地统计',
+        };
         for (const item of entries) {
           const row = document.createElement('div');
           row.className = 'svi-store-key-row';
           const name = document.createElement('span');
           name.className = 'svi-store-key-name';
-          name.textContent = item.key;
+          name.textContent = KEY_ZH[item.key] || item.key;
+          name.title = item.key;
           const preview = document.createElement('span');
           preview.className = 'svi-store-key-preview';
-          preview.textContent = item.bytes + 'B · ' + item.preview; // 存储内容预览 → textContent
+          preview.textContent = item.bytes + 'B · ' + item.preview; // 存储内容预览 → textContent (XSS 加固)
           const del = document.createElement('button');
           del.className = 'svi-mini-btn danger';
           del.textContent = '删除';
@@ -7246,77 +7604,211 @@
             const logical = item.key.replace(/^svi:/, '');
             Store.remove(logical);
             Store.flush();
-            this.refreshStorageSection();
-            showToast('已删除 ' + item.key);
+            this.refreshDataSection();
+            showToast('已删除 ' + (KEY_ZH[item.key] || item.key));
           });
           row.append(name, preview, del);
           this.storageKeysBox.appendChild(row);
         }
       }
+      // 本地统计摘要
+      if (this.statsSummary) {
+        this.statsSummary.textContent = StatsManager.summaryText();
+      }
+      // file:// 提示
       if (this.fileHintLine) {
         let onFile = false;
         try { onFile = location.protocol === 'file:'; } catch (e) { /* ignore */ }
         if (onFile && runtime.fileAccessBlocked) {
-          this.fileHintLine.setText('⚠️ 本地文件页面: 浏览器需允许油猴访问文件 (Chrome: 扩展程序 → Tampermonkey → 详细信息 → 允许访问文件网址), 否则文件图片无法分析。');
+          this.fileHintLine.setText('本地文件页面：浏览器需允许油猴访问文件网址，否则文件图片无法分析。');
         } else if (onFile) {
-          this.fileHintLine.setText('当前为 file:// 本地页面: 已启用兼容模式 (GM blob 通道分析本地图片)。');
+          this.fileHintLine.setText('当前为本地文件页面：已启用兼容模式分析本地图片。');
         } else {
           this.fileHintLine.setText('');
         }
       }
     }
 
-    exportStorageJson() {
+    // ==========================================
+    // v3.3 规则文件导出与导入 (文件友好: 站点名单 / 本站设置 / 元素规则 / 学习规则 / 屏蔽色)
+    // ==========================================
+    exportRulesFile() {
       try {
-        const data = JSON.stringify({ schema: 1, exportedAt: new Date().toISOString(), version: SCRIPT_VERSION, store: Store.exportAll() }, null, 2);
-        const blob = new Blob([data], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `svi-storage-${new Date().toISOString().slice(0, 10)}.json`;
-        (document.body || document.documentElement).appendChild(a);
-        a.click();
-        setTimeout(() => {
-          URL.revokeObjectURL(url);
-          a.remove();
-        }, 500);
-        showToast('存储 JSON 已开始下载');
+        const payload = {
+          kind: 'svi-rules',
+          schema: 1,
+          version: SCRIPT_VERSION,
+          exportedAt: new Date().toISOString(),
+          rules: {
+            siteMode: state.siteMode || 'all',
+            siteBlacklist: (state.siteBlacklist || []).slice(),
+            siteWhitelist: (state.siteWhitelist || []).slice(),
+            siteOverrides: JSON.parse(JSON.stringify(state.siteOverrides || {})),
+            elementRules: normalizeElementRules(state.elementRules),
+            shieldColors: (state.shieldColors || []).slice(),
+            bgExcludeSelectors: (state.bgExcludeSelectors || []).slice(),
+            learned: JSON.parse(JSON.stringify(ruleLearner.data || {})),
+          },
+        };
+        if (downloadJsonFile('svi-rules-' + new Date().toISOString().slice(0, 10) + '.json', payload)) {
+          showToast('规则文件已开始下载');
+        } else {
+          showToast('导出失败');
+        }
       } catch (e) {
         showToast('导出失败: ' + e.message);
       }
     }
 
-    importStorageJson() {
-      try {
-        const input = document.createElement('input');
-        input.type = 'file';
-        input.accept = 'application/json,.json';
-        input.addEventListener('change', () => {
-          const file = input.files && input.files[0];
-          if (!file) return;
-          const reader = new FileReader();
-          reader.onload = () => {
-            try {
-              const parsed = JSON.parse(String(reader.result));
-              const payload = parsed && parsed.store ? parsed.store : parsed;
-              const n = Store.importAll(payload);
-              Store.flush();
-              this.refreshStorageSection();
-              showToast('已导入 ' + n + ' 个存储键');
-            } catch (e) {
-              showToast('导入失败: JSON 解析错误');
+    importRulesFile(replace) {
+      pickJsonFile((parsed) => {
+        try {
+          const rules = (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) ? (parsed.rules || parsed) : null;
+          if (!rules || typeof rules !== 'object' || Array.isArray(rules)) {
+            showToast('导入失败: 不是有效的规则文件');
+            return;
+          }
+          const msg = replace
+            ? '确认用文件中的规则整体替换当前规则吗？\n(文件中包含的各类规则将被覆盖, 文件中未包含的保持不变)'
+            : '确认将文件中的规则合并进当前规则吗？\n(重复条目自动去重, 站点设置以文件为准, 学习规则保留命中更高者)';
+          if (!confirm(msg)) return;
+          this.applyRulesPayload(rules, replace === true);
+          showToast(replace ? '规则已替换导入' : '规则已合并导入');
+        } catch (e) {
+          showToast('导入失败: ' + e.message);
+        }
+      }, () => showToast('导入失败: 文件读取或解析错误'));
+    }
+
+    // 规则载荷应用 (replace=true: 逐组覆盖文件中包含的组; false: 合并去重)
+    applyRulesPayload(rules, replace) {
+      const has = (k) => rules[k] !== undefined;
+      const strList = (v) => (Array.isArray(v) ? v.filter((s) => typeof s === 'string' && s.trim()) : null);
+      const uniq = (list) => {
+        const seen = new Set();
+        const out = [];
+        for (const item of list) {
+          const k = JSON.stringify(item);
+          if (!seen.has(k)) { seen.add(k); out.push(item); }
+        }
+        return out;
+      };
+      const sanitizeLearned = (src) => {
+        const out = {};
+        if (!src || typeof src !== 'object' || Array.isArray(src)) return out;
+        for (const host of Object.keys(src)) {
+          const hd = src[host];
+          const list = hd && Array.isArray(hd.rules) ? hd.rules : [];
+          const clean = [];
+          for (const r of list) {
+            if (!r || typeof r.stem !== 'string' || !r.stem) continue;
+            clean.push({
+              stem: r.stem,
+              action: r.action === 'protect' ? 'protect' : 'invert',
+              hits: Math.max(0, Math.round(Number(r.hits) || 0)),
+              lastAt: Number(r.lastAt) || 0,
+            });
+          }
+          if (clean.length) out[host] = { rules: clean.slice(-100) };
+        }
+        return out;
+      };
+      const mergeLearned = (inc) => {
+        for (const host of Object.keys(inc)) {
+          const hd = ruleLearner._hostData(host);
+          for (const r of inc[host].rules) {
+            const found = hd.rules.find((x) => x.stem === r.stem);
+            if (!found) {
+              hd.rules.push({ stem: r.stem, action: r.action, hits: r.hits, lastAt: r.lastAt || Date.now() });
+            } else if (r.hits > (found.hits || 0)) {
+              found.action = r.action;
+              found.hits = r.hits;
+              found.lastAt = r.lastAt || found.lastAt;
             }
-          };
-          reader.readAsText(file);
-        });
-        input.click();
-      } catch (e) {
-        showToast('导入失败: ' + e.message);
+          }
+          if (hd.rules.length > 100) {
+            hd.rules.sort((a, b) => (a.lastAt || 0) - (b.lastAt || 0));
+            hd.rules = hd.rules.slice(-100);
+          }
+        }
+        ruleLearner.persist();
+      };
+
+      if (replace) {
+        if (has('siteMode') && ['all', 'blacklist', 'whitelist'].indexOf(rules.siteMode) !== -1) state.siteMode = rules.siteMode;
+        const bl = strList(rules.siteBlacklist);
+        if (bl) state.siteBlacklist = uniq(bl);
+        const wl = strList(rules.siteWhitelist);
+        if (wl) state.siteWhitelist = uniq(wl);
+        if (has('siteOverrides') && rules.siteOverrides && typeof rules.siteOverrides === 'object' && !Array.isArray(rules.siteOverrides)) {
+          state.siteOverrides = {};
+          for (const p of Object.keys(rules.siteOverrides)) {
+            const inc = rules.siteOverrides[p];
+            if (inc && typeof inc === 'object' && !Array.isArray(inc)) state.siteOverrides[p] = Object.assign({}, inc);
+          }
+        }
+        if (has('elementRules')) state.elementRules = normalizeElementRules(rules.elementRules);
+        const sc = strList(rules.shieldColors);
+        if (sc) state.shieldColors = uniq(sc.filter((c) => /^#[0-9a-fA-F]{6}$/.test(c)));
+        const be = strList(rules.bgExcludeSelectors);
+        if (be) state.bgExcludeSelectors = uniq(be);
+        if (has('learned')) ruleLearner.data = sanitizeLearned(rules.learned);
+      } else {
+        state.siteBlacklist = uniq((state.siteBlacklist || []).concat(strList(rules.siteBlacklist) || []));
+        state.siteWhitelist = uniq((state.siteWhitelist || []).concat(strList(rules.siteWhitelist) || []));
+        if (rules.siteOverrides && typeof rules.siteOverrides === 'object' && !Array.isArray(rules.siteOverrides)) {
+          for (const p of Object.keys(rules.siteOverrides)) {
+            const inc = rules.siteOverrides[p];
+            if (!inc || typeof inc !== 'object' || Array.isArray(inc)) continue;
+            state.siteOverrides[p] = Object.assign({}, state.siteOverrides[p] || {}, inc);
+          }
+        }
+        state.elementRules = normalizeElementRules((state.elementRules || []).concat(Array.isArray(rules.elementRules) ? rules.elementRules : []));
+        state.shieldColors = uniq((state.shieldColors || []).concat((strList(rules.shieldColors) || []).filter((c) => /^#[0-9a-fA-F]{6}$/.test(c))));
+        state.bgExcludeSelectors = uniq((state.bgExcludeSelectors || []).concat(strList(rules.bgExcludeSelectors) || []));
+        mergeLearned(sanitizeLearned(rules.learned));
+      }
+
+      savePrefs();
+      // 全链生效: 决策缓存重扫 + 滤镜样式 + 背景替换重评 + 区块刷新
+      window.__svi_image_engine?.clearCacheAndRescan();
+      updateImageFilterCss();
+      try {
+        if (getSiteProfile().bgReplace === true) applyBackgroundReplace(true);
+      } catch (e) { /* ignore */ }
+      this.refreshSiteSection();
+      this.refreshElementRules();
+      this.refreshSmartSection();
+      this.refreshDataSection();
+      this.refreshShieldSection();
+      this.syncVisuals();
+    }
+
+    exportStorageJson() {
+      const payload = { schema: 1, exportedAt: new Date().toISOString(), version: SCRIPT_VERSION, store: Store.exportAll() };
+      if (downloadJsonFile('svi-storage-' + new Date().toISOString().slice(0, 10) + '.json', payload)) {
+        showToast('备份文件已开始下载');
+      } else {
+        showToast('导出失败');
       }
     }
 
+    importStorageJson() {
+      pickJsonFile((parsed) => {
+        try {
+          const payload = parsed && parsed.store ? parsed.store : parsed;
+          const n = Store.importAll(payload);
+          Store.flush();
+          this.refreshDataSection();
+          showToast('已导入 ' + n + ' 个数据项 (部分需刷新页面后生效)');
+        } catch (e) {
+          showToast('导入失败: 文件内容不是有效的备份数据');
+        }
+      }, () => showToast('导入失败: 文件读取或解析错误'));
+    }
+
     // ==========================================
-    // v2.0 模态区块: 🌐 站点与规则 (经 ui 组件库重建)
+    // v2.0 模态区块: 🌐 站点与规则 (v3.3: 并入元素级规则与学习规则子块)
     // ==========================================
     buildSiteSection() {
       const sec = document.createElement('div');
@@ -7339,7 +7831,7 @@
         return row;
       };
 
-      mkToggle('本站启用脚本', '关闭后本站全部引擎停用 (等价黑名单)',
+      mkToggle('本站启用脚本', '关闭后本站全部引擎停用，等同把本站加入黑名单',
         () => getSiteProfile().enabled !== false,
         (v) => {
           getOv().enabled = v;
@@ -7363,7 +7855,7 @@
           savePrefs();
           this.syncVisuals();
         });
-      mkToggle('本站背景替换', '浅色页面一键深色化, 登录块原样保护',
+      mkToggle('本站背景替换', '浅色页面一键深色化，登录区域自动保护',
         () => !!getSiteProfile().bgReplace,
         (v) => {
           getOv().bgReplace = v;
@@ -7372,12 +7864,92 @@
           this.syncVisuals();
         });
 
-      // 站点管理模式
-      const modeRow = ui.selectRow('站点管理模式', '全部启用 / 黑名单 / 白名单',
+      // 本站图片特效模式 (跟随全局或单独指定; 「跟随全局」删除覆盖键)
+      const siteFxRow = ui.selectRow('本站图片特效', '仅作用于当前站点的图片特效模式',
+        [{ v: '', label: '跟随全局', describe: '使用图片反色区块中设置的全局特效模式。' }].concat(
+          IMG_FX_MODES.map((m) => ({ v: m.v, label: m.label, describe: m.describe + '仅本站生效。' }))
+        ),
+        () => (getOv().imgFxMode || ''),
+        (v) => {
+          if (v) {
+            getOv().imgFxMode = v;
+          } else {
+            delete getOv().imgFxMode;
+          }
+          savePrefs();
+          window.__svi_image_engine?.clearCacheAndRescan();
+        });
+      sec.appendChild(siteFxRow.row);
+      this.siteRowSyncs.push(siteFxRow.sync);
+
+      // —— 元素级规则 (v3.3: 站点黑白名单之外的精细控制) ——
+      const erTitle = document.createElement('div');
+      erTitle.className = 'svi-sub-title';
+      erTitle.textContent = '元素级规则';
+      sec.appendChild(erTitle);
+      sec.appendChild(ui.infoLine('按元素特征强制反色或保持原色，优先于自动判断与学习规则。').row);
+
+      this.elementRulesBox = document.createElement('div');
+      sec.appendChild(this.elementRulesBox);
+
+      const erForm = document.createElement('div');
+      erForm.className = 'svi-er-form';
+      const mkOpt = (v, label) => {
+        const o = document.createElement('option');
+        o.value = v;
+        o.textContent = label;
+        return o;
+      };
+      const erScopeSel = document.createElement('select');
+      erScopeSel.className = 'svi-modal-select';
+      erScopeSel.appendChild(mkOpt('site', '本站'));
+      erScopeSel.appendChild(mkOpt('all', '全部站点'));
+      const erActionSel = document.createElement('select');
+      erActionSel.className = 'svi-modal-select';
+      erActionSel.appendChild(mkOpt('invert', '强制反色'));
+      erActionSel.appendChild(mkOpt('protect', '保持原色'));
+      const erInput = document.createElement('input');
+      erInput.type = 'text';
+      erInput.className = 'svi-modal-text';
+      erInput.placeholder = '元素特征，如 .ad-banner';
+      const erAdd = document.createElement('button');
+      erAdd.className = 'svi-mini-btn';
+      erAdd.textContent = '添加规则';
+      erAdd.addEventListener('click', () => {
+        const selector = erInput.value.trim();
+        if (!selector) {
+          showToast('请先填写元素特征');
+          return;
+        }
+        const pattern = erScopeSel.value === 'all' ? '*' : host;
+        const action = erActionSel.value === 'protect' ? 'protect' : 'invert';
+        const list = Array.isArray(state.elementRules) ? state.elementRules : (state.elementRules = []);
+        if (list.some((r) => r && r.pattern === pattern && r.selector === selector && r.action === action)) {
+          showToast('该元素规则已存在');
+          return;
+        }
+        list.push({ id: hash32(pattern + '|' + selector + '|' + action + '|' + Date.now()), pattern, selector, action, note: '', createdAt: Date.now() });
+        if (list.length > 200) state.elementRules = list.slice(-200);
+        savePrefs();
+        erInput.value = '';
+        this.refreshElementRules();
+        window.__svi_image_engine?.clearCacheAndRescan();
+        try {
+          const bgEng = window.__svi && window.__svi.engines ? window.__svi.engines.bgImage : null;
+          if (bgEng && typeof bgEng.sweep === 'function') bgEng.sweep();
+        } catch (e) { /* ignore */ }
+        showToast('元素规则已添加');
+      });
+      erForm.append(erScopeSel, erActionSel, erInput, erAdd);
+      sec.appendChild(erForm);
+      this.refreshElementRules();
+
+      // 站点管理模式 (v3.3 选项净化: 短名 + 动态说明)
+      const modeRow = ui.selectRow('站点管理模式', '控制脚本在哪些站点生效',
         [
-          { v: 'all', label: '全部启用' },
-          { v: 'blacklist', label: '黑名单模式' },
-          { v: 'whitelist', label: '白名单模式' },
+          { v: 'all', label: '全部启用', describe: '所有站点默认启用。' },
+          { v: 'blacklist', label: '黑名单', describe: '名单内站点停用，其余站点启用。' },
+          { v: 'whitelist', label: '白名单', describe: '仅名单内站点启用，其余停用。' },
         ],
         () => state.siteMode || 'all',
         (v) => {
@@ -7395,7 +7967,7 @@
         state.siteBlacklist = lines;
         savePrefs();
         updateImageFilterCss();
-      }, '黑名单域名模式, 每行一个 (如 *.163.com)');
+      }, '黑名单域名，每行一个，如 *.163.com');
       sec.appendChild(blackRow.row);
       this.blacklistTa = blackRow.ta;
       this.siteRowSyncs.push(blackRow.sync);
@@ -7405,10 +7977,41 @@
         state.siteWhitelist = lines;
         savePrefs();
         updateImageFilterCss();
-      }, '白名单域名模式, 每行一个');
+      }, '白名单域名，每行一个');
       sec.appendChild(whiteRow.row);
       this.whitelistTa = whiteRow.ta;
       this.siteRowSyncs.push(whiteRow.sync);
+
+      // —— 学习规则 (v3.3 由独立「智能」区块并入) ——
+      const learnTitle = document.createElement('div');
+      learnTitle.className = 'svi-sub-title';
+      learnTitle.textContent = '学习规则';
+      sec.appendChild(learnTitle);
+
+      const seedRow = ui.toggleRow('内置种子规则', '内置站点规则库作为兜底层，学习规则优先于它',
+        () => state.rulesEnabled !== false,
+        (v) => {
+          state.rulesEnabled = v;
+          savePrefs();
+        });
+      sec.appendChild(seedRow.row);
+      this.siteRowSyncs.push(seedRow.sync);
+
+      const learnRow = ui.sliderRow('学习命中阈值', '同一特征手动修正达此次数后自动生效', () => state.learnHits, (n) => {
+        state.learnHits = Math.round(n);
+        savePrefs();
+      }, 2, 6, 1, '次');
+      sec.appendChild(learnRow.row);
+      this.siteRowSyncs.push(learnRow.sync);
+
+      sec.appendChild(ui.infoLine('本站已学习规则（Alt+点击修正积累）：').row);
+
+      this.smartRulesBox = document.createElement('div');
+      sec.appendChild(this.smartRulesBox);
+
+      this.smartHint = ui.infoLine('');
+      sec.appendChild(this.smartHint.row);
+      this.refreshSmartSection();
 
       // 内置规则摘要
       this.ruleSummary = document.createElement('div');
@@ -7431,6 +8034,50 @@
       sec.appendChild(rescanBtns.row);
 
       return sec;
+    }
+
+    // v3.3: 元素级规则列表刷新 (选择器来自存储层 → 一律 textContent, XSS 加固)
+    refreshElementRules() {
+      if (!this.elementRulesBox) return;
+      this.elementRulesBox.textContent = '';
+      const rules = Array.isArray(state.elementRules) ? state.elementRules : [];
+      if (!rules.length) {
+        const empty = document.createElement('div');
+        empty.className = 'svi-hint-line';
+        empty.textContent = '暂无元素规则 —— 添加后对匹配元素强制生效。';
+        this.elementRulesBox.appendChild(empty);
+        return;
+      }
+      rules.forEach((rule, idx) => {
+        const row = document.createElement('div');
+        row.className = 'svi-learned-row';
+        const scope = document.createElement('span');
+        scope.className = 'svi-learned-action';
+        scope.textContent = rule.pattern === '*' ? '全部站点' : rule.pattern;
+        const stem = document.createElement('span');
+        stem.className = 'svi-learned-stem';
+        stem.textContent = rule.selector; // 存储层字符串 → textContent (XSS 加固)
+        stem.title = rule.selector;
+        const action = document.createElement('span');
+        action.className = 'svi-learned-action' + (rule.action === 'protect' ? ' protect' : '');
+        action.textContent = rule.action === 'protect' ? '保护' : '反色';
+        const del = document.createElement('button');
+        del.className = 'svi-mini-btn danger';
+        del.textContent = '删除';
+        del.addEventListener('click', (e) => {
+          e.stopPropagation();
+          state.elementRules.splice(idx, 1);
+          savePrefs();
+          this.refreshElementRules();
+          window.__svi_image_engine?.clearCacheAndRescan();
+          try {
+            const bgEng = window.__svi && window.__svi.engines ? window.__svi.engines.bgImage : null;
+            if (bgEng && typeof bgEng.sweep === 'function') bgEng.sweep();
+          } catch (err) { /* ignore */ }
+        });
+        row.append(scope, stem, action, del);
+        this.elementRulesBox.appendChild(row);
+      });
     }
 
     refreshSiteSection() {
@@ -7472,7 +8119,7 @@
       secTitle.innerHTML = `<span>🛡️ 原色屏蔽</span>`;
       sec.appendChild(secTitle);
 
-      const hint = ui.infoLine('加入屏蔽列表的原始颜色永不转换 (背景替换与图片反色都会跳过), 适合保护品牌色/警示色。');
+      const hint = ui.infoLine('加入屏蔽列表的原始颜色永不转换，背景替换与图片反色都会跳过，适合保护品牌色与警示色。');
       sec.appendChild(hint.row);
 
       this.shieldChipsBox = document.createElement('div');
@@ -7554,54 +8201,7 @@
     }
 
     // ==========================================
-    // v2.0 模态区块: 📊 数据与反馈 (经 ui 组件库重建)
-    // ==========================================
-    buildStatsSection() {
-      const sec = document.createElement('div');
-      sec.className = 'svi-modal-section';
-      sec.id = 'svi-sec-stats';
-
-      const secTitle = document.createElement('div');
-      secTitle.className = 'svi-sec-title';
-      secTitle.innerHTML = `<span>📊 数据与反馈</span>`;
-      sec.appendChild(secTitle);
-
-      this.statsSummary = document.createElement('div');
-      this.statsSummary.className = 'svi-stats-summary';
-      sec.appendChild(this.statsSummary);
-
-      const btns = ui.btnRow([
-        { label: '复制 JSON', onClick: () => this.copyStatsJson() },
-        { label: '下载 JSON', onClick: () => this.downloadStatsJson() },
-        {
-          label: '清空统计',
-          danger: true,
-          onClick: () => {
-            if (confirm('确认清空本地统计数据吗？(偏好设置不受影响)')) {
-              StatsManager.clear();
-              this.refreshStatsSection();
-              showToast('本地统计已清空');
-            }
-          },
-        },
-      ]);
-      sec.appendChild(btns.row);
-
-      const privacy = ui.infoLine('🔒 数据仅保存在本地浏览器 (' + STATS_KEY + ' / svi:stats), 绝不自动上传; 导出完全由你手动触发, 欢迎附在 Issue 中反馈问题。');
-      sec.appendChild(privacy.row);
-
-      this.refreshStatsSection();
-      return sec;
-    }
-
-    refreshStatsSection() {
-      if (this.statsSummary) {
-        this.statsSummary.textContent = StatsManager.summaryText();
-      }
-    }
-
-    // ==========================================
-    // v3.1 R3 模态区块: 🖼️ 当前页媒体 (列出/反色/定位被遮挡无法点击的媒体)
+    // v3.1 R3 模态区块: 🖥️ 当前页媒体 (列出/反色/定位被遮挡无法点击的媒体)
     // 列表按需采集 (点击按钮触发, 启动零开销); 行内数据一律 textContent (XSS 加固)
     // ==========================================
     buildMediaSection() {
@@ -7707,7 +8307,7 @@
 
       const type = document.createElement('span');
       type.className = 'svi-media-type';
-      const TYPE_ZH = { img: '图片', video: '视频', canvas: '画布', svg: 'SVG', image: 'SVG图', input: '输入图', bg: '背景图' };
+      const TYPE_ZH = { img: '图片', video: '视频', canvas: '画布', svg: '矢量图', image: '矢量图', input: '输入图', bg: '背景图' };
       type.textContent = TYPE_ZH[item.type] || item.type;
 
       const size = mediaClientSize(el);
@@ -7808,7 +8408,7 @@
       try {
         if (navigator.clipboard && navigator.clipboard.writeText) {
           await navigator.clipboard.writeText(text);
-          showToast('统计 JSON 已复制到剪贴板');
+          showToast('统计已复制到剪贴板');
           return;
         }
         throw new Error('clipboard unavailable');
@@ -7820,30 +8420,18 @@
           ta.select();
           document.execCommand('copy');
           document.body.removeChild(ta);
-          showToast('统计 JSON 已复制到剪贴板');
+          showToast('统计已复制到剪贴板');
         } catch (e2) {
-          showToast('复制失败, 请使用下载 JSON');
+          showToast('复制失败, 请使用下载统计');
         }
       }
     }
 
     downloadStatsJson() {
-      try {
-        const data = JSON.stringify(StatsManager.exportJson(), null, 2);
-        const blob = new Blob([data], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `svi-stats-${new Date().toISOString().slice(0, 10)}.json`;
-        (document.body || document.documentElement).appendChild(a);
-        a.click();
-        setTimeout(() => {
-          URL.revokeObjectURL(url);
-          a.remove();
-        }, 500);
-        showToast('统计 JSON 已开始下载');
-      } catch (e) {
-        showToast('下载失败: ' + e.message);
+      if (downloadJsonFile('svi-stats-' + new Date().toISOString().slice(0, 10) + '.json', StatsManager.exportJson())) {
+        showToast('统计文件已开始下载');
+      } else {
+        showToast('下载失败');
       }
     }
 
@@ -7852,10 +8440,10 @@
       this.panel.classList.remove('show');
       if (this.modalControls) this.modalControls.syncAll();
       this.refreshSiteSection();
+      this.refreshElementRules();
       this.refreshShieldSection();
-      this.refreshStatsSection();
+      this.refreshDataSection();
       this.refreshSmartSection();
-      this.refreshStorageSection();
       // 当前页媒体列表保持惰性 (设计: 点击「采集/刷新列表」按钮才全页扫描, 打开面板零开销)
       this.updateStatusBadge();
     }
@@ -8103,6 +8691,8 @@
     buildVideoTuneFilter,
     // 调试句柄: 站点档案按 (host, 偏好版本) 缓存 —— 运行时注入/变更内置规则后需显式失效
     invalidateProfileCache: () => { try { profileCache.clear(); } catch (e) { /* ignore */ } },
+    // v3.3 调试句柄: 偏好写入入口 (基准/调试注入规则后同步偏好版本号)
+    savePrefs,
     Store,
     RuleLearner: ruleLearner,
     TimelineLearner: timelineLearner,
@@ -8116,6 +8706,9 @@
     LOGIN_SELECTORS,
     manualOverrideKey,
     addManualOverride,
+    // v3.3 纯函数导出 (单测契约): 元素级规则归一化 / 首条命中
+    normalizeElementRules,
+    firstMatchingElementRule,
     exportStats: () => StatsManager.exportJson(),
     stats: StatsManager,
     engines: {},

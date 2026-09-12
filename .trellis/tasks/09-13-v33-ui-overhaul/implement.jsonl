@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "硬性红线：运行态不落盘、innerHTML 禁令、决策优先级顺序、快照强制刷新、基准 profile 清理、版本与 README 同步清单"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "本任务要求解耦复用（文件助手/动态说明/行组件），动手前过一遍复用思维清单"}
+{"file": ".trellis/tasks/09-13-v33-ui-overhaul/prd.md", "reason": "需求 R1–R7 与验收标准（布局三形态、无横向滚动、选项无括号、全中文化、规则文件、元素规则）"}
+{"file": ".trellis/tasks/09-13-v33-ui-overhaul/design.md", "reason": "技术设计：现状坐标（行号）、数据模型、元素规则决策语义、三形态外壳、IA 装配顺序、规则文件格式、文案净化清单、测试计划"}

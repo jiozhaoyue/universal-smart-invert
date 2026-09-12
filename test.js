@@ -426,7 +426,7 @@ vm.runInThisContext(scriptSource, { filename: 'universal-smart-invert.user.js' }
 
 const svi = window.__svi;
 assert.ok(svi, 'window.__svi must be exported for tests');
-assert.strictEqual(svi.version, '3.1.0', 'script version must be 3.1.0');
+assert.strictEqual(svi.version, '3.3.0', 'script version must be 3.3.0');
 
 // —— 7a. v3 → v4 迁移: 剥离运行时键, 保留偏好, 旧键不动 (R7) ——
 const v4raw = storageData['universal_smart_invert_v4'];
@@ -490,6 +490,49 @@ svi.prefs.siteWhitelist = [];
 svi.prefs.rulesEnabled = false;
 assert.strictEqual(svi.resolveSiteProfile('mail.163.com').builtin, null, 'rulesEnabled=false skips builtin layer');
 svi.prefs.rulesEnabled = true;
+
+// —— 7c-2. v3.3 元素级规则: 归一化 + 站点档案解析 + 首条命中 ——
+const normER = svi.normalizeElementRules;
+assert.deepStrictEqual(normER(null), [], 'non-array normalizes to empty list');
+assert.deepStrictEqual(normER(undefined), [], 'undefined normalizes to empty list');
+assert.strictEqual(normER(['bad', null, 42, { pattern: 'x.com' }, { pattern: 'x.com', selector: '', action: 'invert' }]).length, 0,
+  'non-object entries and entries missing pattern/selector/action are dropped');
+const normOk = normER([
+  { pattern: 'example.com', selector: '.ad-banner', action: 'protect', junk: 'strip-me' },
+  { pattern: '*', selector: '  img.stamp  ', action: 'not-an-action' },
+  { pattern: '*', selector: 'img.stamp', action: 'invert', note: 7 },
+]);
+assert.strictEqual(normOk.length, 2, 'only well-formed entries survive');
+assert.strictEqual(normOk[0].selector, '.ad-banner');
+assert.strictEqual(normOk[0].action, 'protect');
+assert.ok(!('junk' in normOk[0]), 'unknown fields must not survive normalization');
+assert.strictEqual(normOk[1].id.length, 8, 'missing id is auto-filled with 8-hex hash');
+assert.strictEqual(normOk[1].note, '', 'non-string note coerces to empty string');
+const fifoInput = [];
+for (let i = 0; i < 205; i++) fifoInput.push({ pattern: '*', selector: '.r' + i, action: 'invert' });
+const fifoOut = normER(fifoInput);
+assert.strictEqual(fifoOut.length, 200, 'element rules FIFO cap is 200');
+assert.strictEqual(fifoOut[0].selector, '.r5', 'oldest entries are dropped first (keep newest)');
+
+svi.prefs.elementRules = [
+  { pattern: '163.com', selector: '.site-ad', action: 'protect' },
+  { pattern: '*', selector: '.global-stamp', action: 'invert' },
+  { pattern: 'github.com', selector: '.nope', action: 'invert' },
+];
+svi.invalidateProfileCache();
+const per163ER = svi.resolveSiteProfile('mail.163.com');
+assert.strictEqual(per163ER.elementRules.length, 2, 'site + global rules attach to profile, non-matching excluded');
+assert.strictEqual(per163ER.elementRules[0].selector, '.site-ad', 'array order preserved as priority order');
+assert.strictEqual(svi.resolveSiteProfile('github.com').elementRules.length, 2, 'github gets global + its own rule');
+assert.strictEqual(svi.resolveSiteProfile('example.org').elementRules.length, 1, 'unmatched host only gets global rule');
+svi.prefs.elementRules = [];
+svi.invalidateProfileCache();
+
+const erEl = { matches: (sel) => sel === '.hit' };
+const erList = [{ selector: '.miss', action: 'protect' }, { selector: '.hit', action: 'invert' }];
+assert.strictEqual(svi.firstMatchingElementRule(erEl, erList).action, 'invert', 'first matching element rule wins');
+assert.strictEqual(svi.firstMatchingElementRule({ matches: () => false }, erList), null, 'no match returns null');
+assert.strictEqual(svi.firstMatchingElementRule(erEl, null), null, 'missing rule list returns null');
 
 // —— 7d. classifySmallElement (R3/p0 智能小元素屏蔽) ——
 const cls = svi.classifySmallElement;
@@ -590,7 +633,7 @@ assert.ok(ghRule.forceInvert.some((s) => s.includes('.markdown-body img')), 'git
 const export1 = svi.exportStats();
 assert.strictEqual(export1.schema, 1, 'export envelope schema');
 assert.ok(typeof export1.exportedAt === 'string' && export1.exportedAt.length > 0, 'exportedAt ISO string');
-assert.strictEqual(export1.version, '3.1.0', 'export version');
+assert.strictEqual(export1.version, '3.3.0', 'export version');
 assert.ok(export1.counters && typeof export1.counters === 'object', 'export counters object');
 assert.ok(typeof export1.counters.imagesAnalyzed === 'number', 'counter imagesAnalyzed');
 assert.ok(typeof export1.counters.taintFallbacks === 'number', 'counter taintFallbacks');

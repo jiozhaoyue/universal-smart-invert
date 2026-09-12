@@ -89,6 +89,47 @@ rules below are battle-tested conventions from v1.4.0 → v2.0.0; follow them fo
   (budgeted) scan; auto-refresh defeats the empty state and costs a page-wide sweep.
 - Any computed-style sweep needs a candidate cap (align with the engine budgets, 1500).
 
+## v3.3 Additions (settings panel IA, element rules, rule files)
+
+- **Element-rule tier in the decision pipeline**: precedence is
+  manual override > **element rule** > decision snapshot > learned rule > seed rule >
+  small-element/policy gates > pixel analysis. A matching element rule must
+  `recordDecision(src, verdict, 'element-rule', /* force */ true)` — explicit user
+  configuration shadows a cached snapshot exactly like a manual override does. Every rule
+  edit path (add/delete/import) must run `savePrefs()` (bumps `prefsRevision`, invalidating
+  the site-profile cache) **and** `clearCacheAndRescan()` (+ bgImage `sweep()`), or the
+  decide-once snapshot keeps the stale verdict.
+- **Element-rule resolution contract**: `resolveSiteProfile` fills `profile.elementRules`
+  with rules whose `pattern === '*'` or `hostMatchesPattern(host, pattern)`; array order is
+  priority order (first match wins). Normalize through `normalizeElementRules()` (drops
+  malformed entries, fills `id` via `hash32`, FIFO cap 200 keeping newest).
+- **UI select options carry no parentheses/explanations**: option labels are short Chinese
+  names only; explanations go in the option's `describe` field, rendered by `ui.selectRow`
+  as a dynamic `svi-row-describe` line that syncs with the current value. Same for
+  code/English terms (`CSS 滤镜`, `(GPU)`, hex, `svi:` keys, backend names) — Chinese in the
+  DOM, raw value in `title` tooltips or developer comments only.
+- **Settings layout modes contract**: prefs `settingsLayout: 'center'|'left'|'right'` and
+  `settingsWidth` (clamped 320–600). Docked mode = `svi-modal-mask.docked`
+  (transparent mask, `pointer-events: none`, window `pointer-events: auto`, solid window
+  background — no backdrop blur means 98% alpha lets page content ghost through) +
+  document-level click-outside close + Esc close. Drawer width is the CSS var
+  `--svi-settings-w` on the window element. Mutating `state.settingsLayout` directly does
+  nothing — layout only applies through `applySettingsLayout()` (the header segmented
+  buttons are the single entry point; tests must click them, not poke prefs).
+- **Rule file contract**: envelope `{ kind: 'svi-rules', schema: 1, version, exportedAt,
+  rules: { siteMode, siteBlacklist, siteWhitelist, siteOverrides, elementRules,
+  shieldColors, bgExcludeSelectors, learned } }`. Merge import dedups arrays, per-pattern
+  merges `siteOverrides` (file wins per key), learned rules keep the higher `hits` per
+  (host, stem). Replace import overwrites **only groups present in the file** — absent
+  groups must not be cleared. After applying: `savePrefs` → `clearCacheAndRescan` →
+  `updateImageFilterCss` → bgReplace re-eval → refresh site/element/smart/data sections.
+- **Gotcha (testing)**: injecting the userscript via CDP
+  `Page.addScriptToEvaluateOnNewDocument` (document-start) silently loses ALL styles —
+  `injectStyles()` runs while `document.head`/`documentElement` are both still null and the
+  fallback append no-ops. Class-based assertions keep passing (classList works), so the
+  loss is invisible until you measure computed styles. Layout probes must inject via
+  `Runtime.evaluate` after navigation (same as probe-github), not at document-start.
+
 ## Testing Requirements
 
 - **The bench's fixed Chrome profile (`.chrome-test-profile/`) persists localStorage across

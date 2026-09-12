@@ -1,7 +1,7 @@
 # 全网通用智能视频与图片反色 (Universal Smart Video & Image Invert)
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-3.2.0-blue.svg?style=flat-square" alt="Version">
+  <img src="https://img.shields.io/badge/version-3.3.0-blue.svg?style=flat-square" alt="Version">
   <img src="https://img.shields.io/badge/license-MIT-green.svg?style=flat-square" alt="License">
   <img src="https://img.shields.io/badge/Tampermonkey-Supported-orange.svg?style=flat-square" alt="Tampermonkey">
   <img src="https://img.shields.io/badge/ScriptCat-Supported-purple.svg?style=flat-square" alt="ScriptCat">
@@ -128,6 +128,34 @@
 - **共存握手**：油猴脚本与插件版可同时安装，先启动者认领页面（5 秒心跳），后到者休眠启动，绝不双重滤镜；
 - **GitHub Actions**：`ci.yml`（单测 + 构建冒烟 + 独立 headless Chrome 基准）与 `release.yml`（推送 `v*` 标签 → 测试 → 构建 → zip/CRX → GitHub Release → Chrome Web Store 上传与发布，secrets 缺失时自动跳过）；
 - 详细配置见 [PUBLISHING.md](./PUBLISHING.md) 「浏览器插件发布 (Extension)」章节。
+
+---
+
+## 🆕 v3.3 重大升级 (设置面板全面改版)
+
+### 🪟 三种面板布局 (不再强制全屏遮罩)
+- 设置页头部新增布局切换：**居中窗口 / 靠左停靠 / 靠右停靠**，选择持久记忆；
+- 停靠形态为全高侧边抽屉：**无全屏遮罩**、不遮挡其余页面，点击面板外部或按 `Esc` 即可关闭；
+- 抽屉宽度可在 320 ~ 600px 间拖拽调节并记忆；居中窗口加宽至 600px 并随视口自适应。
+
+### 📐 信息架构重排 + 布局健壮性
+- 设置区块按使用频率重排：**外观与画面 → 图片反色 → 视频 → 站点与规则 → 颜色保护 → 当前页媒体 → 数据与备份 → 操作技巧**；
+- 原「高级参数微调」折叠抽屉解散，全部滑杆归位对应区块，一眼可达、无需翻找；
+- 行布局改为纵向堆叠（标题说明在上、控件在下），任何窗宽下**无横向滚动、无控件出界**。
+
+### 🀄 界面全中文化
+- 全部下拉选项只保留简短中文名（不再有括号说明），选中后在选项下方显示动态说明；
+- 滤镜路径、十六进制色值、存储后端与数据键名等代码/英文表述全部改为中文（色值由悬浮提示呈现）。
+
+### 📁 规则文件上下传
+- 新增「导出规则文件」：站点名单、本站设置、元素规则、学习规则与屏蔽色一键存为 JSON 文件；
+- 新增「导入并合并 / 导入并替换」：跨页面、跨设备迁移规则，重复条目自动去重，学习规则按命中数取优；
+- 与既有「全量备份」并存：规则文件管规则，全量备份管全部数据。
+
+### 🧩 元素级规则 (站点黑白名单之外)
+- 新增「元素级规则」：按 **站点范围（本站 / 全部站点）+ 元素特征 + 动作（强制反色 / 保持原色）** 精确控制任意元素；
+- 决策优先级插至更高档：**手动 Alt+点击 > 元素规则 > 决策快照 > 学习规则 > 种子规则 > 智能检测门 > 像素分析**；
+- 图片与背景图引擎同时生效，变更即时重扫；总量上限 200 条，超出自动淘汰最旧。
 
 ---
 

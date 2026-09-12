@@ -752,7 +752,7 @@ async function main() {
           hasModal: !!document.querySelector('.svi-modal-mask'),
           chipsCount: document.querySelectorAll('.svi-color-chip').length,
           hasPicker: !!document.querySelector('.svi-color-input-native'),
-          hasAccordion: !!document.querySelector('.svi-accordion'),
+          hasElementRuleForm: !!document.querySelector('.svi-er-form'),
           actionBtnCount: document.querySelectorAll('.svi-action-btn').length,
           hasSiteSection: !!document.getElementById('svi-sec-site'),
           hasShieldSection: !!document.getElementById('svi-sec-shield'),
@@ -823,7 +823,7 @@ async function main() {
     assert.strictEqual(report.ui.hasPill, true, 'Floating pill UI must exist');
     assert.strictEqual(report.ui.hasModal, true, 'Settings modal must exist');
     assert.strictEqual(report.ui.hasPicker, true, 'Native color picker must exist');
-    assert.strictEqual(report.ui.hasAccordion, true, 'Collapsible accordion must exist');
+    assert.strictEqual(report.ui.hasElementRuleForm, true, 'Element rule form must exist (v3.3 element rules)');
     assert.strictEqual(report.ui.actionBtnCount, 4, 'Panel must have 4 action buttons (video/smart/image/bg-replace)');
     assert.strictEqual(report.ui.hasSiteSection, true, 'Modal 站点与规则 section must exist');
     assert.strictEqual(report.ui.hasShieldSection, true, 'Modal 原色屏蔽 section must exist');
@@ -836,6 +836,61 @@ async function main() {
     assert.ok(report.statsKey.imagesAnalyzed >= 1, 'persisted stats counters must record image analysis activity');
     assert.ok(report.statsKey.exportImagesAnalyzed >= 1, 'export JSON must contain image analysis counter');
     assert.strictEqual(report.statsKey.exportSchema, 1, 'export JSON envelope schema must be 1');
+
+    // ============================================================
+    // Scenario 1b (v3.3): 元素级规则 —— 保护/强制反色立即生效, 删除后恢复自动决策
+    // ============================================================
+    console.log('[Test] Scenario 1b: element rules (protect / invert) ...');
+    await new Promise((r) => setTimeout(r, 300));
+    const erBefore = (await sendCdp('Runtime.evaluate', {
+      expression: `(() => {
+        const before = {
+          white: document.getElementById('img-white').getAttribute('data-svi-inverted') === 'true',
+          dark: document.getElementById('img-dark').getAttribute('data-svi-inverted') === 'true'
+        };
+        window.__svi.prefs.elementRules = [{ id: 'er-protect', pattern: '*', selector: '#img-white', action: 'protect', note: '', createdAt: Date.now() }];
+        window.__svi.savePrefs();
+        window.__svi_image_engine.clearCacheAndRescan();
+        return before;
+      })()`,
+      returnByValue: true
+    })).result.value;
+    await new Promise((r) => setTimeout(r, 1500));
+    const erProtected = (await sendCdp('Runtime.evaluate', {
+      expression: `(() => ({
+        white: document.getElementById('img-white').getAttribute('data-svi-inverted') === 'true',
+        dark: document.getElementById('img-dark').getAttribute('data-svi-inverted') === 'true'
+      }))()`,
+      returnByValue: true
+    })).result.value;
+    assert.strictEqual(erBefore.white, true, 'pre-condition: light image inverted before element rule');
+    assert.strictEqual(erBefore.dark, false, 'pre-condition: dark image not inverted before element rule');
+    assert.strictEqual(erProtected.white, false, 'protect element rule must remove inversion from matched image');
+    await sendCdp('Runtime.evaluate', {
+      expression: `(() => {
+        window.__svi.prefs.elementRules = [{ id: 'er-invert', pattern: '*', selector: '#img-dark', action: 'invert', note: '', createdAt: Date.now() }];
+        window.__svi.savePrefs();
+        window.__svi_image_engine.clearCacheAndRescan();
+        return true;
+      })()`,
+      returnByValue: true
+    });
+    await new Promise((r) => setTimeout(r, 1500));
+    const erInverted = (await sendCdp('Runtime.evaluate', {
+      expression: `(() => ({
+        white: document.getElementById('img-white').getAttribute('data-svi-inverted') === 'true',
+        dark: document.getElementById('img-dark').getAttribute('data-svi-inverted') === 'true'
+      }))()`,
+      returnByValue: true
+    })).result.value;
+    assert.strictEqual(erInverted.dark, true, 'invert element rule must force-invert the matched dark image');
+    assert.strictEqual(erInverted.white, true, 'removing protect rule must restore auto pixel inversion');
+    // 清理: 清空规则恢复默认世界 (后续场景依赖干净状态)
+    await sendCdp('Runtime.evaluate', {
+      expression: `(() => { window.__svi.prefs.elementRules = []; window.__svi.savePrefs(); window.__svi_image_engine.clearCacheAndRescan(); return true; })()`,
+      returnByValue: true
+    });
+    await new Promise((r) => setTimeout(r, 800));
 
     // ============================================================
     // Scenario 2 (R7): toggle 视频反色 via the UI button, then reload —
@@ -1242,8 +1297,8 @@ async function main() {
         for (let i = 1; i <= 4; i++) {
           out['learn-' + i] = document.getElementById('learn-' + i).getAttribute('data-svi-inverted') === 'true';
         }
-        out.smartSection = !!document.getElementById('svi-sec-smart');
-        out.smartText = document.getElementById('svi-sec-smart') ? document.getElementById('svi-sec-smart').textContent : '';
+        out.smartSection = !!document.getElementById('svi-sec-site');
+        out.smartText = document.getElementById('svi-sec-site') ? document.getElementById('svi-sec-site').textContent : '';
         return out;
       })()`,
       returnByValue: true
@@ -1309,8 +1364,8 @@ async function main() {
         out.overridesKey = !!localStorage.getItem('svi:overrides');
         out.backend = window.__svi.Store.backend;
         out.describeCount = window.__svi.Store.describe().length;
-        out.storageSection = !!document.getElementById('svi-sec-storage');
-        out.badgeText = (document.querySelector('#svi-sec-storage .svi-backend-badge') || {textContent: ''}).textContent;
+        out.storageSection = !!document.getElementById('svi-sec-stats');
+        out.badgeText = (document.querySelector('#svi-sec-stats .svi-backend-badge') || {textContent: ''}).textContent;
         out.exportParses = (() => { try { JSON.stringify(window.__svi.Store.exportAll()); return true; } catch (e) { return false; } })();
         // 键删除
         try {
@@ -1363,7 +1418,7 @@ async function main() {
         booted: !!(window.__svi && window.__svi.version),
         version: window.__svi ? window.__svi.version : null,
         hasPill: !!document.querySelector('.svi-trigger-pill'),
-        hasStorageSection: !!document.getElementById('svi-sec-storage'),
+        hasStorageSection: !!document.getElementById('svi-sec-stats'),
         imgTagged: !!document.getElementById('f-img').getAttribute('data-svi-failed'),
         runtimeBlockedFlag: !!(window.__svi && window.__svi.runtime && window.__svi.runtime.fileAccessBlocked)
       }))()`,
@@ -1371,7 +1426,7 @@ async function main() {
     })).result.value;
     console.log('file:// result:', JSON.stringify(fileRes), 'pageErrors =', pageErrorCount);
     assert.strictEqual(fileRes.booted, true, 'script must boot on file:// pages');
-    assert.strictEqual(fileRes.version, '3.1.0', 'file:// page must report v3.1.0');
+    assert.strictEqual(fileRes.version, '3.3.0', 'file:// page must report v3.3.0');
     assert.strictEqual(fileRes.hasPill, true, 'UI must be present on file:// pages');
     assert.strictEqual(fileRes.hasStorageSection, true, 'storage section (with file hint) must exist');
     assert.strictEqual(pageErrorCount, 0, 'file:// page must boot with zero uncaught page errors');
@@ -1861,7 +1916,7 @@ async function main() {
     const tuneOpen = (await sendCdp('Runtime.evaluate', {
       expression: `(() => {
         window.__svi.ui.openSettingsModal();
-        const sec = document.getElementById('svi-sec-tune');
+        const sec = document.getElementById('svi-sec-video');
         if (!sec) return { section: false };
         return {
           section: true,
@@ -1872,12 +1927,12 @@ async function main() {
       returnByValue: true
     })).result.value;
     assert.strictEqual(tuneOpen.section, true, '视频画面调节 section must exist');
-    assert.strictEqual(tuneOpen.sliders, 5, 'video tune section must expose 5 sliders');
+    assert.strictEqual(tuneOpen.sliders, 9, 'video section must expose 5 tune + 4 algorithm sliders (v3.3 accordion dissolved)');
     assert.deepStrictEqual(tuneOpen.presets, [true, true, true, true], 'preset buttons 护眼/夜间/鲜艳/还原 present');
 
     const tuneEye = (await sendCdp('Runtime.evaluate', {
       expression: `(() => {
-        const sec = document.getElementById('svi-sec-tune');
+        const sec = document.getElementById('svi-sec-video');
         Array.from(sec.querySelectorAll('button')).find((b) => b.textContent === '护眼').click();
         const v = document.getElementById('bench-video');
         return {
@@ -1919,7 +1974,7 @@ async function main() {
     // 还原 + 持久化: 护眼 → 重载 → 仍然生效
     await sendCdp('Runtime.evaluate', {
       expression: `(() => {
-        const sec = document.getElementById('svi-sec-tune');
+        const sec = document.getElementById('svi-sec-video');
         Array.from(sec.querySelectorAll('button')).find((b) => b.textContent === '还原').click();
         return document.documentElement.classList.contains('svi-video-tune');
       })()`,
@@ -1929,7 +1984,7 @@ async function main() {
     assert.ok(tuneResetOk, '还原 preset must clear the tune class');
     await sendCdp('Runtime.evaluate', {
       expression: `(() => {
-        const sec = document.getElementById('svi-sec-tune');
+        const sec = document.getElementById('svi-sec-video');
         Array.from(sec.querySelectorAll('button')).find((b) => b.textContent === '夜间').click();
         return true;
       })()`,
