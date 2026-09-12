@@ -1,7 +1,7 @@
 # Universal Smart Video & Image Invert
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.4.0-blue.svg?style=flat-square" alt="Version">
+  <img src="https://img.shields.io/badge/version-2.0.0-blue.svg?style=flat-square" alt="Version">
   <img src="https://img.shields.io/badge/license-MIT-green.svg?style=flat-square" alt="License">
   <img src="https://img.shields.io/badge/Tampermonkey-Supported-orange.svg?style=flat-square" alt="Tampermonkey">
   <img src="https://img.shields.io/badge/ScriptCat-Supported-purple.svg?style=flat-square" alt="ScriptCat">
@@ -54,6 +54,43 @@ Specifically designed to tame **blinding white PowerPoint/PDF lecture slides in 
 
 ---
 
+## 🆕 What's New in v2.0 (Site Engine)
+
+### 1. 🌗 Background Replace Engine (Login-Box Safe)
+- One-click dark mode for light sites like 163 NetEase: samples computed styles per element and maps light backgrounds to **hue-preserving dark equivalents** with mirrored light text — never a global filter.
+- **Login blocks are never covered or recolored**: built-in login selectors (`login`/`signin`/`passport`...) plus per-site exclusion lists keep the login box untouched.
+- The capsule panel gains a 4th button, **背景替换 (Background Replace)**, toggled per site; `img/video/svg/canvas/iframe` are never touched.
+
+### 2. 🌐 Site Rules & Blacklist/Whitelist (New Modal Section)
+- Per-site overrides: script enabled / image invert / video invert / background replace, all taking precedence over global defaults.
+- Global site management: **All enabled / Blacklist / Whitelist** (Dark Reader style) with wildcard patterns such as `*.163.com`, one per line.
+- Master switch for the built-in rule library; matched rules are visible in the modal (rule name + protect/force-invert/bg-image selector counts).
+
+### 3. 🛡️ Original-Color Shield
+- Maintain a list of original colors that are never transformed (color-picker add, chip remove): shielded colors are skipped by both **background replace and image inversion** — ideal for brand or warning colors.
+
+### 4. 📚 Built-in Mainstream-Site Media Rule Library
+- Covers Bilibili (incl. live), GitHub, 163 NetEase, Zhihu, Weibo, YouTube, Douyin, iQiyi, Youku, Tencent Video, Twitter/X, QQ, Taobao, JD, Stack Overflow, Juejin, CSDN and more.
+- Each rule carries protect selectors (avatars/player controls), force-invert selectors (e.g. GitHub `.markdown-body` and camo images) and background-image selectors, plus a flag to disable video auto-detection on pure video sites.
+
+### 5. 🧩 Smart Small-Element Shield (p0)
+- Avatars/icons/badges (meta keywords, tiny rendered size, **same-src repeated ≥ 3 times**, nav/header chrome context) are never auto-inverted.
+- Content contexts (`.markdown-body`, article/comment bodies) are exempt from misclassification — 300px white diagrams still invert.
+
+### 6. 📑 Per-Tab Isolation
+- Video invert and other runtime state live in memory only — **each tab is fully independent**, nothing is written to storage; a new tab or reload always starts with video invert off.
+- Preferences moved to a fresh storage key (legacy v3 data migrates automatically; the old key is kept for rollback).
+
+### 7. 📊 Local Stats & Developer Export
+- Local counters (images analyzed/inverted, background images, CORS fallbacks, video auto activations, bg-replace pages) plus a capped 200-entry action log.
+- **Stored locally only, never uploaded automatically**; copy JSON / download JSON / clear directly from the settings modal — attach the export when filing issues.
+
+### 8. 🔧 Notable Fixes
+- **GitHub star-history / camo images not inverted**: rebuilt decode chain — canvas sample → taint or blank sample → blob refetch → `createImageBitmap` (own try/catch) → temp `<img>` + objectURL fallback decode; cross-origin SVGs without intrinsic dimensions now invert reliably.
+- **Bilibili comment thumbnails not inverted**: new background-image engine inverts light `background-image` thumbnails without opening them; hover restores original colors.
+
+---
+
 ## 🚀 Installation
 
 Install directly via any userscript manager (Tampermonkey, Violentmonkey, or ScriptCat) by clicking the GitHub Raw link below:
@@ -88,7 +125,7 @@ To iterate on the code locally and see updates immediately:
 | :--- | :--- |
 | `Alt + I` | Toggle video invert (with manual override lock) |
 | `Alt + A` | Toggle smart auto-detection mode |
-| `Alt + Left Click` | Force toggle inversion on any image or SVG |
+| `Alt + Left Click` | Force toggle inversion on any image or SVG (remembered per site since v2.0) |
 | Click Edge Pill | Expand/collapse floating mini control card |
 | Drag Edge Pill | Drag vertically along screen edge |
 | Hover on Inverted Image | Temporarily displays original image colors |
