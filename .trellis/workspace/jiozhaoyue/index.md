@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 4
-- **Last Active**: 2026-09-06
+- **Total Sessions**: 5
+- **Last Active**: 2026-09-12
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~90 | Active |
+| `journal-1.md` | ~112 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 5 | 2026-09-12 | v2.0 Site Engine: background replace, per-site rules, tab isolation, stats | `0f078ba` | `main` |
 | 4 | 2026-09-06 | v1.4.0 Multi-Light-Color Image Detection & Browser Automation | `75e3401` | `main` |
 | 3 | 2026-09-06 | Universal Smart Invert v1.3.1 Open Source Release | `a8f69ac`, `9377560` | `main` |
 | 2 | 2026-09-05 | Phase 2 Smart Image Invert Implementation | - | `-` |

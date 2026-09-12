@@ -88,3 +88,25 @@ Fixed image auto-invert root causes (tainted canvas & URL filter), introduced 8x
 ### Status
 
 [OK] **Completed**
+
+
+## Session 5: v2.0 Site Engine: background replace, per-site rules, tab isolation, stats
+<!-- trellis-session: v=2 fp=3c1dd9dffd4e9c23 -->
+
+**Date**: 2026-09-12
+**Task**: v2.0 Site Engine: background replace, per-site rules, tab isolation, stats
+**Branch**: `main`
+
+### Summary
+
+Shipped v2.0.0: per-site background replacement with login-block protection (163 etc.), builtin site rule library + color shield + blacklist/whitelist, smart small-element shielding, tab-isolated runtime state, star-history/camo SVG nested decode fallback fix, bilibili bg-image comment thumbnails, local stats with manual developer export; all unit + CDP browser tests green.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `0f078ba` | feat: per-site background replace with login-block protection, site rules, color shield, tab isolation, camo SVG decode fix, bg-image thumbnails, and local stats export (v2.0.0) |
+
+### Status
+
+[OK] **Completed**
