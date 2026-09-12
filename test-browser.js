@@ -58,6 +58,25 @@ const SVG_TEMPLATES = {
   '/img/light-poster.svg': `<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180"><rect width="100%" height="100%" fill="#f8fafc"/><text x="90" y="95" fill="#334155" font-size="18">Poster</text></svg>`
 };
 
+// v3.1 基准图生成器: GitHub 式徽章/截图/logo、封面格、大图
+function badgeSvg(i) {
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="95" height="20"><rect width="100%" height="100%" fill="#f5f5f5"/><rect x="1" y="1" width="30" height="18" fill="#4c6ef5"/><text x="36" y="14" font-family="sans-serif" font-size="10" fill="#111">b${i}</text></svg>`;
+}
+function shotSvg(i) {
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="3600" height="2018"><rect width="100%" height="100%" fill="#ffffff"/><rect x="200" y="300" width="1200" height="600" fill="none" stroke="#111" stroke-width="8"/><text x="220" y="280" font-family="sans-serif" font-size="120" fill="#111">Screenshot ${i}</text></svg>`;
+}
+function coverSvg(i) {
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="240" height="135"><rect width="100%" height="100%" fill="#f8fafc"/><rect x="20" y="20" width="200" height="70" rx="8" fill="#e2e8f0"/><text x="30" y="120" font-family="sans-serif" font-size="18" fill="#334155">Cover ${i}</text></svg>`;
+}
+Object.assign(SVG_TEMPLATES, {
+  '/img/gh-logo.svg': `<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120"><rect width="100%" height="100%" fill="#ffffff"/><circle cx="60" cy="60" r="40" fill="none" stroke="#111" stroke-width="6"/><text x="30" y="70" font-family="sans-serif" font-size="20" fill="#111">LOGO</text></svg>`,
+  '/img/diagram-big.svg': `<svg xmlns="http://www.w3.org/2000/svg" width="800" height="600"><rect width="100%" height="100%" fill="#ffffff"/><circle cx="400" cy="200" r="120" fill="none" stroke="#111" stroke-width="6"/><path d="M100,500 L700,500" stroke="#111" stroke-width="6"/><text x="320" y="560" font-family="sans-serif" font-size="40" fill="#111">Big Diagram</text></svg>`,
+  '/img/cover-card.svg': `<svg xmlns="http://www.w3.org/2000/svg" width="240" height="135"><rect width="100%" height="100%" fill="#fefce8"/><rect x="20" y="20" width="200" height="90" rx="8" fill="#e7e5e4"/><text x="30" y="125" font-family="sans-serif" font-size="16" fill="#333">Card Cover</text></svg>`,
+});
+for (let i = 1; i <= 15; i++) SVG_TEMPLATES[`/img/badge-${i}.svg`] = badgeSvg(i);
+for (let i = 1; i <= 5; i++) SVG_TEMPLATES[`/img/shot-${i}.svg`] = shotSvg(i);
+for (let i = 1; i <= 12; i++) SVG_TEMPLATES[`/img/cover-${i}.svg`] = coverSvg(i);
+
 const userscriptCode = fs.readFileSync(path.join(__dirname, 'universal-smart-invert.user.js'), 'utf8');
 
 // @version extracted from the userscript header (manifest sync assertion source of truth)
@@ -120,7 +139,8 @@ const HTML_CONTENT = `<!DOCTYPE html>
   <style>
     body { font-family: sans-serif; background: #121212; color: #fff; padding: 20px; }
     .gallery { display: flex; flex-wrap: wrap; gap: 15px; margin-top: 20px; }
-    .card { background: #1e1e1e; padding: 10px; border-radius: 8px; text-align: center; }
+    /* v3.1: 画廊容器类名 card → frame ("card" 在 v3.1 平衡策略中属于 chrome 上下文提示) */
+    .frame { background: #1e1e1e; padding: 10px; border-radius: 8px; text-align: center; }
     img { display: block; width: 160px; height: 120px; border-radius: 4px; }
     #icon-grid img { width: 64px; height: 64px; }
     #bg-thumb { width: 120px; height: 80px; border-radius: 4px; }
@@ -129,16 +149,16 @@ const HTML_CONTENT = `<!DOCTYPE html>
 <body>
   <h1>Smart Invert Automation Test Bench</h1>
   <div class="gallery">
-    <div class="card"><img id="img-white" src="/img/white-diagram.svg" alt="White diagram"><p>1. White Diagram</p></div>
-    <div class="card"><img id="img-gray" src="/img/gray-chart.svg" alt="Gray chart"><p>2. Gray Chart</p></div>
-    <div class="card"><img id="img-cream" src="/img/cream-slide.svg" alt="Cream slide"><p>3. Cream Slide</p></div>
-    <div class="card"><img id="img-blue" src="/img/cool-blue.svg" alt="Cool blue"><p>4. Cool Blue</p></div>
-    <div class="card"><img id="img-thumb" src="/img/thumb/wiki-diagram.svg" alt="Thumb URL"><p>5. Wiki Thumb</p></div>
-    <div class="card"><img id="img-dark" src="/img/dark-scenery.svg" alt="Dark scenery"><p>6. Dark Scenery</p></div>
-    <div class="card"><img id="img-color" src="/img/colorful-banner.svg" alt="Colorful banner"><p>7. Colorful Banner</p></div>
-    <div class="card"><img id="img-camo" src="http://127.0.0.1:${PORT2}/img/camo-sized.svg" alt="Camo sized"><p>8. CORS SVG (sized)</p></div>
-    <div class="card"><img id="img-camo-nosize" src="http://127.0.0.1:${PORT2}/img/camo-nosize.svg" alt="Camo nosize"><p>9. CORS SVG (no size)</p></div>
-    <div class="card"><div id="bg-thumb" style="background-image: url('/img/white-diagram.svg'); background-size: cover;"></div><p>10. BG-Image Thumb</p></div>
+    <div class="frame"><img id="img-white" src="/img/white-diagram.svg" alt="White diagram"><p>1. White Diagram</p></div>
+    <div class="frame"><img id="img-gray" src="/img/gray-chart.svg" alt="Gray chart"><p>2. Gray Chart</p></div>
+    <div class="frame"><img id="img-cream" src="/img/cream-slide.svg" alt="Cream slide"><p>3. Cream Slide</p></div>
+    <div class="frame"><img id="img-blue" src="/img/cool-blue.svg" alt="Cool blue"><p>4. Cool Blue</p></div>
+    <div class="frame"><img id="img-thumb" src="/img/thumb/wiki-diagram.svg" alt="Thumb URL"><p>5. Wiki Thumb</p></div>
+    <div class="frame"><img id="img-dark" src="/img/dark-scenery.svg" alt="Dark scenery"><p>6. Dark Scenery</p></div>
+    <div class="frame"><img id="img-color" src="/img/colorful-banner.svg" alt="Colorful banner"><p>7. Colorful Banner</p></div>
+    <div class="frame"><img id="img-camo" src="http://127.0.0.1:${PORT2}/img/camo-sized.svg" alt="Camo sized"><p>8. CORS SVG (sized)</p></div>
+    <div class="frame"><img id="img-camo-nosize" src="http://127.0.0.1:${PORT2}/img/camo-nosize.svg" alt="Camo nosize"><p>9. CORS SVG (no size)</p></div>
+    <div class="frame"><div id="bg-thumb" style="background-image: url('/img/white-diagram.svg'); background-size: cover;"></div><p>10. BG-Image Thumb</p></div>
   </div>
   <div id="icon-grid">
     ${ICON_GRID}
@@ -388,6 +408,98 @@ const LOGIN_HTML = `<!DOCTYPE html>
 </body>
 </html>`;
 
+// —— v3.1 Scenario 13: GitHub 式页面 (eager 初始处理 / decide-once / SPA 换页) ——
+// 15 枚 95×20 徽章 + logo 位于首屏, 3 张 3600×2018 白底截图位于折叠线以下但启动时已加载完成:
+// 断言不滚动的情况下截图已被 eager 通道反色 (F2), 徽章首通决策与强制重扫后一致 (F3)
+const GH_BADGES = Array.from({ length: 15 }, (_, i) => `<img class="gh-badge" src="/img/badge-${i + 1}.svg" alt="badge ${i + 1}">`).join('\n    ');
+const GITHUB_HTML = `<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><title>GitHub-like Eager Bench</title>
+<script>${SEED_SNIPPET}; sviSeed({ imagePolicy: 'balanced' });<\/script>
+<style>
+  body { background: #ffffff; margin: 0; padding: 24px; font-family: sans-serif; }
+  .markdown-body { color: #111; }
+  .gh-badge { display: inline-block; width: 95px; height: 20px; margin: 2px; }
+  .gh-logo { display: block; width: 120px; height: 120px; }
+  .gh-shot { display: block; width: 600px; margin-top: 24px; }
+</style>
+</head><body>
+  <div class="markdown-body" id="md-content">
+    <div id="badges-row">${GH_BADGES}</div>
+    <img id="gh-logo" class="gh-logo" src="/img/gh-logo.svg" alt="logo">
+    <div style="height: 1200px;">(below-fold spacer)</div>
+    <img id="gh-shot-1" class="gh-shot" src="/img/shot-1.svg" alt="shot 1">
+    <img id="gh-shot-2" class="gh-shot" src="/img/shot-2.svg" alt="shot 2">
+    <img id="gh-shot-3" class="gh-shot" src="/img/shot-3.svg" alt="shot 3">
+  </div>
+  <script>
+    ${executableScript}
+  <\/script>
+</body></html>`;
+
+// —— v3.1 Scenario 14: 智能图片策略 —— B 站式封面格 (12 同尺寸浅色封面, 同父)
+// + 卡片封面 (chrome 提示) + 孤立大图; balanced: 封面全跳过、大图反色; aggressive: 封面反色
+const POLICY_COVERS = Array.from({ length: 12 }, (_, i) => `<img class="feed-cover" src="/img/cover-${i + 1}.svg" alt="cover ${i + 1}">`).join('\n    ');
+const POLICY_HTML = `<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><title>Image Policy Bench</title>
+<script>${SEED_SNIPPET}; sviSeed({ imagePolicy: (new URLSearchParams(location.search).get('policy') || 'balanced'), imgFxMode: 'full' });<\/script>
+<style>
+  body { background: #121212; color: #eee; padding: 16px; }
+  #feed-grid { display: flex; flex-wrap: wrap; width: 1100px; }
+  .feed-cover { display: block; width: 240px; height: 135px; margin: 4px; }
+  #card-cover { display: block; width: 160px; height: 120px; }
+  #lone-diagram { display: block; width: 600px; margin-top: 24px; }
+</style>
+</head><body>
+  <div id="feed-grid">${POLICY_COVERS}</div>
+  <div class="video-card"><a href="#" id="card-link"><img id="card-cover" src="/img/cover-card.svg" alt="card cover"></a></div>
+  <div id="diagram-wrap"><img id="lone-diagram" src="/img/diagram-big.svg" alt="lone diagram"></div>
+  <script>
+    ${executableScript}
+  <\/script>
+</body></html>`;
+
+// —— v3.1 Scenario 15: 悬停显示原图开关 (hoverRestore=false: CSS 滤镜路径与 fx content:url 路径均保持反色) ——
+// 配置经查询参数传入 (上一页 pagehide 落盘会覆盖导航前写入的种子, 必须在本页加载时种子)
+const HOVER_HTML = `<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><title>Hover Restore Bench</title>
+<script>
+  ${SEED_SNIPPET};
+  (function () {
+    var q = new URLSearchParams(location.search);
+    sviSeed({
+      hoverRestore: q.get('restore') !== '0',
+      imagePolicy: 'balanced',
+      imgFxMode: q.get('fx') || 'full'
+    });
+  })();
+<\/script>
+<style>body { background: #121212; } img { display:block; width:200px; height:150px; margin: 16px; }</style>
+</head><body>
+  <img id="hover-css" src="/img/white-diagram.svg" alt="css path">
+  <script>
+    ${executableScript}
+  <\/script>
+</body></html>`;
+
+// —— v3.1 Scenario 16: 放大镜/看图类插件适配 —— 基础图先建立决策缓存,
+// 再动态追加闭合 Shadow Root 宿主 (同 src 图) 与 body 尾部背景图覆盖层:
+// 快路径同步反色 + 闭合根内 Alt+点击 可切换 + 背景图引擎覆盖 (R6) ——
+const VIEWER_HTML = `<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><title>Viewer Extension Bench</title>
+<script>${SEED_SNIPPET}; sviSeed({ imagePolicy: 'balanced', imgFxMode: 'full' });<\/script>
+<style>body { background: #121212; } img { display:block; width:200px; height:150px; margin: 16px; }</style>
+</head><body>
+  <img id="viewer-base" src="/img/white-diagram.svg" alt="base">
+  <div id="viewer-overlay-slot"></div>
+  <script>
+    ${executableScript}
+  <\/script>
+</body></html>`;
+
 // 1. Create HTTP test servers (main + cross-origin CORS SVG host)
 // Scenario 12 pages are registered in main() after the extension smoke builds the real bundle.
 const PAGES = {
@@ -399,6 +511,10 @@ const PAGES = {
   '/learn-page': LEARN_HTML,
   '/media-page': MEDIA_HTML,
   '/storage-page': STORAGE_HTML,
+  '/github-page': GITHUB_HTML,
+  '/policy-page': POLICY_HTML,
+  '/hover-page': HOVER_HTML,
+  '/viewer-page': VIEWER_HTML,
 };
 
 const server = http.createServer((req, res) => {
@@ -612,7 +728,9 @@ async function main() {
           actionBtnCount: document.querySelectorAll('.svi-action-btn').length,
           hasSiteSection: !!document.getElementById('svi-sec-site'),
           hasShieldSection: !!document.getElementById('svi-sec-shield'),
-          hasStatsSection: !!document.getElementById('svi-sec-stats')
+          hasStatsSection: !!document.getElementById('svi-sec-stats'),
+          hasMediaSection: !!document.getElementById('svi-sec-media'),
+          hoverRestoreClass: document.documentElement.classList.contains('svi-hover-restore')
         };
         results.statsKey = {
           exists: !!statsRaw,
@@ -682,6 +800,8 @@ async function main() {
     assert.strictEqual(report.ui.hasSiteSection, true, 'Modal 站点与规则 section must exist');
     assert.strictEqual(report.ui.hasShieldSection, true, 'Modal 原色屏蔽 section must exist');
     assert.strictEqual(report.ui.hasStatsSection, true, 'Modal 数据与反馈 section must exist');
+    assert.strictEqual(report.ui.hasMediaSection, true, 'Modal 当前页媒体 section must exist (v3.1)');
+    assert.strictEqual(report.ui.hoverRestoreClass, true, 'html.svi-hover-restore must be on by default (v3.1)');
 
     // R5: stats key must exist and parse after activity (flushed via the designed export path)
     assert.strictEqual(report.statsKey.parsed, true, 'localStorage stats key must exist and parse');
@@ -1223,7 +1343,7 @@ async function main() {
     })).result.value;
     console.log('file:// result:', JSON.stringify(fileRes), 'pageErrors =', pageErrorCount);
     assert.strictEqual(fileRes.booted, true, 'script must boot on file:// pages');
-    assert.strictEqual(fileRes.version, '3.0.0', 'file:// page must report v3.0.0');
+    assert.strictEqual(fileRes.version, '3.1.0', 'file:// page must report v3.1.0');
     assert.strictEqual(fileRes.hasPill, true, 'UI must be present on file:// pages');
     assert.strictEqual(fileRes.hasStorageSection, true, 'storage section (with file hint) must exist');
     assert.strictEqual(pageErrorCount, 0, 'file:// page must boot with zero uncaught page errors');
@@ -1268,6 +1388,431 @@ async function main() {
     assert.strictEqual(coexistExt.extBooted, true, 'ext-first booter must boot normally');
     assert.strictEqual(coexistExt.usDormant, true, 'second (userscript) booter must go dormant');
     assert.strictEqual(coexistExt.singleUI, 1, 'exactly one UI instance must exist');
+
+    // ============================================================
+    // Scenario 13 (v3.1 R1/R2): GitHub 式页面 —— eager 初始处理 (折叠线下但已加载
+    // 完成的截图不滚动即反色, F2), 徽章首通决策与强制重扫后一致 (F3/decide-once),
+    // 缓存快路径 + SPA 换页重处理
+    // ============================================================
+    console.log('[Test] Scenario 13: navigating to /github-page (eager pass, no scrolling) ...');
+    await sendCdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/github-page` });
+    await new Promise((r) => setTimeout(r, 5000)); // eager 首扫 + 2.5s 补扫, 期间绝不滚动
+
+    const ghState = (await sendCdp('Runtime.evaluate', {
+      expression: `(() => {
+        const ids = ['gh-shot-1', 'gh-shot-2', 'gh-shot-3', 'gh-logo'];
+        const shots = {};
+        ids.forEach((id) => {
+          const el = document.getElementById(id);
+          shots[id] = {
+            inverted: el ? el.getAttribute('data-svi-inverted') === 'true' : false,
+            checked: el ? !!el.getAttribute('data-svi-checked-src') : false,
+            top: el ? Math.round(el.getBoundingClientRect().top + window.scrollY) : -1
+          };
+        });
+        const badges = Array.from(document.querySelectorAll('.gh-badge'));
+        const eng = window.__svi.engines.image;
+        return {
+          scrollY: window.scrollY,
+          shots,
+          badgeCount: badges.length,
+          badgesInverted: badges.filter((b) => b.getAttribute('data-svi-inverted') === 'true').length,
+          badgesChecked: badges.filter((b) => !!b.getAttribute('data-svi-checked-src')).length,
+          badgeFirstPassReason: eng ? (eng.decisionBySrc.get(badges[0] ? badges[0].src : '') || {}).reason : null
+        };
+      })()`,
+      returnByValue: true
+    })).result.value;
+    console.log('GitHub-like pre-scroll state:', JSON.stringify(ghState));
+    assert.strictEqual(ghState.scrollY, 0, 'assertions must hold BEFORE any scrolling');
+    assert.ok(ghState.shots['gh-shot-1'].top > 600, 'screenshots are below the fold (fixture sanity)');
+    for (const id of ['gh-shot-1', 'gh-shot-2', 'gh-shot-3']) {
+      assert.strictEqual(ghState.shots[id].inverted, true, `${id} must be inverted WITHOUT scrolling (eager initial pass, F2)`);
+      assert.strictEqual(ghState.shots[id].checked, true, `${id} must carry a final decision marker`);
+    }
+    assert.strictEqual(ghState.shots['gh-logo'].inverted, true, 'logo must be inverted via eager pass');
+    assert.strictEqual(ghState.badgeCount, 15, 'badge grid must contain 15 badges');
+    assert.strictEqual(ghState.badgesChecked, 15, 'all badges must have a decision on the FIRST pass (no undecided stragglers)');
+    assert.strictEqual(ghState.badgesInverted, 0, 'badges stay unforced (tiny gate) before seed rule injection');
+
+    // 种子规则注入 (模拟 github.com 内置规则) + 显式重扫: 强制反色必须先于小元素门 (F3 顺序修复)
+    await sendCdp('Runtime.evaluate', {
+      expression: `(() => {
+        window.__svi.BUILTIN_RULES.push({
+          pattern: '127.0.0.1', name: 'BenchGitHubLike', protect: [],
+          forceInvert: ['.markdown-body img'], bgImageSelectors: [], disableVideoAuto: false, bgReplace: false
+        });
+        window.__svi.invalidateProfileCache(); // 站点档案按 (host, 偏好版本) 缓存, 注入规则后需失效
+        window.__svi.engines.image.clearCacheAndRescan();
+        return true;
+      })()`,
+      returnByValue: true
+    });
+    await new Promise((r) => setTimeout(r, 1500));
+    const afterRule = (await sendCdp('Runtime.evaluate', {
+      expression: `(() => {
+        const badges = Array.from(document.querySelectorAll('.gh-badge'));
+        const shots = ['gh-shot-1', 'gh-shot-2', 'gh-shot-3', 'gh-logo'].map((id) => document.getElementById(id).getAttribute('data-svi-inverted') === 'true');
+        const eng = window.__svi.engines.image;
+        return {
+          badgesInverted: badges.filter((b) => b.getAttribute('data-svi-inverted') === 'true').length,
+          badgeReason: eng ? (eng.decisionBySrc.get(badges[0].src) || {}).reason : null,
+          shots,
+          snapshot: Array.from(document.querySelectorAll('.markdown-body img')).map((i) => i.getAttribute('data-svi-inverted') === 'true' ? 1 : 0).join('')
+        };
+      })()`,
+      returnByValue: true
+    })).result.value;
+    console.log('After seed rule + rescan:', JSON.stringify(afterRule));
+    assert.strictEqual(afterRule.badgesInverted, 15, 'forceInvert must outrank the tiny gate (badges invert after rule injection, F3)');
+    assert.strictEqual(afterRule.badgeReason, 'seed-force', 'badge decision reason is seed-force');
+    assert.ok(afterRule.shots.every(Boolean), 'shots stay inverted after rescan');
+
+    // decide-once 稳定性: 再次强制重扫, 全部决策必须逐位一致 (同图永不翻转)
+    await sendCdp('Runtime.evaluate', {
+      expression: `(() => { window.__svi.engines.image.clearCacheAndRescan(); return true; })()`,
+      returnByValue: true
+    });
+    await new Promise((r) => setTimeout(r, 1500));
+    const afterRescan2 = (await sendCdp('Runtime.evaluate', {
+      expression: `Array.from(document.querySelectorAll('.markdown-body img')).map((i) => i.getAttribute('data-svi-inverted') === 'true' ? 1 : 0).join('')`,
+      returnByValue: true
+    })).result.value;
+    assert.strictEqual(afterRescan2, afterRule.snapshot, 'decide-once: two forced rescans produce identical decisions');
+
+    // 缓存快路径: 追加一张已决 src 的图 (折叠线下, IO 不可达) → 变更 flush 同步反色
+    await sendCdp('Runtime.evaluate', {
+      expression: `(() => {
+        const im = document.createElement('img');
+        im.id = 'fast-path-img';
+        im.src = '/img/shot-1.svg';
+        im.style.cssText = 'display:block;width:600px;margin-top:24px;';
+        document.getElementById('md-content').appendChild(im);
+        return true;
+      })()`,
+      returnByValue: true
+    });
+    const fastPathOk = await waitForExpr(`(() => {
+      const el = document.getElementById('fast-path-img');
+      return !!(el && el.getAttribute('data-svi-inverted') === 'true' && el.getAttribute('data-svi-checked-src'));
+    })()`, 4000);
+    assert.ok(fastPathOk, 'mutation fast-path must apply the cached decision synchronously to new media');
+
+    // SPA 换页: pushState + 内容替换 → 新 src 图重处理
+    await sendCdp('Runtime.evaluate', {
+      expression: `(() => {
+        history.pushState({}, '', '/github-page-2');
+        const md = document.getElementById('md-content');
+        md.innerHTML = '<img id="spa-img-1" src="/img/shot-4.svg" style="display:block;width:600px;">'
+          + '<img id="spa-img-2" src="/img/shot-5.svg" style="display:block;width:600px;margin-top:24px;">';
+        return true;
+      })()`,
+      returnByValue: true
+    });
+    const spaOk = await waitForExpr(`(() => {
+      const a = document.getElementById('spa-img-1');
+      const b = document.getElementById('spa-img-2');
+      return !!(a && b && a.getAttribute('data-svi-inverted') === 'true' && b.getAttribute('data-svi-inverted') === 'true');
+    })()`, 8000);
+    assert.ok(spaOk, 'SPA-swap content replacement must re-process new images (white screenshots invert)');
+
+    // ============================================================
+    // Scenario 14 (v3.1 R4): 智能图片策略 —— balanced 封面格全跳过/孤立大图反色,
+    // aggressive 封面反色 (v3.0 行为)
+    // ============================================================
+    console.log('[Test] Scenario 14: navigating to /policy-page (balanced) ...');
+    await sendCdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/policy-page` });
+    await new Promise((r) => setTimeout(r, 5000));
+    const policyBalanced = (await sendCdp('Runtime.evaluate', {
+      expression: `(() => {
+        const covers = Array.from(document.querySelectorAll('.feed-cover'));
+        const card = document.getElementById('card-cover');
+        const diagram = document.getElementById('lone-diagram');
+        const st = (el) => ({ inverted: el.getAttribute('data-svi-inverted') === 'true', checked: !!el.getAttribute('data-svi-checked-src') });
+        const eng = window.__svi.engines.image;
+        return {
+          policy: window.__svi.prefs.imagePolicy,
+          coverCount: covers.length,
+          covers: covers.map(st),
+          coverReason: eng ? (eng.decisionBySrc.get(covers[0].src) || {}).reason : null,
+          card: st(card),
+          cardReason: eng ? (eng.decisionBySrc.get(card.src) || {}).reason : null,
+          diagram: st(diagram)
+        };
+      })()`,
+      returnByValue: true
+    })).result.value;
+    console.log('Policy balanced:', JSON.stringify(policyBalanced));
+    assert.strictEqual(policyBalanced.policy, 'balanced', 'policy seeded to balanced');
+    assert.strictEqual(policyBalanced.coverCount, 12, 'cover grid must contain 12 covers');
+    assert.ok(policyBalanced.covers.every((c) => c.checked), 'all covers decided on this pass');
+    assert.ok(policyBalanced.covers.every((c) => !c.inverted), 'balanced: grid-repeated covers must NOT invert (bilibili 封面格)');
+    assert.strictEqual(policyBalanced.coverReason, 'policy', 'cover skip reason is policy (grid heuristic)');
+    assert.strictEqual(policyBalanced.card.checked, true, 'card cover decided');
+    assert.strictEqual(policyBalanced.card.inverted, false, 'balanced: card/cover chrome context must NOT invert');
+    assert.strictEqual(policyBalanced.cardReason, 'policy', 'card cover skip reason is policy (chrome heuristic)');
+    assert.strictEqual(policyBalanced.diagram.inverted, true, 'balanced: lone large white diagram must invert');
+
+    // aggressive: 同一页面, 封面反色 (v3.0 行为)。配置经查询参数传入
+    // (上一页 pagehide 落盘会覆盖导航前 evaluate 写入的种子, 必须由本页加载时种子)
+    console.log('[Test] Scenario 14b: /policy-page?policy=aggressive ...');
+    await sendCdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/policy-page?policy=aggressive` });
+    await new Promise((r) => setTimeout(r, 5000));
+    const policyAggr = (await sendCdp('Runtime.evaluate', {
+      expression: `(() => {
+        const covers = Array.from(document.querySelectorAll('.feed-cover'));
+        return {
+          policy: window.__svi.prefs.imagePolicy,
+          coversInverted: covers.filter((c) => c.getAttribute('data-svi-inverted') === 'true').length,
+          diagramInverted: document.getElementById('lone-diagram').getAttribute('data-svi-inverted') === 'true'
+        };
+      })()`,
+      returnByValue: true
+    })).result.value;
+    console.log('Policy aggressive:', JSON.stringify(policyAggr));
+    assert.strictEqual(policyAggr.policy, 'aggressive', 'policy seeded to aggressive');
+    assert.strictEqual(policyAggr.coversInverted, 12, 'aggressive: cover grid inverts (v3.0 size-gates-only behavior)');
+    assert.strictEqual(policyAggr.diagramInverted, true, 'aggressive: diagram still inverts');
+
+    // ============================================================
+    // Scenario 15 (v3.1 R5): 悬停显示原图开关 —— hoverRestore=false 时
+    // CSS 滤镜路径与 fx content:url 路径悬停均保持反色; 恢复 true 后悬停还原
+    // ============================================================
+    async function hoverAssert(expr, timeoutMs) {
+      return waitForExpr(expr, timeoutMs || 6000);
+    }
+    console.log('[Test] Scenario 15a: /hover-page?restore=0&fx=full (hoverRestore=false, CSS filter path) ...');
+    await sendCdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/hover-page?restore=0&fx=full` });
+    await new Promise((r) => setTimeout(r, 4000));
+    const hoverSetup = (await sendCdp('Runtime.evaluate', {
+      expression: `(() => {
+        const img = document.getElementById('hover-css');
+        return {
+          inverted: img.getAttribute('data-svi-inverted') === 'true',
+          restoreClass: document.documentElement.classList.contains('svi-hover-restore'),
+          rect: JSON.stringify(img.getBoundingClientRect())
+        };
+      })()`,
+      returnByValue: true
+    })).result.value;
+    assert.strictEqual(hoverSetup.inverted, true, 'hover bench: white diagram inverted (CSS filter path)');
+    assert.strictEqual(hoverSetup.restoreClass, false, 'svi-hover-restore class must be OFF when pref disabled');
+    const cssRect = JSON.parse(hoverSetup.rect);
+    await sendCdp('Input.dispatchMouseEvent', {
+      type: 'mouseMoved',
+      x: Math.round(cssRect.left + cssRect.width / 2),
+      y: Math.round(cssRect.top + cssRect.height / 2)
+    });
+    await new Promise((r) => setTimeout(r, 250));
+    const cssHover = (await sendCdp('Runtime.evaluate', {
+      expression: `getComputedStyle(document.getElementById('hover-css')).filter`,
+      returnByValue: true
+    })).result.value;
+    console.log('CSS path hover filter:', cssHover);
+    assert.ok(String(cssHover).indexOf('invert(1)') !== -1, 'hoverRestore=false: CSS filter path keeps inversion on hover, got ' + cssHover);
+    await sendCdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 4, y: 4 });
+
+    console.log('[Test] Scenario 15b: /hover-page?restore=0&fx=luma (hoverRestore=false, fx content:url path) ...');
+    await sendCdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/hover-page?restore=0&fx=luma` });
+    await new Promise((r) => setTimeout(r, 4500));
+    const fxSetup = (await sendCdp('Runtime.evaluate', {
+      expression: `(() => {
+        const img = document.getElementById('hover-css');
+        return { hasFx: img.hasAttribute('data-svi-fx'), rect: JSON.stringify(img.getBoundingClientRect()) };
+      })()`,
+      returnByValue: true
+    })).result.value;
+    assert.strictEqual(fxSetup.hasFx, true, 'fx bench: img delivered via content:url (luma)');
+    const fxRect15 = JSON.parse(fxSetup.rect);
+    await sendCdp('Input.dispatchMouseEvent', {
+      type: 'mouseMoved',
+      x: Math.round(fxRect15.left + fxRect15.width / 2),
+      y: Math.round(fxRect15.top + fxRect15.height / 2)
+    });
+    await new Promise((r) => setTimeout(r, 250));
+    const fxHover = (await sendCdp('Runtime.evaluate', {
+      expression: `(() => {
+        const img = document.getElementById('hover-css');
+        return { hoverClass: img.classList.contains('svi-fx-hover'), content: getComputedStyle(img).content };
+      })()`,
+      returnByValue: true
+    })).result.value;
+    console.log('fx path hover:', JSON.stringify(fxHover));
+    assert.strictEqual(fxHover.hoverClass, false, 'hoverRestore=false: fx hover class must not be added');
+    assert.ok(String(fxHover.content).indexOf('blob:') !== -1, 'hoverRestore=false: fx content:url delivery must persist on hover, got ' + fxHover.content);
+    await sendCdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 4, y: 4 });
+
+    console.log('[Test] Scenario 15c: /hover-page?restore=1&fx=full (hoverRestore back ON, CSS path restores) ...');
+    await sendCdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/hover-page?restore=1&fx=full` });
+    await new Promise((r) => setTimeout(r, 4000));
+    const backOn = (await sendCdp('Runtime.evaluate', {
+      expression: `(() => {
+        const img = document.getElementById('hover-css');
+        return {
+          inverted: img.getAttribute('data-svi-inverted') === 'true',
+          restoreClass: document.documentElement.classList.contains('svi-hover-restore'),
+          rect: JSON.stringify(img.getBoundingClientRect())
+        };
+      })()`,
+      returnByValue: true
+    })).result.value;
+    assert.strictEqual(backOn.restoreClass, true, 'toggling hoverRestore back ON re-adds svi-hover-restore');
+    const backRect = JSON.parse(backOn.rect);
+    await sendCdp('Input.dispatchMouseEvent', {
+      type: 'mouseMoved',
+      x: Math.round(backRect.left + backRect.width / 2),
+      y: Math.round(backRect.top + backRect.height / 2)
+    });
+    await new Promise((r) => setTimeout(r, 250));
+    const backHover = (await sendCdp('Runtime.evaluate', {
+      expression: `getComputedStyle(document.getElementById('hover-css')).filter`,
+      returnByValue: true
+    })).result.value;
+    assert.ok(/^none/.test(String(backHover)), 'hoverRestore=true: hover restores original (filter none), got ' + backHover);
+    await sendCdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 4, y: 4 });
+
+    // ============================================================
+    // Scenario 16 (v3.1 R6): 放大镜/看图类插件适配 —— 闭合 Shadow Root 快路径 + Alt+点击 + body 尾部背景图覆盖层
+    // ============================================================
+    console.log('[Test] Scenario 16: navigating to /viewer-page (viewer extension sim) ...');
+    await sendCdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/viewer-page` });
+    await new Promise((r) => setTimeout(r, 4000));
+    const baseReady = (await sendCdp('Runtime.evaluate', {
+      expression: `document.getElementById('viewer-base').getAttribute('data-svi-inverted') === 'true'`,
+      returnByValue: true
+    })).result.value;
+    assert.strictEqual(baseReady, true, 'base img must be decided+inverted first (decision cache seeded)');
+
+    await sendCdp('Runtime.evaluate', {
+      expression: `(() => {
+        const host = document.createElement('div');
+        host.id = 'viewer-host';
+        const root = host.attachShadow({ mode: 'closed' });
+        window.__sviBenchRoot = root;
+        const im = document.createElement('img');
+        im.id = 'viewer-shadow-img';
+        im.src = '/img/white-diagram.svg';
+        im.style.cssText = 'display:block;width:240px;height:180px;';
+        root.appendChild(im);
+        document.getElementById('viewer-overlay-slot').appendChild(host);
+        const overlay = document.createElement('div');
+        overlay.id = 'viewer-overlay';
+        overlay.style.cssText = 'width:200px;height:150px;background-image:url(/img/white-diagram.svg);background-size:cover;';
+        document.body.appendChild(overlay);
+        return true;
+      })()`,
+      returnByValue: true
+    });
+    const viewerReady = await waitForExpr(`(() => {
+      const root = window.__sviBenchRoot;
+      const im = root && root.getElementById('viewer-shadow-img');
+      const ov = document.getElementById('viewer-overlay');
+      return !!(im && im.getAttribute('data-svi-inverted') === 'true' && ov && ov.getAttribute('data-svi-bginv') === 'true');
+    })()`, 10000);
+    assert.ok(viewerReady, 'closed-shadow img must auto-invert via fast-path AND body-end overlay bg-image must invert');
+
+    // Alt+点击 (bubbles+composed) 穿透闭合根切换反色
+    const toggle1 = (await sendCdp('Runtime.evaluate', {
+      expression: `(() => {
+        const im = window.__sviBenchRoot.getElementById('viewer-shadow-img');
+        const wasInverted = im.getAttribute('data-svi-inverted') === 'true';
+        im.dispatchEvent(new MouseEvent('click', { altKey: true, bubbles: true, composed: true, cancelable: true }));
+        return { wasInverted, afterFirst: im.getAttribute('data-svi-inverted') === 'true', overrideRecorded: Object.keys(window.__svi.prefs.manualOverrides).some((k) => k.indexOf('white-diagram') !== -1) };
+      })()`,
+      returnByValue: true
+    })).result.value;
+    console.log('Viewer Alt+click 1:', JSON.stringify(toggle1));
+    assert.strictEqual(toggle1.wasInverted, true, 'shadow img starts inverted');
+    assert.strictEqual(toggle1.afterFirst, false, 'Alt+click inside closed shadow root must restore (toggle off)');
+    assert.strictEqual(toggle1.overrideRecorded, true, 'override recorded for the shadow img src');
+    const toggle2 = (await sendCdp('Runtime.evaluate', {
+      expression: `(() => {
+        const im = window.__sviBenchRoot.getElementById('viewer-shadow-img');
+        im.dispatchEvent(new MouseEvent('click', { altKey: true, bubbles: true, composed: true, cancelable: true }));
+        return im.getAttribute('data-svi-inverted') === 'true';
+      })()`,
+      returnByValue: true
+    })).result.value;
+    assert.strictEqual(toggle2, true, 'second Alt+click re-inverts (toggle roundtrip)');
+
+    // ============================================================
+    // Scenario 17 (v3.1 R3): 当前页媒体面板 —— 打开区块, 断言列表/切换/定位
+    // ============================================================
+    console.log('[Test] Scenario 17: navigating to main page, opening 当前页媒体 section ...');
+    await sendCdp('Page.navigate', { url: `http://127.0.0.1:${PORT}` });
+    await new Promise((r) => setTimeout(r, 3500));
+    // 场景内自建反色状态 (Scenario 10 的迁移基准会重置存储, 2b 的覆盖不再存在)
+    const darkSeed = (await sendCdp('Runtime.evaluate', {
+      expression: `(() => {
+        const img = document.getElementById('img-dark');
+        img.dispatchEvent(new MouseEvent('click', { altKey: true, bubbles: true, cancelable: true }));
+        return img.getAttribute('data-svi-inverted') === 'true';
+      })()`,
+      returnByValue: true
+    })).result.value;
+    assert.strictEqual(darkSeed, true, 'Alt+click within the scenario must invert img-dark (fixture sanity)');
+    const mediaOpen = (await sendCdp('Runtime.evaluate', {
+      expression: `(() => {
+        window.__svi.ui.openSettingsModal();
+        const sec = document.getElementById('svi-sec-media');
+        if (!sec) return { section: false };
+        const btns = Array.from(sec.querySelectorAll('button'));
+        const collect = btns.find((b) => b.textContent.indexOf('采集') !== -1);
+        if (collect) collect.click();
+        return { section: true, rows: sec.querySelectorAll('.svi-media-row').length };
+      })()`,
+      returnByValue: true
+    })).result.value;
+    console.log('Media section:', JSON.stringify(mediaOpen));
+    assert.strictEqual(mediaOpen.section, true, '当前页媒体 section must exist');
+    assert.ok(mediaOpen.rows >= 10, 'media inspector must list the known page media (gallery + icons + bg-thumb)');
+
+    const mediaToggle = (await sendCdp('Runtime.evaluate', {
+      expression: `(() => {
+        const rows = Array.from(document.querySelectorAll('#svi-sec-media .svi-media-row'));
+        const row = rows.find((r) => r._sviTarget && r._sviTarget.id === 'img-dark');
+        if (!row) return { found: false };
+        const before = {
+          stateText: row.querySelector('.svi-media-state').textContent,
+          inverted: row._sviTarget.getAttribute('data-svi-inverted') === 'true'
+        };
+        const toggleBtn = Array.from(row.querySelectorAll('button')).find((b) => b.textContent === '复原' || b.textContent === '反色');
+        toggleBtn.click();
+        return { found: true, before, afterInverted: row._sviTarget.getAttribute('data-svi-inverted') === 'true' };
+      })()`,
+      returnByValue: true
+    })).result.value;
+    console.log('Media toggle:', JSON.stringify(mediaToggle));
+    assert.strictEqual(mediaToggle.found, true, 'media inspector must map rows to page elements (img-dark)');
+    assert.strictEqual(mediaToggle.before.inverted, true, 'img-dark starts inverted (manual override from Scenario 2b)');
+    assert.strictEqual(mediaToggle.afterInverted, false, 'inspector 反色/复原 toggle must flip the media state');
+
+    const mediaLocate = (await sendCdp('Runtime.evaluate', {
+      expression: `(() => {
+        window.scrollTo(0, document.body.scrollHeight);
+        return window.scrollY;
+      })()`,
+      returnByValue: true
+    })).result.value;
+    assert.ok(mediaLocate > 100, 'page scrolled to bottom before 定位 (fixture sanity)');
+    await sendCdp('Runtime.evaluate', {
+      expression: `(() => {
+        const rows = Array.from(document.querySelectorAll('#svi-sec-media .svi-media-row'));
+        const row = rows.find((r) => r._sviTarget && r._sviTarget.id === 'img-white');
+        const locateBtn = Array.from(row.querySelectorAll('button')).find((b) => b.textContent === '定位');
+        locateBtn.click();
+        return true;
+      })()`,
+      returnByValue: true
+    });
+    const located = await waitForExpr(`(() => {
+      const el = document.getElementById('img-white');
+      const rect = el.getBoundingClientRect();
+      return rect.top > -10 && rect.top < window.innerHeight && window.scrollY < ${mediaLocate} - 10;
+    })()`, 5000);
+    assert.ok(located, '定位 must scrollIntoView the target element (img-white back in view)');
+    const flashOk = await waitForExpr(`document.getElementById('img-white').classList.contains('svi-locate-flash')`, 2000);
+    assert.ok(flashOk, '定位 must flash the outline highlight class');
 
     console.log('\n🎉 ALL BROWSER AUTOMATION TESTS PASSED 100% SUCCESFULLY!\n');
 

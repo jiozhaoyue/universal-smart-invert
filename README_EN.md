@@ -1,7 +1,7 @@
 # Universal Smart Video & Image Invert
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-3.0.0-blue.svg?style=flat-square" alt="Version">
+  <img src="https://img.shields.io/badge/version-3.1.0-blue.svg?style=flat-square" alt="Version">
   <img src="https://img.shields.io/badge/license-MIT-green.svg?style=flat-square" alt="License">
   <img src="https://img.shields.io/badge/Tampermonkey-Supported-orange.svg?style=flat-square" alt="Tampermonkey">
   <img src="https://img.shields.io/badge/ScriptCat-Supported-purple.svg?style=flat-square" alt="ScriptCat">
@@ -125,6 +125,44 @@ Specifically designed to tame **blinding white PowerPoint/PDF lecture slides in 
 
 ---
 
+## 🆕 What's New in v3.1 (Feedback Hardening · Media Inspector · Smart Policy)
+
+### 1. 🖼️ Current-Page Media Inspector (reach overlay-hidden media)
+- New modal section "🖼️ 当前页媒体 (Current-Page Media)": one click collects every media element on the page (images / canvas / video / SVG / input images / background-image elements / Shadow-DOM media; collection budget 400, list cap 200 + load-more);
+- Each row shows **type · rendered size · source (truncated) · state** (inverted / original / skipped:reason) — see at a glance which media were blocked by "tiny / repeated-small / policy" rules;
+- Per-row **反色/复原 (invert/restore)** toggle (same override path as Alt+click, remembered per site) and **定位 (locate)** which scrolls the element into view with a 1.2 s outline flash — built for media nested under overlays that are visible but impossible to click.
+
+### 2. 🎛️ Smart Image Policy (deciding *when* to invert)
+- New `imagePolicy` preference with three modes (✨效果 section), default **balanced**:
+  - **Balanced**: content context (`.markdown-body`, articles, comment bodies) **or** (rendered size ≥ 96 px **and** not grid-repeated **and** not chrome context);
+  - **Conservative**: content context or ≥ 200 px images only;
+  - **Aggressive**: v3.0 behavior (size gates only).
+- **Grid-repetition heuristic**: ≥ 4 same-size, same-tag images under one parent → cover/thumbnail grid → skipped. Bilibili-style light cover walls stay original **with zero hand-written rules**, while lone white diagrams in articles still invert;
+- **Chrome-context detection**: images inside `nav/header/aside/footer`, card/cover class hints (`card`/`cover`), or single-image anchors (`a>img`) are no longer auto-inverted;
+- Precedence unchanged: **manual Alt+click > learned rules > seed force/protect > policy gate > pixel analysis** — seed force-invert (e.g. GitHub markdown/camo) and protect selectors fully bypass the policy gate.
+
+### 3. 🔁 GitHub / Long-Page First-Paint Inversion + Unified Decision Pipeline
+- **Eager initial pass**: images already loaded at boot are decided immediately (budget, default 80, tunable) instead of waiting for viewport intersection — opening a GitHub README **inverts everything on first paint, no scrolling**; three deferred re-sweeps (2.5 s / 6 s / 12 s) catch late finishes;
+- **Unified decide-once pipeline**: every entry path (intersection / dynamic insert / eager / manual rescan) funnels into one decision function with strict precedence; each src's final decision is computed exactly once and cached (per-src decision snapshot) — **identical inputs never flip between "not inverted on load" and "inverted after scrolling"**; re-evaluation happens only via an explicit rescan (settings change / manual trigger);
+- **Decide-then-mark**: `data-svi-checked-src` is written only after a decision; failed analyses stay silent for a 60 s TTL, retry at most 3 times, then skip permanently with a recorded reason; newly added media whose src already has a decision get it **applied synchronously** (the foundation of instant viewer-overlay inversion).
+
+### 4. 🌗 Hover-to-Restore Switch
+- New "悬停显示原图" toggle in the 🌙基础 section (default on = v3.0 behavior): turn it off and hovering an inverted image **keeps the inverted view** — both the CSS-filter path and the fx `content:url` path — for those who dislike the original flashing through on hover.
+
+### 5. 🔍 Image-Viewer / Zoom Extension Compatibility (FuTuXiu-like)
+- `Alt+click` now resolves its target via `event.composedPath()`: media inside **Shadow DOM (including closed roots)** can be toggled;
+- Dynamically inserted media with an already-decided src get the cached decision **applied synchronously** during the mutation flush — images already seen by the page appear inverted inside zoom overlays instantly;
+- The background-image engine covers overlay elements appended at the end of `<body>` (inline-style `background-image`).
+
+### 6. 🩺 Troubleshooting: "GitHub doesn't seem to work"
+If the script appears inactive on GitHub READMEs:
+1. **Check the version**: open the Tampermonkey dashboard and confirm the script version is **3.1.0** or newer (older builds had the first-paint gap and the badge decision flip);
+2. **Silent update failures**: updates are fetched from `raw.githubusercontent.com` — if that host is unreachable (or an older install pointed at a private/renamed repository and the raw URL 404s), Tampermonkey **silently keeps the old version**. Trigger "Check for userscript updates" manually, or re-click the install link above to reinstall over the top;
+3. **Check the script is enabled**: Tampermonkey badge active; site not disabled by blacklist/whitelist or the per-site toggle;
+4. **Self-diagnose**: settings modal → "🖼️ 当前页媒体" → collect — each image shows exactly why it was skipped, and you can invert manually right there.
+
+---
+
 ## 🚀 Installation
 
 Install directly via any userscript manager (Tampermonkey, Violentmonkey, or ScriptCat) by clicking the GitHub Raw link below:
@@ -164,7 +202,7 @@ To iterate on the code locally and see updates immediately:
 | `Alt + Left Click` | Force toggle inversion on any image or SVG (remembered per site since v2.0) |
 | Click Edge Pill | Expand/collapse floating mini control card |
 | Drag Edge Pill | Drag vertically along screen edge |
-| Hover on Inverted Image | Temporarily displays original image colors |
+| Hover on Inverted Image | Temporarily displays original image colors (can be disabled via the "悬停显示原图" toggle since v3.1) |
 
 ---
 

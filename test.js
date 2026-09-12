@@ -426,7 +426,7 @@ vm.runInThisContext(scriptSource, { filename: 'universal-smart-invert.user.js' }
 
 const svi = window.__svi;
 assert.ok(svi, 'window.__svi must be exported for tests');
-assert.strictEqual(svi.version, '3.0.0', 'script version must be 3.0.0');
+assert.strictEqual(svi.version, '3.1.0', 'script version must be 3.1.0');
 
 // —— 7a. v3 → v4 迁移: 剥离运行时键, 保留偏好, 旧键不动 (R7) ——
 const v4raw = storageData['universal_smart_invert_v4'];
@@ -590,7 +590,7 @@ assert.ok(ghRule.forceInvert.some((s) => s.includes('.markdown-body img')), 'git
 const export1 = svi.exportStats();
 assert.strictEqual(export1.schema, 1, 'export envelope schema');
 assert.ok(typeof export1.exportedAt === 'string' && export1.exportedAt.length > 0, 'exportedAt ISO string');
-assert.strictEqual(export1.version, '3.0.0', 'export version');
+assert.strictEqual(export1.version, '3.1.0', 'export version');
 assert.ok(export1.counters && typeof export1.counters === 'object', 'export counters object');
 assert.ok(typeof export1.counters.imagesAnalyzed === 'number', 'counter imagesAnalyzed');
 assert.ok(typeof export1.counters.taintFallbacks === 'number', 'counter taintFallbacks');
@@ -982,6 +982,174 @@ assert.strictEqual(mdv(fakeVideo, 0, 0), 0, 'zero viewport → 0');
 assert.strictEqual(svi.hash32('https://example.com/a.png'), svi.hash32('https://example.com/a.png'), 'hash deterministic');
 assert.strictEqual(svi.hash32('a') !== svi.hash32('b'), true, 'different inputs differ');
 assert.ok(/^[0-9a-f]{8}$/.test(svi.hash32('anything')), 'hash output is 8 hex chars');
+
+// ============================================================
+// v3.1 新增单测 (design §7 Node list): passesImagePolicy 模式矩阵 /
+// countGridGroup 网格边界 (3 vs 4) / 新偏好默认值 /
+// ImageInvertEngine.decideImage 统一决策管线 (forceInvert 首通生效 /
+// decide-once 快路径 / 保护优先 / 手动覆盖 / 失败有界重试)
+// ============================================================
+
+// —— 9a. v3.1 新偏好默认值与规范化 ——
+assert.strictEqual(svi.prefs.imagePolicy, 'balanced', 'imagePolicy defaults to balanced');
+assert.strictEqual(svi.prefs.hoverRestore, true, 'hoverRestore defaults to true (current behavior)');
+assert.strictEqual(svi.prefs.eagerScanBudget, 80, 'eagerScanBudget defaults to 80');
+
+// —— 9b. countGridGroup (同标签 ±8px 容差, 含自身; ≥4 网格边界) ——
+const cgg = svi.countGridGroup;
+const gridSibs = (n, w = 240, h = 135, tag = 'IMG') => Array.from({ length: n }, () => ({ w, h, tag }));
+assert.strictEqual(cgg(240, 135, 'IMG', gridSibs(3)), 4, '3 same-size siblings + self = 4 → grid boundary');
+assert.strictEqual(cgg(240, 135, 'IMG', gridSibs(2)), 3, '2 siblings + self = 3 → below grid boundary');
+assert.strictEqual(cgg(240, 135, 'IMG', []), 1, 'no siblings → count 1');
+assert.strictEqual(cgg(240, 135, 'IMG', gridSibs(3, 248, 135)), 4, '8px size diff within tolerance');
+assert.strictEqual(cgg(240, 135, 'IMG', gridSibs(3, 250, 135)), 1, '10px size diff exceeds tolerance');
+assert.strictEqual(cgg(240, 135, 'IMG', gridSibs(5, 240, 135, 'DIV')), 1, 'different tag never counts');
+assert.strictEqual(cgg(0, 135, 'IMG', gridSibs(5)), 0, 'zero own dimension → 0');
+
+// —— 9c. passesImagePolicy 模式矩阵 (balanced / conservative / aggressive) ——
+const pip = svi.passesImagePolicy;
+const pinfo = (o) => Object.assign({ maxDim: 0, contentContext: false, chromeContext: false, gridSiblings: 0, policy: 'balanced' }, o);
+// balanced
+assert.strictEqual(pip(pinfo({ maxDim: 300 })), true, 'balanced: lone 300px diagram passes');
+assert.strictEqual(pip(pinfo({ maxDim: 95 })), false, 'balanced: 95px below gate fails');
+assert.strictEqual(pip(pinfo({ maxDim: 96 })), true, 'balanced: 96px boundary passes');
+assert.strictEqual(pip(pinfo({ maxDim: 240, gridSiblings: 12 })), false, 'balanced: grid-repeated covers fail (bilibili 封面格)');
+assert.strictEqual(pip(pinfo({ maxDim: 160, chromeContext: true })), false, 'balanced: card/cover chrome context fails');
+assert.strictEqual(pip(pinfo({ maxDim: 160, gridSiblings: 12, contentContext: true })), true, 'balanced: content context wins over grid');
+assert.strictEqual(pip(pinfo({ maxDim: 160, chromeContext: true, contentContext: true })), true, 'balanced: content context wins over chrome');
+// conservative
+assert.strictEqual(pip(pinfo({ maxDim: 160, policy: 'conservative' })), false, 'conservative: 160px fails');
+assert.strictEqual(pip(pinfo({ maxDim: 200, policy: 'conservative' })), true, 'conservative: 200px boundary passes');
+assert.strictEqual(pip(pinfo({ maxDim: 240, gridSiblings: 12, chromeContext: true, policy: 'conservative' })), true, 'conservative: large images bypass grid/chrome');
+assert.strictEqual(pip(pinfo({ maxDim: 60, contentContext: true, policy: 'conservative' })), true, 'conservative: content context passes');
+// aggressive (v3.0 behavior)
+assert.strictEqual(pip(pinfo({ maxDim: 20, policy: 'aggressive' })), true, 'aggressive: size gates only');
+assert.strictEqual(pip(pinfo({ maxDim: 2000, gridSiblings: 50, chromeContext: true, policy: 'aggressive' })), true, 'aggressive: always passes');
+
+// —— 9d. decideImage 统一决策管线 (真实引擎实例, Node 桩环境) ——
+// 引擎构造在桩环境安全: IntersectionObserver 缺失 → init() 早退, 无 IO/扫描副作用
+const engine = new svi.ImageInvertEngine();
+assert.strictEqual(typeof engine.decideImage, 'function', 'engine exposes unified decideImage');
+assert.strictEqual(typeof engine.decisionBySrc, 'object', 'engine exposes decide-once snapshot');
+
+function makeImgStub(opts) {
+  const attrs = {};
+  const stub = {
+    tagName: 'IMG',
+    currentSrc: opts.src,
+    className: opts.className || '',
+    id: opts.id || '',
+    alt: opts.alt || '',
+    clientWidth: opts.w != null ? opts.w : 0,
+    clientHeight: opts.h != null ? opts.h : 0,
+    complete: true,
+    naturalWidth: opts.w || 0,
+    attrs,
+    setAttribute(k, v) { attrs[k] = String(v); },
+    getAttribute(k) { return (k in attrs) ? attrs[k] : null; },
+    removeAttribute(k) { delete attrs[k]; },
+    hasAttribute(k) { return k in attrs; },
+    closest(sel) { return (opts.closestHint && String(sel).indexOf(opts.closestHint) !== -1) ? {} : null; },
+    matches(sel) { return opts.matches ? !!opts.matches(String(sel)) : false; },
+    addEventListener() {},
+    parentElement: opts.parentElement || null,
+  };
+  return stub;
+}
+const sameParentSibs = (self, n, w, h) => {
+  const kids = [self];
+  for (let i = 0; i < n; i++) kids.push({ tagName: 'IMG', clientWidth: w, clientHeight: h, children: [] });
+  return { tagName: 'DIV', className: 'list', id: '', children: kids, parentElement: null };
+};
+
+(async () => {
+  // 迁移单测 (7a) 种入 imageInvert=false —— 引擎管线测试需要图片反色开启
+  svi.prefs.imageInvert = true;
+
+  // 9d-1. forceInvert 首通即生效 (F3 顺序修复: 强制反色先于小元素门 —— v3.0 中 10px coremail 图
+  // 会在首个处理通道被 'tiny' 跳过, 滚动后的重处理通道才反色, 决策随通道翻转)
+  const srcA = 'https://mail.163.com/img/coremail/badge.png';
+  const imgA = makeImgStub({ src: srcA, w: 10, h: 10, matches: (sel) => sel.indexOf('coremail') !== -1 });
+  await engine.decideImage(imgA, srcA);
+  assert.strictEqual(engine.decisionBySrc.get(srcA).verdict, 'invert', 'forceInvert fires on the FIRST pass (F3 ordering fix)');
+  assert.strictEqual(engine.decisionBySrc.get(srcA).reason, 'seed-force', 'forceInvert reason recorded');
+  assert.strictEqual(imgA.attrs['data-svi-inverted'], 'true', '10px forceInvert img inverted despite tiny size');
+  assert.strictEqual(imgA.attrs['data-svi-checked-src'], srcA, 'data-svi-checked-src set only after a decision');
+
+  // 9d-2. decide-once / 快路径: 同 src 新元素同步继承决策, 绝不重算
+  const decisionA = engine.decisionBySrc.get(srcA);
+  const imgA2 = makeImgStub({ src: srcA, w: 10, h: 10, matches: (sel) => sel.indexOf('coremail') !== -1 });
+  await engine.decideImage(imgA2, srcA);
+  assert.strictEqual(imgA2.attrs['data-svi-inverted'], 'true', 'cached decision applied synchronously to a new element');
+  assert.strictEqual(engine.decisionBySrc.get(srcA), decisionA, 'decision object untouched (no re-analysis)');
+  assert.strictEqual(engine.cache.get(srcA), true, 'pixel-verdict cache carries seed-force conclusion');
+
+  // 9d-3. 小元素门照常生效 (非规则图)
+  const srcC = 'https://mail.163.com/static/tiny.png';
+  await engine.decideImage(makeImgStub({ src: srcC, w: 10, h: 10 }), srcC);
+  assert.strictEqual(engine.decisionBySrc.get(srcC).verdict, 'skip', 'tiny img skipped');
+  assert.strictEqual(engine.decisionBySrc.get(srcC).reason, 'tiny', 'tiny reason recorded');
+
+  // 9d-4. 策略门 (balanced): 同父 ≥4 同尺寸兄弟 → 封面网格跳过
+  const srcD = 'https://mail.163.com/static/cover-1.png';
+  const imgD = makeImgStub({ src: srcD, w: 100, h: 100 });
+  imgD.parentElement = sameParentSibs(imgD, 5, 100, 100);
+  await engine.decideImage(imgD, srcD);
+  assert.strictEqual(engine.decisionBySrc.get(srcD).verdict, 'skip', 'grid-repeated cover skipped in balanced mode');
+  assert.strictEqual(engine.decisionBySrc.get(srcD).reason, 'policy', 'policy reason recorded');
+
+  // 9d-5. 手动覆盖最高优先 (覆盖 > 全部门)
+  const srcE = 'https://mail.163.com/static/manual.png';
+  svi.prefs.manualOverrides['mail.163.com|' + srcE] = 'invert';
+  await engine.decideImage(makeImgStub({ src: srcE, w: 10, h: 10 }), srcE);
+  assert.strictEqual(engine.decisionBySrc.get(srcE).verdict, 'invert', 'manual override wins over tiny gate');
+  assert.strictEqual(engine.decisionBySrc.get(srcE).reason, 'manual', 'manual reason recorded');
+  delete svi.prefs.manualOverrides['mail.163.com|' + srcE];
+
+  // 9d-6. 保护选择器优先于强制反色 (种子层内部: protect > forceInvert)
+  const oldHost = global.location.hostname;
+  global.location.hostname = 'github.com';
+  const srcF = 'https://camo.githubusercontent.com/avatar-x.png';
+  await engine.decideImage(makeImgStub({
+    src: srcF, w: 40, h: 40,
+    matches: (sel) => sel.indexOf('avatar') !== -1 || sel.indexOf('markdown-body') !== -1 || sel.indexOf('camo') !== -1,
+  }), srcF);
+  assert.strictEqual(engine.decisionBySrc.get(srcF).verdict, 'keep', 'protect wins over forceInvert');
+  assert.strictEqual(engine.decisionBySrc.get(srcF).reason, 'protected', 'protected reason recorded');
+  global.location.hostname = oldHost;
+
+  // 9d-7. 分析失败有界重试 (R2): 60s TTL 内未决; 3 次后永久跳过 (记录原因)
+  const srcG = 'https://mail.163.com/static/fail.png';
+  const imgG = makeImgStub({ src: srcG, w: 300, h: 200 });
+  engine.markFailure(imgG, srcG);
+  engine.markFailure(imgG, srcG);
+  engine.markFailure(imgG, srcG);
+  assert.ok(imgG.attrs['data-svi-failed'], 'failure marker attr written');
+  await engine.decideImage(makeImgStub({ src: srcG, w: 300, h: 200 }), srcG);
+  assert.strictEqual(engine.decisionBySrc.has(srcG), false, 'recent failure within TTL stays undecided');
+  engine.failures.get(srcG).at = Date.now() - 61000; // 模拟 TTL 过期
+  await engine.decideImage(makeImgStub({ src: srcG, w: 300, h: 200 }), srcG);
+  assert.strictEqual(engine.decisionBySrc.get(srcG).verdict, 'skip', '3 strikes → permanent skip decision');
+  assert.strictEqual(engine.decisionBySrc.get(srcG).reason, 'analysis-failed', 'failure skip reason recorded');
+
+  // 9d-8. 确定性: 同一输入两次管线执行结果一致 (克隆桩, 跨执行同决策)
+  const runOnce = async () => {
+    const srcX = 'https://mail.163.com/static/cover-det.png';
+    const el = makeImgStub({ src: srcX, w: 120, h: 90 });
+    el.parentElement = sameParentSibs(el, 6, 120, 90);
+    const eng = new svi.ImageInvertEngine();
+    await eng.decideImage(el, srcX);
+    return eng.decisionBySrc.get(srcX).verdict + ':' + eng.decisionBySrc.get(srcX).reason;
+  };
+  const run1 = await runOnce();
+  const run2 = await runOnce();
+  assert.strictEqual(run1, run2, 'deterministic: two fresh pipeline runs produce identical results');
+
+  console.log('✓ v3.1 unit tests passed: imagePolicy defaults / passesImagePolicy matrix / countGridGroup boundary / decideImage ordering + decide-once + failure budget');
+})().catch((err) => {
+  console.error('v3.1 async unit tests failed:', err);
+  process.exit(1);
+});
 
 console.log('✓ v3.0 core unit tests passed: transformPixel / mergeSegments / lookupSegment / selectorStem / RuleLearner / Store / mediaDominantViewport / rect / hash32');
 

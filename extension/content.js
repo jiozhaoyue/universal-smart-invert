@@ -3,7 +3,7 @@
  * universal-smart-invert — browser extension content script
  * GENERATED FILE — DO NOT EDIT.
  * Built by scripts/build-extension.js from universal-smart-invert.user.js
- * Source version: 3.0.0
+ * Source version: 3.1.0
  *
  * Prelude contract (see scripts/build-extension.js header):
  *   - EXT_MODE (wrapper scope)   → core claims coexistence kind 'ext'
@@ -75,7 +75,7 @@
   // ==========================================
   // 1. 配置与常量定义
   // ==========================================
-  const SCRIPT_VERSION = '3.0.0';
+  const SCRIPT_VERSION = '3.1.0';
   const PREFS_KEY = 'universal_smart_invert_v4';   // v2.0 遗留偏好键 (迁移源, 迁移后原样保留以便回滚)
   const LEGACY_KEY = 'universal_smart_invert_v3';  // v1.x 旧键 (仅读取迁移, 保留不删以便回滚)
   const STATS_KEY = 'universal_smart_invert_stats_v1'; // v2.0 遗留统计键 (保留写入以兼容回滚)
@@ -192,6 +192,11 @@
     timelineMode: 'reference', // 时间线记忆模式: 'off' | 'reference'(参考预布防) | 'takeover'(接管)
     learnHits: 2,              // 自学习规则激活命中次数 (2 ~ 6)
     storeBackend: 'auto',      // 存储后端: 'auto' | 'local' (自动: chrome.sync → GM → localStorage)
+
+    // ===== v3.1 新增偏好 =====
+    imagePolicy: 'balanced',   // 图片反色策略 (R4): 'balanced'(默认) | 'conservative' | 'aggressive'(=v3.0 仅尺寸门)
+    hoverRestore: true,        // 悬停显示原图 (R5): false 时悬停已反色图片保持反色视图
+    eagerScanBudget: 80,       // eager 初始处理预算 (R1): 启动时已加载完成的图片不等待视口交叉, 最多处理 N 张
   };
 
   // 运行时状态 (仅存于内存, 每个标签页独立, 绝不写入存储 —— 标签页隔离)
@@ -850,6 +855,10 @@
     if (['off', 'reference', 'takeover'].indexOf(merged.timelineMode) === -1) merged.timelineMode = 'reference';
     merged.learnHits = Math.round(clampNumber(merged.learnHits, 2, 6, 2));
     if (merged.storeBackend !== 'local' && merged.storeBackend !== 'auto') merged.storeBackend = 'auto';
+    // v3.1 字段规范化
+    if (['balanced', 'conservative', 'aggressive'].indexOf(merged.imagePolicy) === -1) merged.imagePolicy = 'balanced';
+    merged.hoverRestore = merged.hoverRestore !== false;
+    merged.eagerScanBudget = Math.round(clampNumber(merged.eagerScanBudget, 10, 500, 80));
     // 标签页隔离: 运行时状态绝不入库
     delete merged.invertActive;
 
@@ -925,6 +934,8 @@
       document.documentElement.style.setProperty('--svi-img-filter', f);
       document.documentElement.style.setProperty('--svi-img-transition', t);
       document.documentElement.classList.toggle('svi-img-invert-on', imgOn);
+      // v3.1 R5: 悬停还原开关门类 (关闭后 :hover 还原规则不再命中, 悬停保持反色视图)
+      document.documentElement.classList.toggle('svi-hover-restore', state.hoverRestore !== false);
     }
     if (document.body) {
       document.body.classList.toggle('svi-img-invert-on', imgOn);
@@ -1773,30 +1784,31 @@
         pointer-events: none !important;
       }
 
-      /* 网页图片与矢量图智能反色规则 (v3.0 扩展: canvas / SVG image / input[type=image]) */
+      /* 网页图片与矢量图智能反色规则 (v3.0 扩展: canvas / SVG image / input[type=image];
+         v3.1: video[data-svi-inverted] 供当前页媒体面板手动反色使用) */
       html.svi-img-invert-on img[data-svi-inverted="true"],
       html.svi-img-invert-on svg[data-svi-inverted="true"],
       html.svi-img-invert-on canvas[data-svi-inverted="true"],
       html.svi-img-invert-on image[data-svi-inverted="true"],
       html.svi-img-invert-on input[type="image" i][data-svi-inverted="true"],
+      html.svi-img-invert-on video[data-svi-inverted="true"],
       body.svi-img-invert-on img[data-svi-inverted="true"],
       body.svi-img-invert-on svg[data-svi-inverted="true"],
       body.svi-img-invert-on canvas[data-svi-inverted="true"],
       body.svi-img-invert-on image[data-svi-inverted="true"],
-      body.svi-img-invert-on input[type="image" i][data-svi-inverted="true"] {
+      body.svi-img-invert-on input[type="image" i][data-svi-inverted="true"],
+      body.svi-img-invert-on video[data-svi-inverted="true"] {
         filter: var(--svi-img-filter, invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.90)) !important;
         transition: var(--svi-img-transition, none) !important;
       }
-      html.svi-img-invert-on img[data-svi-inverted="true"]:hover,
-      html.svi-img-invert-on svg[data-svi-inverted="true"]:hover,
-      html.svi-img-invert-on canvas[data-svi-inverted="true"]:hover,
-      html.svi-img-invert-on image[data-svi-inverted="true"]:hover,
-      html.svi-img-invert-on input[type="image" i][data-svi-inverted="true"]:hover,
-      body.svi-img-invert-on img[data-svi-inverted="true"]:hover,
-      body.svi-img-invert-on svg[data-svi-inverted="true"]:hover,
-      body.svi-img-invert-on canvas[data-svi-inverted="true"]:hover,
-      body.svi-img-invert-on image[data-svi-inverted="true"]:hover,
-      body.svi-img-invert-on input[type="image" i][data-svi-inverted="true"]:hover {
+      /* v3.1 R5: 悬停还原规则统一门控在 html.svi-hover-restore 之下 (默认开启;
+         关闭悬停显示原图后规则不命中, 悬停保持反色视图) */
+      html.svi-hover-restore img[data-svi-inverted="true"]:hover,
+      html.svi-hover-restore svg[data-svi-inverted="true"]:hover,
+      html.svi-hover-restore canvas[data-svi-inverted="true"]:hover,
+      html.svi-hover-restore image[data-svi-inverted="true"]:hover,
+      html.svi-hover-restore input[type="image" i][data-svi-inverted="true"]:hover,
+      html.svi-hover-restore video[data-svi-inverted="true"]:hover {
         filter: none !important;
       }
 
@@ -1806,8 +1818,7 @@
         filter: var(--svi-img-filter, invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.90)) !important;
         transition: var(--svi-img-transition, none) !important;
       }
-      html.svi-img-invert-on [data-svi-bginv="true"]:hover,
-      body.svi-img-invert-on [data-svi-bginv="true"]:hover {
+      html.svi-hover-restore [data-svi-bginv="true"]:hover {
         filter: none !important;
       }
 
@@ -2254,15 +2265,15 @@
          ========================================== */
 
       /* 图片部分反色投递: content:url 替换渲染 (不改 src, 不破坏懒加载);
-         悬停还原 (:hover + JS 类双通道), Alt+点击数据开关 */
+         悬停还原 (:hover + JS 类双通道, v3.1 门控于 html.svi-hover-restore), Alt+点击数据开关 */
       img[data-svi-fx] {
         cursor: crosshair;
       }
       img[data-svi-fx][data-svi-fx-off] {
         content: normal !important;
       }
-      img[data-svi-fx]:hover,
-      img[data-svi-fx].svi-fx-hover {
+      html.svi-hover-restore img[data-svi-fx]:hover,
+      html.svi-hover-restore img[data-svi-fx].svi-fx-hover {
         content: unset !important;
       }
 
@@ -2383,6 +2394,67 @@
         background: rgba(56, 189, 248, 0.12);
         color: #38bdf8;
         border: 1px solid rgba(56, 189, 248, 0.3);
+      }
+
+      /* ==========================================
+         v3.1 新增样式: 当前页媒体面板 / 定位高亮闪烁
+         ========================================== */
+      .svi-media-row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 0;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        font-size: 11px;
+        color: #cbd5e1;
+      }
+      .svi-media-type {
+        flex-shrink: 0;
+        width: 46px;
+        color: #7dd3fc;
+        font-family: monospace;
+        font-size: 10px;
+      }
+      .svi-media-meta {
+        flex: 1;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-family: monospace;
+        font-size: 10px;
+        opacity: 0.85;
+      }
+      .svi-media-state {
+        flex-shrink: 0;
+        font-size: 10px;
+        padding: 1px 6px;
+        border-radius: 6px;
+        background: rgba(255, 255, 255, 0.07);
+        color: #94a3b8;
+        white-space: nowrap;
+      }
+      .svi-media-state.inverted {
+        background: rgba(16, 185, 129, 0.15);
+        color: #34d399;
+      }
+      .svi-media-state.skipped {
+        background: rgba(245, 158, 11, 0.12);
+        color: #fbbf24;
+      }
+      .svi-media-actions {
+        flex-shrink: 0;
+        display: flex;
+        gap: 4px;
+      }
+      .svi-media-actions .svi-mini-btn {
+        font-size: 10px;
+        padding: 2px 7px;
+      }
+      /* 定位高亮: scrollIntoView 后 1.2s 描边闪烁 (仅 outline/box-shadow, 绝不改布局) */
+      .svi-locate-flash {
+        outline: 3px solid #38bdf8 !important;
+        outline-offset: 1px !important;
+        box-shadow: 0 0 0 4px rgba(56, 189, 248, 0.35) !important;
       }
     `;
 
@@ -3453,6 +3525,11 @@
     try { isContent = !!(img.closest && img.closest(CONTENT_CONTEXT_SELECTOR)); } catch (e) { /* ignore */ }
     try { isChrome = !!(img.closest && img.closest(CHROME_CONTEXT_SELECTOR)); } catch (e) { /* ignore */ }
 
+    // v3.1 R4: 策略门所需的扩展上下文 (每次决策对当前 DOM 快照计算一次, 与决策一同缓存,
+    // 后续 DOM 变化绝不翻转已定决策 —— F3 修复的核心约束)
+    const extChrome = detectChromeContext(img);
+    const gridSiblings = detectGridSiblings(img);
+
     return {
       w: w || 0,
       h: h || 0,
@@ -3461,8 +3538,114 @@
       isContentContext: isContent,
       isChromeContext: isChrome,
       minImgSize: state.minImgSize || 48,
+      // v3.1 扩展字段 (passesImagePolicy 输入)
+      maxDim: Math.max(w || 0, h || 0),
+      contentContext: isContent,
+      chromeContext: isChrome || extChrome,
+      gridSiblings,
+      policy: state.imagePolicy || 'balanced',
     };
   }
+
+  // —— v3.1 R4: 智能图片策略 (纯函数, 导出 window.__svi 供单测) ——
+  // 输入 info: { maxDim, contentContext, chromeContext, gridSiblings, policy }
+  // - aggressive  : v3.0 行为 (仅 classifySmallElement 尺寸门, 策略恒通过)
+  // - conservative: 正文上下文 OR maxDim ≥ 200
+  // - balanced    : 正文上下文 OR (maxDim ≥ 96 且非网格重复 且非页面骨架上下文)
+  function passesImagePolicy(info) {
+    const policy = (info && info.policy) || 'balanced';
+    if (policy === 'aggressive') return true;
+    if (info.contentContext) return true;
+    const maxDim = Math.max((info.maxDim | 0), 0);
+    if (policy === 'conservative') return maxDim >= 200;
+    // balanced
+    if (maxDim < 96) return false;
+    if ((info.gridSiblings | 0) >= 4) return false;
+    if (info.chromeContext) return false;
+    return true;
+  }
+
+  // 网格分组计数 (纯函数, 导出单测): 同父容器内同标签且尺寸 ±8px 的元素分组计数 (含自身);
+  // siblings: [{ w, h, tag }] —— ownTag 与 w/h 由 DOM 包装层 (detectGridSiblings) 提供
+  function countGridGroup(ownW, ownH, ownTag, siblings) {
+    if (!ownW || !ownH) return 0;
+    let count = 1;
+    const list = Array.isArray(siblings) ? siblings : [];
+    for (const s of list) {
+      if (!s || s.tag !== ownTag) continue;
+      const w = s.w | 0;
+      const h = s.h | 0;
+      if (!w || !h) continue;
+      if (Math.abs(w - ownW) <= 8 && Math.abs(h - ownH) <= 8) count++;
+    }
+    return count;
+  }
+
+  // 网格重复检测 (DOM 包装): 同一父容器内同标签同尺寸兄弟 ≥4 → 网格贴图
+  // (设计 §4 字面语义: 仅统计同父同级; 卡片结构 (a>img 封面) 由 chrome-context 启发式覆盖)
+  function detectGridSiblings(el) {
+    try {
+      if (!el || !el.parentElement) return 0;
+      const size = mediaClientSize(el);
+      if (!size[0] || !size[1]) return 0;
+      const tag = String(el.tagName || '').toUpperCase();
+      let count = 1;
+      const kids = el.parentElement.children || [];
+      for (const sib of kids) {
+        if (!sib || sib === el) continue;
+        if (String(sib.tagName || '').toUpperCase() !== tag) continue;
+        const s = mediaClientSize(sib);
+        if (s[0] && s[1] && Math.abs(s[0] - size[0]) <= 8 && Math.abs(s[1] - size[1]) <= 8) count++;
+      }
+      return count;
+    } catch (e) {
+      return 0;
+    }
+  }
+
+  // chrome-context 扩展检测 (v3.1, 不用 :has): 基础骨架选择器之外,
+  // 追加 卡片/封面类名提示 ([class*="card"]/["cover"]) 与 单图链接锚 (a 仅包裹一张媒体图) 模式;
+  // 仅作用于策略门 (classifySmallElement 的 chrome-small 判定维持 v3.0 基础选择器语义, 零回归)
+  function detectChromeContext(el) {
+    try { if (el.closest && el.closest(CHROME_CONTEXT_SELECTOR)) return true; } catch (e) { /* ignore */ }
+    try {
+      let node = el.parentElement;
+      let hops = 0;
+      while (node && node !== document.body && node !== document.documentElement && hops < 6) {
+        hops++;
+        const cls = (typeof node.className === 'string')
+          ? node.className
+          : (node.className && node.className.baseVal !== undefined ? node.className.baseVal : '');
+        const hint = String(cls || '') + ' ' + String(node.id || '');
+        if (/card|cover/i.test(hint)) return true;
+        if (node.tagName && String(node.tagName).toUpperCase() === 'A') {
+          let mediaCount = 0;
+          let childCount = 0;
+          const kids = node.children || [];
+          childCount = kids.length;
+          for (const k of kids) {
+            const t = String((k && k.tagName) || '').toUpperCase();
+            if (t === 'IMG' || t === 'SVG' || t === 'IMAGE' || t === 'CANVAS' || t === 'VIDEO' || t === 'PICTURE' || t === 'SOURCE') mediaCount++;
+          }
+          if (childCount === 1 && mediaCount === 1) return true; // a > img:only-child 封面链接
+        }
+        node = node.parentElement;
+      }
+    } catch (e) { /* ignore */ }
+    return false;
+  }
+
+  // 跳过原因中文映射 (当前页媒体面板展示用)
+  const SKIP_REASON_ZH = {
+    'meta-icon': '头像/图标',
+    'repeated-small': '重复小图',
+    'chrome-small': '页面骨架小图',
+    'tiny': '尺寸过小',
+    'below-min': '低于最小尺寸',
+    'favicon': 'favicon',
+    'policy': '策略跳过',
+    'analysis-failed': '分析失败',
+  };
 
   // 合并站点级原色屏蔽后的求值偏好快照
   function getEvalPrefs() {
@@ -3725,17 +3908,28 @@
   // ==========================================
   // 15. 网页图片与矢量图智能反色引擎 (ImageInvertEngine)
   //     v3.0: 学习规则优先级注入 + 媒体全覆盖 (SVG image / input[type=image] / Shadow DOM)
+  //     v3.1: 统一决策管线 decideImage (R1/R2) —— 所有处理入口 (IO / 变更 flush / eager / 重扫)
+  //           一律经同一管线; decide-once 语义: 同一 src 的最终决策只算一次并缓存
+  //           (decisionBySrc), 任何入口绝不重算已决 src, 仅 clearCacheAndRescan 显式重置
+  //           (修复 F3: 同图在不同处理通道间决策翻转)。失败分析有界重试 (≤3 次 / 60s TTL)。
+  //         eager 初始处理 (R1): 启动时已加载完成的图片不等待视口交叉, 预算内立即决策;
+  //         变更快路径 (R6): 新增/变更媒体命中决策缓存 → 同步应用 (放大镜类插件覆盖层即时反色)
   // ==========================================
   class ImageInvertEngine {
     constructor() {
       this.observer = null;
-      this.cache = new Map();
+      this.cache = new Map();          // src → isLight (像素分析结论, 最终决策)
+      this.decisionBySrc = new Map();  // src → { verdict: 'invert'|'keep'|'skip', reason, at } (v3.1 决策快照)
+      this.failures = new Map();       // src → { at, count } (分析失败有界重试: ≤3 次 / 60s TTL)
+      this.inflightSrcs = new Map();   // src → Promise (in-flight 分析去重: 并发入口共享一次分析)
       this.maxCacheSize = 1000;
+      this.maxDecisionSize = 2000;
       this.srcCount = new Map();      // 同 src 重复计数 (小元素重复判定), 上限 500
       this.pendingMutNodes = new Set();
       this.mutTimer = null;
       // v3.0: 覆盖 img + svg + 内联 SVG image + input[type=image]
       this.MEDIA_SELECTOR = 'img, svg, image, input[type="image" i]';
+      this._eagerTimers = [];
       this.init();
       this.bindManualToggle();
       window.__svi_image_engine = this;
@@ -3770,6 +3964,13 @@
       }, { rootMargin: '300px' });
 
       this.scanAll();
+      // v3.1 R1: eager 初始处理 (预算内立即决策已加载完成的图片, 先于 IO 懒加载尾部);
+      // 启动后延迟补扫多轮, 覆盖引擎启动后才完成加载的图片 (GitHub README 慢网场景),
+      // decide-once 保证重复执行近零成本
+      this.runEagerPass();
+      this._eagerTimers.push(setTimeout(() => this.runEagerPass(), 2500));
+      this._eagerTimers.push(setTimeout(() => this.runEagerPass(), 6000));
+      this._eagerTimers.push(setTimeout(() => this.runEagerPass(), 12000));
 
       const mo = new MutationObserver((mutations) => {
         // 变更记录先合并去重, ≤100ms 后批量处理 (性能: 避免高频 DOM 抖动逐条扫描)
@@ -3801,6 +4002,49 @@
       });
     }
 
+    // v3.1 R1: eager 初始处理 —— 遍历已加载完成 (complete 且有自然尺寸) 的媒体,
+    // 预算 state.eagerScanBudget (默认 80) 内立即进入统一决策管线;
+    // 首屏 README 无需滚动即反色 (F2 修复)。已决元素早退, 重复执行近零成本。
+    runEagerPass() {
+      if (document.hidden) return;
+      const root = document.body || document.documentElement;
+      if (!root || !root.querySelectorAll) return;
+      const budget = Math.max(1, Math.round(Number(state.eagerScanBudget) || 80));
+      const scanCap = budget * 6;
+      let used = 0;
+      let scanned = 0;
+      const self = this;
+      const visit = (el) => {
+        if (used >= budget || scanned >= scanCap) return;
+        scanned++;
+        const src = getMediaSrc(el);
+        if (!src) return;
+        try {
+          if (el.getAttribute && el.getAttribute('data-svi-checked-src') === src) return; // 已决: 不占预算
+        } catch (e) { return; }
+        let loaded = true;
+        const tag = el.tagName ? String(el.tagName).toLowerCase() : '';
+        if (tag === 'img') {
+          loaded = !!el.complete && (el.naturalWidth > 0);
+        } else if (typeof el.complete === 'boolean') {
+          loaded = el.complete;
+        }
+        if (!loaded) return;
+        used++;
+        self.processImage(el);
+      };
+      try {
+        root.querySelectorAll('img, image, input[type="image" i]').forEach(visit);
+      } catch (e) { /* ignore */ }
+      // Shadow DOM 有界补充 (≤20 根)
+      if (used < budget) {
+        ShadowDomRegistry.forEachRoot((sr) => {
+          if (used >= budget) return;
+          try { sr.querySelectorAll('img, image, input[type="image" i]').forEach(visit); } catch (e) { /* ignore */ }
+        });
+      }
+    }
+
     flushMutations() {
       if (document.hidden) {
         // 页面隐藏时挂起, 稍后重试
@@ -3809,17 +4053,49 @@
       }
       const nodes = Array.from(this.pendingMutNodes);
       this.pendingMutNodes.clear();
+      let fastApplied = 0;
+      const self = this;
+      // v3.1 R6 变更快路径: 新增/变更媒体命中决策缓存 → 同步应用 (不入队、不重算),
+      // 放大镜/看图类插件动态插入的覆盖层媒体即时反色
+      const handle = (el) => {
+        const src = getMediaSrc(el);
+        if (!src) { self.observe(el); return; }
+        try {
+          if (el.getAttribute && el.getAttribute('data-svi-checked-src') === src) return; // 本元素已决
+        } catch (e) { /* ignore */ }
+        const known = self.decisionBySrc.get(src);
+        if (known && fastApplied < 200) {
+          fastApplied++;
+          self.applyDecision(el, src, known);
+          return;
+        }
+        self.observe(el);
+      };
       for (const node of nodes) {
         const tag = node.tagName ? String(node.tagName).toLowerCase() : '';
         if (tag === 'img' || tag === 'svg' || tag === 'image' || tag === 'input') {
-          this.observe(node);
+          handle(node);
+          this.collectShadowMediaUnder(node, handle);
         } else if (node.querySelectorAll) {
           try {
-            node.querySelectorAll(this.MEDIA_SELECTOR).forEach((el) => this.observe(el));
+            node.querySelectorAll(this.MEDIA_SELECTOR).forEach(handle);
+            this.collectShadowMediaUnder(node, handle);
           } catch (e) { /* ignore */ }
         }
       }
       this.refreshSrcCounts();
+    }
+
+    // v3.1 R6: 追加节点的宿主若携带已注册 Shadow Root (含闭合根), 其内部媒体一并纳入处理
+    collectShadowMediaUnder(node, cb) {
+      ShadowDomRegistry.forEachRoot((sr) => {
+        try {
+          const host = sr.host;
+          if (host && (host === node || (node.contains && node.contains(host)))) {
+            sr.querySelectorAll(this.MEDIA_SELECTOR).forEach(cb);
+          }
+        } catch (e) { /* ignore */ }
+      });
     }
 
     // 同 src 重复计数: 每次全量重算 (不可累加, 否则动态页面多次刷新后计数虚高,
@@ -3864,6 +4140,8 @@
 
     clearCacheAndRescan() {
       this.cache.clear();
+      this.decisionBySrc.clear();
+      this.failures.clear();
       const bg = window.__svi && window.__svi.engines ? window.__svi.engines.bgImage : null;
       if (bg && bg.cache) bg.cache.clear();
       const root = document.body || document.documentElement;
@@ -3876,6 +4154,7 @@
         });
       } catch (e) { /* ignore */ }
       this.scanAll();
+      this.runEagerPass();
     }
 
     observe(el) {
@@ -3888,43 +4167,94 @@
       this.observer.observe(el);
     }
 
+    // v3.1 R6: Alt+点击目标解析 —— composedPath 优先 (穿透 Shadow DOM, 含开/闭合根:
+    // 文档级监听的 composedPath 对开/闭合根一律重定向到 host, 内部节点不可见,
+    // 故统一经 ShadowDomRegistry 注册表按 host 解析根内媒体), 兜底回退 closest
+    resolveMediaFromEvent(e) {
+      let target = null;
+      let path = null;
+      try { path = (typeof e.composedPath === 'function') ? e.composedPath() : null; } catch (err) { path = null; }
+      if (path && path.length) {
+        for (const n of path) {
+          if (!n || n.nodeType !== 1) continue;
+          const tag = n.tagName ? String(n.tagName).toLowerCase() : '';
+          const isMedia = tag === 'img' || tag === 'svg' || tag === 'canvas' || tag === 'video'
+            || tag === 'image'
+            || (tag === 'input' && String(n.getAttribute('type') || '').toLowerCase() === 'image')
+            || (n.hasAttribute && n.hasAttribute('data-svi-bginv'));
+          if (isMedia) { target = n; break; }
+        }
+      }
+      // Shadow Root (开/闭合): composedPath 在文档级监听下重定向到 host → 经注册表解析根内媒体
+      if (!target && path && path.length) {
+        for (const n of path) {
+          if (!n || n.nodeType !== 1) continue;
+          ShadowDomRegistry.forEachRoot((sr) => {
+            if (target || !sr || sr.host !== n) return;
+            try {
+              const media = sr.querySelectorAll('img, svg, canvas, video, image, input[type="image" i], [data-svi-bginv]');
+              for (const m of media) { target = m; break; }
+            } catch (err) { /* ignore */ }
+          });
+          if (target) break;
+        }
+      }
+      if (!target) {
+        try { target = e.target && e.target.closest ? e.target.closest(this.MEDIA_SELECTOR) : null; } catch (err) { target = null; }
+      }
+      return target;
+    }
+
+    // v3.1: Alt+点击核心抽取 (当前页媒体面板"反色/复原"复用同一覆盖路径);
+    // 覆盖即决策: 同步刷新决策快照, 后续新增元素经快路径立即继承手动决策
+    toggleMediaOverride(target) {
+      if (!target) return false;
+      try {
+        // v3.0: 特效投递中的图片 Alt+点击 = 单图 kill switch (还原原始渲染)
+        if (target.getAttribute('data-svi-fx')) {
+          const off = target.getAttribute('data-svi-fx-off') === 'true';
+          if (off) {
+            target.removeAttribute('data-svi-fx-off');
+            showToast('已恢复特效 (Alt+点击)');
+          } else {
+            target.setAttribute('data-svi-fx-off', 'true');
+            showToast('已还原原图 (Alt+点击)');
+          }
+          return true;
+        }
+        const isCurrentlyInverted = target.getAttribute('data-svi-inverted') === 'true';
+        if (isCurrentlyInverted) {
+          target.removeAttribute('data-svi-inverted');
+          showToast('已恢复原色 (Alt+点击)');
+        } else {
+          target.setAttribute('data-svi-inverted', 'true');
+          showToast('已手动反色 (Alt+点击)');
+        }
+        // 持久化手动覆盖记忆 (host|src → 决策), 下次访问自动应用
+        const src = getMediaSrc(target);
+        if (src) {
+          addManualOverride(state.manualOverrides, manualOverrideKey(profileKey(), src), isCurrentlyInverted ? 'restore' : 'invert', 400);
+          savePrefs();
+          // v3.1: 决策快照强制刷新 (手动覆盖最高优先; 后续新增同 src 元素经快路径立即继承手动决策)
+          this.recordDecision(src, isCurrentlyInverted ? 'keep' : 'invert', 'manual', true);
+        }
+        // v3.0: 自学习规则累积 (tag+#id+首类 词干聚合, 命中 ≥ learnHits 自动生效)
+        try {
+          ruleLearner.record(profileKey(), target, isCurrentlyInverted ? 'protect' : 'invert');
+        } catch (err) { /* ignore */ }
+        return true;
+      } catch (e) { /* ignore */ }
+      return false;
+    }
+
     bindManualToggle() {
       document.addEventListener('click', (e) => {
         if (e.altKey) {
-          const target = e.target.closest(this.MEDIA_SELECTOR);
+          const target = this.resolveMediaFromEvent(e);
           if (target) {
             e.preventDefault();
             e.stopPropagation();
-            // v3.0: 特效投递中的图片 Alt+点击 = 单图 kill switch (还原原始渲染)
-            if (target.getAttribute('data-svi-fx')) {
-              const off = target.getAttribute('data-svi-fx-off') === 'true';
-              if (off) {
-                target.removeAttribute('data-svi-fx-off');
-                showToast('已恢复特效 (Alt+点击)');
-              } else {
-                target.setAttribute('data-svi-fx-off', 'true');
-                showToast('已还原原图 (Alt+点击)');
-              }
-              return;
-            }
-            const isCurrentlyInverted = target.getAttribute('data-svi-inverted') === 'true';
-            if (isCurrentlyInverted) {
-              target.removeAttribute('data-svi-inverted');
-              showToast('已恢复原色 (Alt+点击)');
-            } else {
-              target.setAttribute('data-svi-inverted', 'true');
-              showToast('已手动反色 (Alt+点击)');
-            }
-            // 持久化手动覆盖记忆 (host|src → 决策), 下次访问自动应用
-            const src = getMediaSrc(target);
-            if (src) {
-              addManualOverride(state.manualOverrides, manualOverrideKey(profileKey(), src), isCurrentlyInverted ? 'restore' : 'invert', 400);
-              savePrefs();
-            }
-            // v3.0: 自学习规则累积 (tag+#id+首类 词干聚合, 命中 ≥ learnHits 自动生效)
-            try {
-              ruleLearner.record(profileKey(), target, isCurrentlyInverted ? 'protect' : 'invert');
-            } catch (err) { /* ignore */ }
+            this.toggleMediaOverride(target);
           }
         }
       }, true);
@@ -3986,103 +4316,200 @@
       }
     }
 
-    async processImage(img) {
-      const src = getMediaSrc(img);
+    // —— v3.1 决策快照与落点 ——
+
+    // 记录最终决策 (decide-once): 同一 src 只允许记录一次;
+    // 后续任何入口命中快照即同步应用, 绝不重算 (F3 根因修复)。
+    // 例外: force=true (手动覆盖是最高优先级决策源, 必须刷新既有快照,
+    // 否则变更快路径会用旧决策覆盖用户显式选择)
+    recordDecision(src, verdict, reason, force) {
+      if (!force && this.decisionBySrc.has(src)) return this.decisionBySrc.get(src);
+      if (this.decisionBySrc.size >= this.maxDecisionSize) {
+        this.decisionBySrc.delete(this.decisionBySrc.keys().next().value);
+      }
+      const d = { verdict, reason: reason || '', at: Date.now() };
+      this.decisionBySrc.set(src, d);
+      return d;
+    }
+
+    // 决策落点: 唯一允许写 data-svi-checked-src 的位置 (决策达成之后), 同时清除失败标记
+    applyDecision(el, src, d) {
+      try {
+        el.setAttribute('data-svi-checked-src', src);
+        el.removeAttribute('data-svi-failed');
+      } catch (e) { /* ignore */ }
+      this.finalizeInvert(el, src, d.verdict === 'invert');
+    }
+
+    // 分析失败登记: 60s TTL 内不重试; 累计 3 次后由 decideImage 落为永久跳过决策
+    markFailure(img, src) {
+      const prev = this.failures.get(src) || { at: 0, count: 0 };
+      prev.count += 1;
+      prev.at = Date.now();
+      this.failures.set(src, prev);
+      try { img.setAttribute('data-svi-failed', String(prev.at)); } catch (e) { /* ignore */ }
+    }
+
+    // ==========================================
+    // v3.1 统一决策管线 (R1/R2/R4) —— 唯一决策函数, 全部处理入口共用。
+    // 优先级: 手动覆盖 > 学习规则 > 种子保护/强制反色 > 小元素门 + 策略门 > 像素分析。
+    // decide-once: 决策一经达成即冻结 (decisionBySrc), 仅 clearCacheAndRescan 显式重置。
+    // ==========================================
+    async decideImage(img, src) {
       if (!src) return;
-
-      if (img.getAttribute('data-svi-checked-src') === src) return;
-
-      // 失败 TTL 标记: 60s 内不重复尝试 (网络失败优雅降级)
-      const failedTs = parseInt(img.getAttribute('data-svi-failed') || '0', 10);
-      if (failedTs && Date.now() - failedTs < 60000) return;
-
       const profile = getSiteProfile();
       if (state.imageInvert === false || profile.enabled === false || profile.imageInvert === false) return;
 
-      // 1. 手动覆盖记忆最高优先 (Alt+点击 的持久化决策)
+      // —— decide-once: 本元素该 src 已决 → 直接返回 ——
+      try {
+        if (img.getAttribute && img.getAttribute('data-svi-checked-src') === src) return;
+      } catch (e) { /* ignore */ }
+
+      // 1. 手动覆盖记忆最高优先 (Alt+点击 的持久化决策) —— 刻意先于决策快照:
+      //    上一会话/他元素写入的覆盖必须压过本会话已落的快照决策 (设计管线第 1 步)
       const ov = state.manualOverrides[manualOverrideKey(profileKey(), src)];
-      if (ov === 'invert' || ov === 'restore') {
-        img.setAttribute('data-svi-checked-src', src);
-        this.finalizeInvert(img, src, ov === 'invert');
+      if (ov === 'invert') {
+        this.applyDecision(img, src, this.recordDecision(src, 'invert', 'manual', true));
+        return;
+      }
+      if (ov === 'restore') {
+        this.applyDecision(img, src, this.recordDecision(src, 'keep', 'manual', true));
         return;
       }
 
-      // 1.5 自学习规则 (tag+#id+首类 词干聚合, 命中 ≥ learnHits 生效; 优先于内置种子规则)
+      // —— 全局决策快照命中: 同步应用 (同 src 新元素/换源元素绝不重算, F3 修复核心) ——
+      const known = this.decisionBySrc.get(src);
+      if (known) {
+        this.applyDecision(img, src, known);
+        return;
+      }
+
+      // 2. 自学习规则 (tag+#id+首类 词干聚合, 命中 ≥ learnHits 生效; 优先于内置种子规则)
       const learned = ruleLearner.decideFor(profileKey(), img);
       if (learned === 'invert') {
-        img.setAttribute('data-svi-checked-src', src);
-        this.finalizeInvert(img, src, true);
+        this.applyDecision(img, src, this.recordDecision(src, 'invert', 'learned'));
         return;
       }
       if (learned === 'protect') {
-        img.setAttribute('data-svi-checked-src', src);
-        img.removeAttribute('data-svi-inverted');
+        this.applyDecision(img, src, this.recordDecision(src, 'keep', 'learned'));
         return;
       }
 
-      // 2. 站点规则保护选择器 (头像/图标/播放器内部等永不反色)
+      // 3. 种子规则: 保护选择器 (头像/图标/播放器内部等永不反色)
       if (safeMatches(img, profile.protect)) {
-        img.setAttribute('data-svi-checked-src', src);
+        this.applyDecision(img, src, this.recordDecision(src, 'keep', 'protected'));
         return;
       }
 
-      // 3. favicon 类直接跳过
+      // favicon 类直接跳过 (v3.1 修复: 旧正则含转义反斜杠, 恒不匹配)
       if (/\.(ico|cur)(\?.*)?$/i.test(src)) {
-        img.setAttribute('data-svi-checked-src', src);
+        this.applyDecision(img, src, this.recordDecision(src, 'skip', 'favicon'));
         return;
       }
 
-      // 4. 智能小元素屏蔽 (p0: 图标/徽章/重复贴图永不自动反色)
-      const verdict = classifySmallElement(buildClassifyInfo(img, this.srcCount));
-      if (verdict.skip) {
-        img.setAttribute('data-svi-checked-src', src);
-        return;
-      }
-
-      // 5. 站点规则强制反色选择器 (GitHub markdown/camo 等)
+      // 4. 种子强制反色选择器 (GitHub markdown/camo 等) —— v3.1 顺序修复 (F3):
+      //    强制反色先于小元素/策略门, 首个处理通道 (含 eager 首扫) 即生效,
+      //    同一图片在任何通道得到同一决策, 不再随处理轮次翻转
       if (safeMatches(img, profile.forceInvert)) {
-        img.setAttribute('data-svi-checked-src', src);
         if (this.cache.size >= this.maxCacheSize) {
           this.cache.delete(this.cache.keys().next().value);
         }
         this.cache.set(src, true);
-        this.finalizeInvert(img, src, true);
+        this.applyDecision(img, src, this.recordDecision(src, 'invert', 'seed-force'));
         return;
       }
 
-      const runCheck = async () => {
-        if (img.getAttribute('data-svi-checked-src') === src) return;
-        img.setAttribute('data-svi-checked-src', src);
+      // 5. 智能小元素门 (p0: 图标/徽章/重复贴图永不自动反色)
+      const info = buildClassifyInfo(img, this.srcCount);
+      const verdict = classifySmallElement(info);
+      if (verdict.skip) {
+        this.applyDecision(img, src, this.recordDecision(src, 'skip', verdict.reason));
+        return;
+      }
 
-        if (this.cache.has(src)) {
-          this.finalizeInvert(img, src, this.cache.get(src));
+      // 6. 图片策略门 (R4: balanced 默认 —— 正文/大图反色, 封面网格与页面骨架跳过)
+      if (!passesImagePolicy(info)) {
+        this.applyDecision(img, src, this.recordDecision(src, 'skip', 'policy'));
+        return;
+      }
+
+      // 7. 分析失败有界重试 (R2): 60s TTL 内静默 (未决); 累计 ≥3 次 → 永久跳过决策。
+      //    位置刻意晚于全部确定性门 (覆盖/学习/种子/小元素/策略), 绝不阻塞更优先的决策来源
+      const fail = this.failures.get(src);
+      if (fail) {
+        if (Date.now() - fail.at < 60000) return;
+        if (fail.count >= 3) {
+          StatsManager.count('imageAnalysisFailures');
+          this.applyDecision(img, src, this.recordDecision(src, 'skip', 'analysis-failed'));
           return;
         }
+      }
 
-        const r = await analyzeSrc(src, img, getEvalPrefs());
-        if (!r.ok) {
-          // 网络或格式异常: 不设 checked-src (视为未决), 记录失败 TTL 防抖
-          img.removeAttribute('data-svi-checked-src');
-          img.setAttribute('data-svi-failed', String(Date.now()));
-          return;
+      // 8. 像素分析 (结论缓存命中 → 直接落决策, 不再重算; in-flight 去重: 同 src
+      //    并发入口共享一次分析 —— eager/IO/补扫同时触达同一图片时绝不重复解码)
+      if (this.cache.has(src)) {
+        const isLight = this.cache.get(src);
+        this.applyDecision(img, src, this.recordDecision(src, isLight ? 'invert' : 'keep', 'pixel'));
+        return;
+      }
+
+      let r;
+      const inflightJob = this.inflightSrcs.get(src);
+      if (inflightJob) {
+        r = await inflightJob;
+      } else {
+        const job = analyzeSrc(src, img, getEvalPrefs());
+        this.inflightSrcs.set(src, job);
+        try {
+          r = await job;
+        } finally {
+          this.inflightSrcs.delete(src);
         }
+      }
+      // 解码期间元素被移除/换源: 本次结果作废 (下次入口按新 src 重新进入管线)
+      try {
+        if (getMediaSrc(img) !== src) return;
+      } catch (e) { /* ignore */ }
+      if (!r || !r.ok) {
+        // 网络或格式异常: 不落决策 (未决), 记录失败 TTL 防抖 (≤3 次, 之后永久跳过)
+        this.markFailure(img, src);
+        return;
+      }
 
-        if (this.cache.size >= this.maxCacheSize) {
-          this.cache.delete(this.cache.keys().next().value);
-        }
-        this.cache.set(src, r.isLight);
-        StatsManager.count('imagesAnalyzed');
+      if (this.cache.size >= this.maxCacheSize) {
+        this.cache.delete(this.cache.keys().next().value);
+      }
+      this.cache.set(src, r.isLight);
+      StatsManager.count('imagesAnalyzed');
 
-        this.finalizeInvert(img, src, r.isLight);
-      };
+      this.applyDecision(img, src, this.recordDecision(src, r.isLight ? 'invert' : 'keep', 'pixel'));
+    }
+
+    // 处理入口 (IO / eager / 变更 flush 共用): 就绪判定 + 晚加载 load 事件驱动 (有界, 无悬挂状态)
+    async processImage(img) {
+      const src = getMediaSrc(img);
+      if (!src) return;
+
+      try {
+        if (img.getAttribute && img.getAttribute('data-svi-checked-src') === src) return;
+      } catch (e) { /* ignore */ }
+
+      const profile = getSiteProfile();
+      if (state.imageInvert === false || profile.enabled === false || profile.imageInvert === false) return;
 
       const ready = (img.complete !== undefined)
         ? (img.complete && (img.naturalWidth > 0 || !img.getAttribute('src')))
         : true;
-      if (ready) {
-        await runCheck();
+      if (ready || typeof img.addEventListener !== 'function') {
+        await this.decideImage(img, src);
       } else {
-        img.addEventListener('load', () => runCheck(), { once: true });
+        // 晚加载: load 驱动决策; error 登记失败 (有界重试), 均为一次性监听, 无悬挂状态
+        img.addEventListener('load', () => {
+          this.decideImage(img, getMediaSrc(img));
+        }, { once: true });
+        img.addEventListener('error', () => {
+          this.markFailure(img, src);
+        }, { once: true });
       }
     }
   }
@@ -4323,11 +4750,14 @@
     }
 
     // 悬停还原: 委托 mouseover/mouseout (真实输入事件触发, 兼容动态节点)
+    // v3.1 R5: 悬停显示原图可关闭 —— hoverRestore=false 时不再添加 .svi-fx-hover (CSS 规则同样门控),
+    // mouseout 恒定移除, 杜绝悬停/特效状态卡死
     bindHover() {
       if (this.hoverBound) return;
       this.hoverBound = true;
       document.addEventListener('mouseover', (e) => {
         try {
+          if (state.hoverRestore === false) return;
           const t = e.target && e.target.closest ? e.target.closest('img[data-svi-fx]') : null;
           if (t) t.classList.add('svi-fx-hover');
         } catch (err) { /* ignore */ }
@@ -6162,6 +6592,15 @@
       secPreset.add(presetChipRow);
       this.rowSyncs.push(() => presetChipRow.sync());
 
+      // v3.1 R5: 悬停显示原图开关 (默认开)
+      secPreset.add(ui.toggleRow('悬停显示原图', '悬停已反色图片时临时显示原图; 关闭后悬停保持反色 (适配放大镜/看图类插件)',
+        () => state.hoverRestore !== false,
+        (v) => {
+          state.hoverRestore = v;
+          savePrefs();
+          updateImageFilterCss();
+        }));
+
       // 模块 2: 🎨 网页图片浅色反色与色图选择 (并入基础区块之后)
       const secImgColor = ui.section('🎨 网页图片浅色反色与色图选择', '开箱即用');
 
@@ -6211,6 +6650,9 @@
 
       // 模块 7: 📊 数据与反馈 (v2.0)
       const secStats = this.buildStatsSection();
+
+      // 模块 7.5: 🖼️ 当前页媒体 (v3.1 R3)
+      const secMedia = this.buildMediaSection();
 
       // 模块 8: 💾 存储 (v3.0)
       const secStorage = this.buildStorageSection();
@@ -6375,7 +6817,7 @@
       actions.append(resetBtn, doneBtn);
       footer.append(this.modalPerf, actions);
 
-      body.append(secPreset.el, secImgColor.el, secSite, secFx, secSmart, secShield, accordion, secStats, secStorage);
+      body.append(secPreset.el, secImgColor.el, secSite, secFx, secSmart, secShield, accordion, secStats, secMedia, secStorage);
 
       win.append(header, body, footer);
       this.modalMask.appendChild(win);
@@ -6403,6 +6845,20 @@
     // ==========================================
     buildFxSection() {
       const sec = ui.section('✨ 效果', '部分反色 / 指定色反色 / 特效', 'svi-sec-fx');
+
+      // v3.1 R4: 智能图片策略 (balanced 默认: 正文/大图反色, 封面网格与页面骨架跳过)
+      sec.add(ui.selectRow('智能图片策略', '决定哪些网页图片自动反色 (手动 Alt+点击 与学习规则始终优先)',
+        [
+          { v: 'balanced', label: '平衡 (默认: 正文与大图反色, 封面网格跳过)' },
+          { v: 'conservative', label: '保守 (仅正文上下文与 ≥200px 大图)' },
+          { v: 'aggressive', label: '激进 (v3.0 行为: 仅尺寸门)' },
+        ],
+        () => state.imagePolicy || 'balanced',
+        (v) => {
+          state.imagePolicy = v;
+          savePrefs();
+          window.__svi_image_engine?.clearCacheAndRescan();
+        }));
 
       sec.add(ui.selectRow('图片特效模式', '部分反色与特效 (content:url 投递, 悬停还原)',
         [
@@ -7026,6 +7482,209 @@
       }
     }
 
+    // ==========================================
+    // v3.1 R3 模态区块: 🖼️ 当前页媒体 (列出/反色/定位被遮挡无法点击的媒体)
+    // 列表按需采集 (点击按钮触发, 启动零开销); 行内数据一律 textContent (XSS 加固)
+    // ==========================================
+    buildMediaSection() {
+      const sec = ui.section('🖼️ 当前页媒体', '排查被遮挡/无法 Alt+点击 的媒体', 'svi-sec-media');
+      this.mediaShownCount = 200;
+
+      sec.add(ui.btnRow([
+        {
+          label: '🔄 采集/刷新列表',
+          onClick: () => {
+            this.mediaShownCount = 200;
+            this.refreshMediaSection();
+            showToast('已采集当前页媒体');
+          },
+        },
+      ]));
+
+      this.mediaListBox = document.createElement('div');
+      sec.el.appendChild(this.mediaListBox);
+
+      this.mediaSummary = ui.infoLine('');
+      sec.add(this.mediaSummary);
+
+      // 首次构建只渲染空态 (惰性采集, 避免启动时全页样式扫描)
+      const empty = document.createElement('div');
+      empty.className = 'svi-hint-line';
+      empty.textContent = '尚未采集 —— 点击上方按钮列出当前页全部媒体 (图片/画布/视频/背景图)。';
+      this.mediaListBox.appendChild(empty);
+      return sec.el;
+    }
+
+    // 媒体状态文本: 已反色 / 原样 / 跳过:原因 (决策快照驱动)
+    mediaStateText(el) {
+      try {
+        if (el.getAttribute('data-svi-fx') && el.getAttribute('data-svi-fx-off') !== 'true') return '已反色 (特效)';
+        if (el.getAttribute('data-svi-fx-off') === 'true') return '已还原 (杀停)';
+        if (el.getAttribute('data-svi-inverted') === 'true') return '已反色';
+        if (el.getAttribute('data-svi-bginv') === 'true') return '已反色';
+        if (el.dataset && el.dataset.sviPoster === 'light' && !el.classList.contains('svi-playing')) return '已反色 (海报)';
+        const src = getMediaSrc(el);
+        const engine = window.__svi_image_engine;
+        const d = (src && engine) ? engine.decisionBySrc.get(src) : null;
+        if (d && d.verdict === 'skip') return '跳过:' + (SKIP_REASON_ZH[d.reason] || d.reason);
+        if (d && d.verdict === 'keep') return '原样';
+        if (el.hasAttribute && el.hasAttribute('data-svi-failed')) return '分析失败 (待重试)';
+        return '未处理';
+      } catch (e) {
+        return '未知';
+      }
+    }
+
+    // 采集当前页媒体 (预算 400): img/video/canvas/svg/image/input-image + 背景图元素 + Shadow DOM
+    collectPageMedia(budget) {
+      const cap = budget || 400;
+      const seen = new Set();
+      const out = [];
+      const push = (el, type) => {
+        try {
+          if (!el || el.nodeType !== 1 || seen.has(el) || out.length >= cap) return;
+          seen.add(el);
+          out.push({ el, type });
+        } catch (e) { /* ignore */ }
+      };
+      try {
+        const root = document.body || document.documentElement;
+        if (!root || !root.querySelectorAll) return out;
+        root.querySelectorAll('img, video, canvas, svg, image, input[type="image" i]').forEach((el) => {
+          push(el, String(el.tagName).toLowerCase());
+        });
+        root.querySelectorAll('[data-svi-bginv]').forEach((el) => push(el, 'bg'));
+        // 背景图候选: 复用 BgImageEngine 的候选选择器 + 计算样式确认
+        // (样式扫描有界: 最多检 1500 个候选, 对齐 BgImageEngine 的 sweep 预算)
+        const bgEng = window.__svi && window.__svi.engines ? window.__svi.engines.bgImage : null;
+        if (bgEng && typeof bgEng.candidateSelector === 'function') {
+          try {
+            const styleScanCap = 1500;
+            let styleScanned = 0;
+            root.querySelectorAll(bgEng.candidateSelector()).forEach((el) => {
+              if (el.nodeType !== 1) return;
+              if (styleScanned >= styleScanCap || out.length >= cap) return;
+              styleScanned++;
+              let bg = '';
+              try { bg = window.getComputedStyle(el).backgroundImage || ''; } catch (e) { return; }
+              if (bg && bg.indexOf('url(') !== -1) push(el, 'bg');
+            });
+          } catch (e) { /* ignore */ }
+        }
+        ShadowDomRegistry.forEachRoot((sr) => {
+          try {
+            sr.querySelectorAll('img, video, canvas, svg, image, input[type="image" i]').forEach((el) => {
+              push(el, String(el.tagName).toLowerCase());
+            });
+          } catch (e) { /* ignore */ }
+        });
+      } catch (e) { /* ignore */ }
+      return out;
+    }
+
+    buildMediaRow(item) {
+      const el = item.el;
+      const row = document.createElement('div');
+      row.className = 'svi-media-row';
+
+      const type = document.createElement('span');
+      type.className = 'svi-media-type';
+      const TYPE_ZH = { img: '图片', video: '视频', canvas: '画布', svg: 'SVG', image: 'SVG图', input: '输入图', bg: '背景图' };
+      type.textContent = TYPE_ZH[item.type] || item.type;
+
+      const size = mediaClientSize(el);
+      let src = '';
+      try { src = getMediaSrc(el) || ''; } catch (e) { src = ''; }
+      if (!src && el.getAttribute) {
+        try { src = (el.getAttribute('style') || '').slice(0, 60); } catch (e) { src = ''; }
+      }
+      src = String(src).replace(/^data:[^,]*/, 'data:…');
+      if (src.length > 36) src = src.slice(0, 36) + '…';
+
+      const meta = document.createElement('span');
+      meta.className = 'svi-media-meta';
+      meta.textContent = size[0] + '×' + size[1] + ' · ' + src; // URL/样式来自页面 → textContent (XSS 加固)
+
+      const stateText = this.mediaStateText(el);
+      const state = document.createElement('span');
+      state.className = 'svi-media-state'
+        + (stateText.indexOf('已反色') === 0 ? ' inverted' : '')
+        + (stateText.indexOf('跳过') === 0 ? ' skipped' : '');
+      state.textContent = stateText;
+
+      const actions = document.createElement('span');
+      actions.className = 'svi-media-actions';
+      const toggleBtn = document.createElement('button');
+      toggleBtn.className = 'svi-mini-btn';
+      toggleBtn.textContent = stateText.indexOf('已反色') === 0 ? '复原' : '反色';
+      toggleBtn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        const engine = window.__svi_image_engine;
+        if (engine && engine.toggleMediaOverride(el)) {
+          this.refreshMediaSection();
+        } else {
+          showToast('该媒体暂不支持切换 (可尝试 定位 后 Alt+点击)');
+        }
+      });
+      const locateBtn = document.createElement('button');
+      locateBtn.className = 'svi-mini-btn';
+      locateBtn.textContent = '定位';
+      locateBtn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        this.locateMedia(el);
+      });
+      actions.append(toggleBtn, locateBtn);
+
+      row.append(type, meta, state, actions);
+      row._sviTarget = el; // 调试/测试句柄 (JS 属性, 非 DOM 特性, 不入序列化)
+      return row;
+    }
+
+    refreshMediaSection() {
+      if (!this.mediaListBox) return;
+      this.mediaListBox.textContent = '';
+      const items = this.collectPageMedia(400);
+      if (!items.length) {
+        const empty = document.createElement('div');
+        empty.className = 'svi-hint-line';
+        empty.textContent = '本页未检测到媒体元素。';
+        this.mediaListBox.appendChild(empty);
+        if (this.mediaSummary) this.mediaSummary.setText('共 0 个媒体');
+        return;
+      }
+      const shown = items.slice(0, Math.max(1, this.mediaShownCount || 200));
+      for (const item of shown) {
+        this.mediaListBox.appendChild(this.buildMediaRow(item));
+      }
+      if (items.length > shown.length) {
+        const moreBtn = document.createElement('button');
+        moreBtn.className = 'svi-mini-btn';
+        moreBtn.textContent = '加载更多 (剩余 ' + (items.length - shown.length) + ' 个)';
+        moreBtn.addEventListener('click', () => {
+          this.mediaShownCount += 200;
+          this.refreshMediaSection();
+        });
+        this.mediaListBox.appendChild(moreBtn);
+      }
+      if (this.mediaSummary) {
+        this.mediaSummary.setText('共 ' + items.length + ' 个媒体' + (items.length > shown.length ? ' (已显示前 ' + shown.length + ' 个)' : '') + ' · 状态随决策实时变化');
+      }
+    }
+
+    // 定位: scrollIntoView 居中 + 1.2s 描边闪烁 (仅 outline, 绝不改布局)
+    locateMedia(el) {
+      try {
+        if (!el || el.nodeType !== 1) return;
+        if (typeof el.scrollIntoView === 'function') {
+          el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+        }
+        el.classList.add('svi-locate-flash');
+        setTimeout(() => {
+          try { el.classList.remove('svi-locate-flash'); } catch (e) { /* ignore */ }
+        }, 1200);
+      } catch (e) { /* ignore */ }
+    }
+
     async copyStatsJson() {
       const text = JSON.stringify(StatsManager.exportJson(), null, 2);
       try {
@@ -7079,6 +7738,7 @@
       this.refreshStatsSection();
       this.refreshSmartSection();
       this.refreshStorageSection();
+      // 当前页媒体列表保持惰性 (设计: 点击「采集/刷新列表」按钮才全页扫描, 打开面板零开销)
       this.updateStatusBadge();
     }
 
@@ -7317,6 +7977,12 @@
     lookupSegment,
     selectorStem,
     mediaDominantViewport,
+    // v3.1 纯函数与引擎导出 (单测契约): 图片策略门 / 网格分组计数 / 统一决策管线引擎
+    passesImagePolicy,
+    countGridGroup,
+    ImageInvertEngine,
+    // 调试句柄: 站点档案按 (host, 偏好版本) 缓存 —— 运行时注入/变更内置规则后需显式失效
+    invalidateProfileCache: () => { try { profileCache.clear(); } catch (e) { /* ignore */ } },
     Store,
     RuleLearner: ruleLearner,
     TimelineLearner: timelineLearner,
