@@ -91,6 +91,12 @@ rules below are battle-tested conventions from v1.4.0 → v2.0.0; follow them fo
 
 ## Testing Requirements
 
+- **The bench's fixed Chrome profile (`.chrome-test-profile/`) persists localStorage across
+  runs** — scenario 1 asserts a fresh-storage world, so the runner MUST wipe the profile dir
+  before spawning Chrome (v3.2 lesson: a leftover Alt+click override from a previous run made
+  the dark-photo verdict fail and looked like a production regression). In-run reload
+  persistence scenarios (2b/18) are unaffected by the wipe.
+
 - `node --check universal-smart-invert.user.js` must pass.
 - `node test.js` must pass: legacy algorithm/benchmark tests + v2.0 site-engine tests against the
   real `window.__svi` exports (loaded via a minimal DOM/localStorage shim in Node).
