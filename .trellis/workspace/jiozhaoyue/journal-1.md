@@ -110,3 +110,25 @@ Shipped v2.0.0: per-site background replacement with login-block protection (163
 ### Status
 
 [OK] **Completed**
+
+
+## Session 6: v3.0: partial-effect pipeline, predictive video, self-learning rules, extension prep
+<!-- trellis-session: v=2 fp=3dcdbc7d9342a8a6 -->
+
+**Date**: 2026-09-12
+**Task**: v3.0: partial-effect pipeline, predictive video, self-learning rules, extension prep
+**Branch**: `main`
+
+### Summary
+
+Shipped v3.0.0: canvas/WebGL partial-inversion and effect pipeline (luma-mask, chroma-key, rect region, grayscale/sepia; content:url blob delivery; PiP via captureStream), rVFC same-frame-adjacent video switching with learned timeline segments (reference/takeover), self-learning element rules from manual corrections (user > learned > seed), Store layer (chrome.storage.sync/GM/localStorage, byte-safe chunking, quota degrade, manager UI), shadow-DOM/canvas/poster/SVG-image coverage, file:// support with graceful degradation, userscript+extension coexistence handshake, dependency-free extension build chain (MV3 manifest, PNG icons, zip packer) with CRX CI and guarded CWS auto-publish; 15 check findings fixed incl. secrets-context workflow bug and extension Store init; all unit + 12 CDP bench scenarios green.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `7db7bd4` | feat: partial-effect inversion (luma/chroma-key/rect + effects), predictive video with rVFC and timeline memory, self-learning rules, browser-storage layer with cloud-sync backends, reusable settings UI, file:// support, and MV3 extension build with CRX CI and guarded Web Store auto-publish (v3.0.0) |
+
+### Status
+
+[OK] **Completed**
