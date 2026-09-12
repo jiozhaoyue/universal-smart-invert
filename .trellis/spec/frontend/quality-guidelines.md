@@ -50,6 +50,29 @@ rules below are battle-tested conventions from v1.4.0 → v2.0.0; follow them fo
   `excludeSelectors` ∪ global `bgExcludeSelectors`; media tags (`img/video/svg/canvas/iframe`)
   are never tagged.
 
+## v3.0 Additions (partial effects, storage backends, CI)
+
+- **GitHub Actions `if:` guards**: the `secrets` context is NOT available in `if:` conditions at
+  any level (the workflow fails to parse). Gate optional steps (CRX packaging, Chrome Web Store
+  publish) through a prior step that exports an `ENABLED=true/false` flag into `$GITHUB_ENV`,
+  then `if: env.ENABLED == 'true'`.
+- **Async storage backends need lifecycle discipline**: a `ready` flag must be set only after the
+  remote (chrome.storage) load completes — early-returning on it silently no-ops every write.
+  Legacy-data migration must run after the remote load, exactly once. Always consume
+  `chrome.runtime.lastError`; on `chrome.storage.sync` quota errors degrade to `.local`
+  (never throw). Chunk by UTF-8 bytes, not chars (8KB *byte* item quota), and make deletes
+  chunk-aware or orphaned `.meta/#n` chunks resurrect deleted values.
+- **Event-driven + polling detection paths must be mutually exclusive**: when an rVFC path exists,
+  gate the legacy poll on frame freshness, and make hysteresis time-based (not tick-count-based)
+  or it collapses under event frequency.
+- **`content: url(blob)` is the delivery for transformed images** (never mutate `img.src` —
+  breaks lazy-loaders). Pair it with: transform results cached by `src|mode|params`, LRU with
+  deferred blob revocation + pagehide sweep, and a kill-switch attribute.
+- **Store quota/degrade + index rebuilds**: GM has no list API — the key index must be
+  `existingIndex ∪ currentMirror`, never rebuilt from itself.
+
+---
+
 ## Testing Requirements
 
 - `node --check universal-smart-invert.user.js` must pass.
