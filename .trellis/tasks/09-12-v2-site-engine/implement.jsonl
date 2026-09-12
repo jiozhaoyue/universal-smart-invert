@@ -1,0 +1,4 @@
+{"file": ".trellis/tasks/09-12-v2-site-engine/research/similar-projects.md", "reason": "Dark Reader dynamic-mode approach and the exact root causes (star-history SVG decode bug, bilibili bg-image thumbnails, tab isolation) that the implementation must fix"}
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend guidelines entry point required before writing code in this layer"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Quality standards the implement agent must follow"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "Single-file userscript must reuse existing helpers (gmFetchBlob, evaluateImagePixels, chip UI) instead of duplicating"}

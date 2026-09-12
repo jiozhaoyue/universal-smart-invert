@@ -1,0 +1,3 @@
+{"file": ".trellis/tasks/09-12-v2-site-engine/research/similar-projects.md", "reason": "Verify the implementation actually fixes the documented root causes (nested createImageBitmap fallback, runtime-state isolation)"}
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend guidelines entry point for the quality check"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Quality standards to verify against"}
