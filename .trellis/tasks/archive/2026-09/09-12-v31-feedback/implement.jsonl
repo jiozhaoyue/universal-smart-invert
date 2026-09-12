@@ -1,0 +1,3 @@
+{"file": ".trellis/tasks/09-12-v31-feedback/research/live-probe.md", "reason": "Live-probe evidence: F1 pipeline works, F2 initial-load gap, F3 decision inconsistency, F4 stale-install risk, F5 pjax OK — the fixes must target exactly these"}
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend guidelines entry point"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Project quality conventions incl. decide-once, XSS-safe DOM, observer budgets"}
