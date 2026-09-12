@@ -1,0 +1,4 @@
+{"file": ".trellis/tasks/09-12-v3-partial-effects/research/approaches.md", "reason": "Chosen technical approaches: canvas/WebGL effect pipeline, rVFC timing, PiP captureStream, timeline learning, storage backend chain, extension CI"}
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend guidelines entry point required before writing code in this layer"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "Project quality conventions filled during v2.0 (forbidden/required patterns, testing, review checklist)"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "UI component dedup and engine-helper reuse are core to this task"}
