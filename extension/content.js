@@ -1,36 +1,74 @@
-// ==UserScript==
-// @name         全网通用智能视频与图片反色 (Universal Smart Video & Image Invert)
-// @name:zh-CN   全网通用智能视频与图片反色
-// @name:en      Universal Smart Video & Image Invert
-// @namespace    https://github.com/jiozhaoyue/universal-smart-invert
-// @version      3.0.0
-// @description  全网通用智能视频与图片反色脚本 (v3.0)。新增: 部分反色与特效管线 (图片亮度反色/键色反色/区域反色/灰度/怀旧等, WebGL 视频同款特效覆盖层)、画中画输出、预测性视频反色与时间线记忆 (反色时机提前预定, 永不迟到)、自学习元素规则 (无需手写规则, 学习你的手动修正)、媒体全覆盖 (canvas/视频海报/Shadow DOM/SVG image/input image)、浏览器存储与云同步管理 (svi: 命名空间, 导出/导入/清理)、file:// 本地文件支持、与浏览器插件版自动共存握手; 保留 v2.0 全部能力 (背景替换/站点规则库/原色屏蔽/标签页隔离)。
-// @description:zh-CN 全网通用智能视频与图片反色脚本 (v3.0)。新增: 部分反色与特效管线 (亮度/键色/区域反色与灰度/怀旧特效, 视频走 GPU 着色器覆盖层)、画中画、预测性视频反色与时间线记忆、自学习元素规则、canvas/海报/Shadow DOM 等媒体全覆盖、浏览器存储管理与云同步、file:// 支持、插件共存握手; 保留 v2.0 全部能力。
-// @description:en Universal smart video and image invert userscript (v3.0). New: partial-effect pipeline (luma/key/rect invert, grayscale/sepia effects for images; WebGL shader overlay for videos), Picture-in-Picture output, predictive video inversion with timeline memory (inversion pre-armed, never late), self-learning element rules (no hand-written rules; learns your manual corrections), full media coverage (canvas/video poster/Shadow DOM/SVG image/input image), browser-storage prefs with sync-ready manager (svi: namespace, export/import/clear), file:// support, and coexistence handshake with the extension build. All v2.0 capabilities retained.
-// @author       jiozhaoyue
-// @license      MIT
-// @icon         data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><circle cx=%2250%22 cy=%2250%22 r=%2246%22 fill=%22%231e293b%22 stroke=%22%2338bdf8%22 stroke-width=%228%22/><path d=%22M50 4 A46 46 0 0 1 50 96 Z%22 fill=%22%2338bdf8%22/></svg>
-// @homepageURL  https://github.com/jiozhaoyue/universal-smart-invert
-// @supportURL   https://github.com/jiozhaoyue/universal-smart-invert/issues
-// @updateURL    https://raw.githubusercontent.com/jiozhaoyue/universal-smart-invert/main/universal-smart-invert.user.js
-// @downloadURL  https://raw.githubusercontent.com/jiozhaoyue/universal-smart-invert/main/universal-smart-invert.user.js
-// @match        *://*/*
-// @match        file:///*
-// @grant        GM_xmlhttpRequest
-// @grant        GM_addStyle
-// @grant        GM_getValue
-// @grant        GM_setValue
-// @grant        GM_deleteValue
-// @grant        GM.xmlHttpRequest
-// @connect      *
-// @run-at       document-end
-// @compatible   chrome
-// @compatible   edge
-// @compatible   firefox
-// @compatible   opera
-// @compatible   safari
-// ==/UserScript==
+/*!
+ * ============================================================
+ * universal-smart-invert — browser extension content script
+ * GENERATED FILE — DO NOT EDIT.
+ * Built by scripts/build-extension.js from universal-smart-invert.user.js
+ * Source version: 3.0.0
+ *
+ * Prelude contract (see scripts/build-extension.js header):
+ *   - EXT_MODE (wrapper scope)   → core claims coexistence kind 'ext'
+ *   - GM_xmlhttpRequest          → fetch shim (blob / onload / onerror / ontimeout)
+ *   - GM.xmlHttpRequest          → alias of the same shim (core fallback path)
+ *   - GM_addStyle                → <style> element shim
+ *   - Store backend              → none needed; core detects chrome.storage natively
+ * ============================================================ */
+(function () {
+  'use strict';
 
+  // Coexistence handshake: the core below resolves OWNER_KIND to 'ext' from
+  // this wrapper-scoped flag. Kept off window so page scripts (and a
+  // userscript sharing this world in tests) never observe it.
+  var EXT_MODE = true;
+
+  // GM_xmlhttpRequest shim over fetch. Matches the core's gmFetchBlob usage:
+  // responseType 'blob' → res.response is a Blob; 2xx + truthy response →
+  // onload; abort on opts.timeout (ms) → ontimeout; network failure → onerror.
+  // Note: an MV3 content script cannot bypass page CORS with fetch; the
+  // core's decode chain already degrades gracefully when a fetch fails.
+  function __sviGmXhr(opts) {
+    opts = opts || {};
+    var ctrl = typeof AbortController === 'function' ? new AbortController() : null;
+    var timedOut = false;
+    var timer = null;
+    if (ctrl && opts.timeout > 0) {
+      timer = setTimeout(function () {
+        timedOut = true;
+        try { ctrl.abort(); } catch (e) { /* ignore */ }
+      }, opts.timeout);
+    }
+    fetch(opts.url, { method: opts.method || 'GET', signal: ctrl ? ctrl.signal : undefined })
+      .then(function (res) {
+        if (opts.responseType === 'blob') {
+          return res.blob().then(function (blob) { return { status: res.status, response: blob }; });
+        }
+        return res.text().then(function (text) { return { status: res.status, response: text }; });
+      })
+      .then(function (result) {
+        if (timer) clearTimeout(timer);
+        if (typeof opts.onload === 'function') opts.onload(result);
+      })
+      .catch(function (err) {
+        if (timer) clearTimeout(timer);
+        if (timedOut) {
+          if (typeof opts.ontimeout === 'function') opts.ontimeout();
+          return;
+        }
+        if (typeof opts.onerror === 'function') opts.onerror(err);
+      });
+  }
+
+  var GM_xmlhttpRequest = __sviGmXhr;
+  var GM = { xmlHttpRequest: __sviGmXhr };
+
+  var GM_addStyle = function (css) {
+    try {
+      var el = document.createElement('style');
+      el.textContent = String(css);
+      (document.head || document.documentElement).appendChild(el);
+    } catch (e) { /* ignore */ }
+  };
+
+  /* ==== core body (userscript source, metadata block stripped) ==== */
 (function () {
   'use strict';
 
@@ -7439,4 +7477,5 @@
     });
   }
 
+})();
 })();

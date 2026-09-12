@@ -1,7 +1,7 @@
 # Universal Smart Video & Image Invert
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-2.0.0-blue.svg?style=flat-square" alt="Version">
+  <img src="https://img.shields.io/badge/version-3.0.0-blue.svg?style=flat-square" alt="Version">
   <img src="https://img.shields.io/badge/license-MIT-green.svg?style=flat-square" alt="License">
   <img src="https://img.shields.io/badge/Tampermonkey-Supported-orange.svg?style=flat-square" alt="Tampermonkey">
   <img src="https://img.shields.io/badge/ScriptCat-Supported-purple.svg?style=flat-square" alt="ScriptCat">
@@ -91,6 +91,40 @@ Specifically designed to tame **blinding white PowerPoint/PDF lecture slides in 
 
 ---
 
+## 🆕 What's New in v3.0 (Partial Effects · Prediction · Self-Learning · Extension)
+
+### 1. ✨ Partial-Effect Pipeline (More Than Inversion)
+- **Partial image inversion (2D Canvas offscreen pipeline)**: `luma` inverts only bright, low-saturation pixels (white slide areas) while colorful photos stay untouched; `key` inverts only pixels within tolerance of a picked key color ("specified-color inversion"); `rect` inverts an arbitrary region drawn with `Alt+Shift+drag`; plus non-invert effects — `grayscale`, `sepia`, `brightness`, and a custom CSS filter;
+- **Video effects (WebGL shader overlay)**: the same mode set runs on the GPU per presented frame (`requestVideoFrameCallback`); the overlay hugs the player box, is pointer-transparent, and suppresses the CSS filter while active (never double-processing); graceful CSS-filter fallback when WebGL is unavailable;
+- **Picture-in-Picture output 📺**: the processed canvas stream feeds a **PiP window** via `canvas.captureStream()` — dark lecture videos while you code;
+- Delivery uses `content: url(blob)` swapping (no `src` mutation, lazy-loaders unaffected), hover-to-restore, per-image `Alt+click` kill switch, and an LRU cache keyed by `src+mode+params` with proactive blob revocation.
+
+### 2. 🔮 Predictive Video Inversion & Timeline Memory (Never Late)
+- **rVFC per-frame sampling** replaces the 250 ms poll: detection-to-filter latency drops from up to 250 ms to **~1-2 compositor frames**;
+- **TimelineLearner**: while inversion is active, `[start, end]` segments are recorded per video fingerprint (merged, persisted) and **pre-armed on replay** — "reference" mode auto-arms inside learned segments with manual control always winning; "takeover" mode lets the timeline directly drive inversion. The inversion schedule is literally decided in advance.
+
+### 3. 🧬 Self-Learning Element Rules (No Hand-Written Rules)
+- Every `Alt+click` correction aggregates by selector stem; reaching N hits (default 2, tunable 2–6) creates a per-site learned rule (force-invert / protect);
+- Learned rules **outrank the builtin seed rules**; the builtin table is demoted to a seed/fallback layer;
+- The 🧠智能 (Smart) modal section lists learned rules per site (stem / action / hits) with one-click delete.
+
+### 4. 💾 Browser Storage & Sync-Ready Manager
+- All persistent state lives under the **`svi:` namespace** behind a unified `Store` abstraction with the backend chain: **`chrome.storage.sync` (extension, cloud-synced) → GM storage (cloud-synced via Tampermonkey’s sync setting) → localStorage**;
+- Async backend + in-memory mirror: zero-cost reads, debounced (400 ms) batched writes; automatic 8 KB chunking for `chrome.storage.sync` quotas; v2.0 keys migrate losslessly (legacy keys kept for rollback);
+- 💾存储 (Storage) modal section: backend badge, per-key size/preview/delete, JSON export / import / one-click clear.
+
+### 5. 🧩 Full Media Coverage & file:// Support
+- Newly covered: `<canvas>` (light-chart detection), **video posters**, images inside **Shadow DOM** (idempotent `attachShadow` patch + bounded collection), inline SVG `<image>`, and `input[type=image]`;
+- `@match file:///*`: local HTML pages boot and invert normally; when the browser blocks local image decode the script degrades gracefully with a one-time hint — never a crash.
+
+### 6. 🧰 Browser Extension Build & CI / Auto-Publish
+- `universal-smart-invert.user.js` remains the single source of truth; the extension is derived by **zero-dependency Node scripts**: `scripts/build-extension.js` (MV3 `manifest.json` with name/version/description synced from the header, chrome.storage adapter, GM shims), `scripts/gen-icons.js` (hand-rolled PNG encoder), `scripts/pack.js` (from-scratch ZIP packer);
+- **Coexistence handshake**: the userscript and the extension may both be installed — the first booter claims the page (5 s heartbeat) and the other boots dormant, so filters are never applied twice;
+- **GitHub Actions**: `ci.yml` (unit tests + build smoke + an isolated headless-Chrome bench job) and `release.yml` (push a `v*` tag → tests → build → zip/CRX → GitHub Release → Chrome Web Store upload & publish, skipping cleanly when secrets are absent);
+- See [PUBLISHING.md](./PUBLISHING.md) "浏览器插件发布 (Extension)" for the full setup guide.
+
+---
+
 ## 🚀 Installation
 
 Install directly via any userscript manager (Tampermonkey, Violentmonkey, or ScriptCat) by clicking the GitHub Raw link below:
@@ -101,6 +135,8 @@ Or copy the link into your userscript manager's "Install from URL" input:
 ```
 https://raw.githubusercontent.com/jiozhaoyue/universal-smart-invert/main/universal-smart-invert.user.js
 ```
+
+**Option B — Browser extension (v3.0, Load Unpacked)**: build locally with `node scripts/gen-icons.js && node scripts/build-extension.js && node scripts/pack.js` (zero npm dependencies), then load the `extension/` directory via `chrome://extensions` → Developer mode → "Load unpacked". Installing it alongside the userscript is safe: the dormant handshake keeps exactly one active instance per page (see [PUBLISHING.md](./PUBLISHING.md)).
 
 ---
 

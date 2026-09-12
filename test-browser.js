@@ -3,15 +3,28 @@
 // v2.0 scenarios: cross-origin CORS SVG decode chain (star-history/camo fix), bilibili-style
 // background-image thumbnails, repeated tiny icon shield, login-box-safe background replace,
 // per-tab video-invert isolation across reload, and local stats persistence.
+// v3.0 additions: node-only extension smoke (design §9 item 11 — build + manifest/version sync +
+// content.js syntax + zip central directory), and Scenario 12 coexistence running the REAL built
+// extension/content.js bundle (plain <script>) against the userscript in both orders.
 const http = require('http');
-const { spawn } = require('child_process');
+const { spawn, execFileSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const assert = require('assert');
+const { readCentralDirectory } = require('./scripts/lib/zip');
 
 const PORT = 8765;
 const PORT2 = 8766; // 跨域 CORS 服务器 (模拟 GitHub camo / star-history 跨域图床)
-const CHROME_PATH = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
+// Chrome discovery: SVI_CHROME_PATH override first, then per-platform defaults.
+// (CI uses browser-actions/setup-chrome + SVI_CHROME_PATH; local Windows keeps the default.)
+const CHROME_CANDIDATES = process.env.SVI_CHROME_PATH
+  ? [process.env.SVI_CHROME_PATH]
+  : process.platform === 'darwin'
+    ? ['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome']
+    : process.platform === 'linux'
+      ? ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser', '/snap/bin/chromium']
+      : ['C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'];
+const CHROME_PATH = CHROME_CANDIDATES.find((p) => p && fs.existsSync(p)) || CHROME_CANDIDATES[0];
 const CDP_PORT = 9222;
 
 // SVG image generators for testing
@@ -28,10 +41,69 @@ const SVG_TEMPLATES = {
   // GitHub camo / star-history 修复: 跨域 CORS SVG (有固有尺寸)
   '/img/camo-sized.svg': `<svg xmlns="http://www.w3.org/2000/svg" width="240" height="160"><rect width="100%" height="100%" fill="#ffffff"/><rect x="20" y="30" width="40" height="100" fill="#16a34a"/><rect x="80" y="60" width="40" height="70" fill="#16a34a"/><text x="130" y="90" fill="#111" font-size="16">star-history</text></svg>`,
   // GitHub camo / star-history 修复: 跨域 CORS SVG (无固有尺寸 → createImageBitmap 必然拒绝, 走临时 img 兜底)
-  '/img/camo-nosize.svg': `<svg xmlns="http://www.w3.org/2000/svg"><rect width="100%" height="100%" fill="#fdfdfd"/><circle cx="60" cy="60" r="40" fill="none" stroke="#333" stroke-width="4"/><text x="25" y="130" fill="#111" font-size="18">no-size SVG</text></svg>`
+  '/img/camo-nosize.svg': `<svg xmlns="http://www.w3.org/2000/svg"><rect width="100%" height="100%" fill="#fdfdfd"/><circle cx="60" cy="60" r="40" fill="none" stroke="#333" stroke-width="4"/><text x="25" y="130" fill="#111" font-size="18">no-size SVG</text></svg>`,
+  // ===== v3.0 特效基准图 =====
+  // 亮度反色: 左半纯白 (应被反色), 右半高饱和蓝 (应保留, ΔRGB ≤ 40)
+  '/img/fx-halfwhite.svg': `<svg xmlns="http://www.w3.org/2000/svg" width="200" height="120"><rect x="0" y="0" width="100" height="120" fill="#ffffff"/><rect x="100" y="0" width="100" height="120" fill="#1e50c8"/></svg>`,
+  // 键色反色: 左半纯红 (键色, 应被反色), 右半纯白 (应保留)
+  '/img/fx-redwhite.svg': `<svg xmlns="http://www.w3.org/2000/svg" width="200" height="120"><rect x="0" y="0" width="100" height="120" fill="#ff0000"/><rect x="100" y="0" width="100" height="120" fill="#ffffff"/></svg>`,
+  // 彩色照片替代物 (luma 模式不应触碰): 高饱和多彩
+  '/img/fx-photo.svg': `<svg xmlns="http://www.w3.org/2000/svg" width="200" height="120"><rect width="100%" height="100%" fill="#1a9632"/><circle cx="100" cy="60" r="40" fill="#e2483d"/><circle cx="60" cy="40" r="20" fill="#f5d312"/></svg>`,
+  // 自学习规则: 4 张深色图 (分类器判定不该反色 → 反色只能来自学习规则)
+  '/img/learn-dark-1.svg': `<svg xmlns="http://www.w3.org/2000/svg" width="160" height="120"><rect width="100%" height="100%" fill="#111827"/><text x="30" y="65" fill="#6b7280" font-size="14">dark-1</text></svg>`,
+  '/img/learn-dark-2.svg': `<svg xmlns="http://www.w3.org/2000/svg" width="160" height="120"><rect width="100%" height="100%" fill="#1f2937"/><text x="30" y="65" fill="#9ca3af" font-size="14">dark-2</text></svg>`,
+  '/img/learn-dark-3.svg': `<svg xmlns="http://www.w3.org/2000/svg" width="160" height="120"><rect width="100%" height="100%" fill="#0f172a"/><text x="30" y="65" fill="#94a3b8" font-size="14">dark-3</text></svg>`,
+  '/img/learn-dark-4.svg': `<svg xmlns="http://www.w3.org/2000/svg" width="160" height="120"><rect width="100%" height="100%" fill="#172554"/><text x="30" y="65" fill="#60a5fa" font-size="14">dark-4</text></svg>`,
+  // 视频海报 (浅色 → data-svi-poster=light)
+  '/img/light-poster.svg': `<svg xmlns="http://www.w3.org/2000/svg" width="320" height="180"><rect width="100%" height="100%" fill="#f8fafc"/><text x="90" y="95" fill="#334155" font-size="18">Poster</text></svg>`
 };
 
 const userscriptCode = fs.readFileSync(path.join(__dirname, 'universal-smart-invert.user.js'), 'utf8');
+
+// @version extracted from the userscript header (manifest sync assertion source of truth)
+const USERSRC_VERSION = (userscriptCode.match(/@version\s+(\S+)/) || [])[1] || '';
+
+// ============================================================
+// v3.0 Node-only extension smoke (design §9 item 11) — distinct
+// early phase, runs before the browser phase (and even when
+// Chrome is absent). Builds the extension (gen-icons → build →
+// pack), then asserts: manifest JSON valid, manifest.version ===
+// userscript @version, content.js passes `node --check`, the zip
+// exists and its central directory parses (zip lib reuse).
+// ============================================================
+function runExtensionSmoke() {
+  const run = (args) => execFileSync(process.execPath, args, { cwd: __dirname, stdio: 'inherit' });
+  console.log('[Ext Smoke] node-only extension smoke: gen-icons -> build-extension -> pack ...');
+  run(['scripts/gen-icons.js']);
+  run(['scripts/build-extension.js']);
+  run(['scripts/pack.js']);
+
+  const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, 'extension', 'manifest.json'), 'utf8'));
+  assert.strictEqual(manifest.manifest_version, 3, 'manifest must be MV3');
+  assert.strictEqual(manifest.version, USERSRC_VERSION, 'manifest.version must equal userscript @version');
+  assert.deepStrictEqual(manifest.permissions, ['storage'], 'manifest permissions must be ["storage"]');
+  assert.deepStrictEqual(manifest.content_scripts, [{
+    matches: ['<all_urls>', 'file://*/*'],
+    js: ['content.js'],
+    run_at: 'document_end',
+    all_frames: true,
+  }], 'content_scripts shape must match the design contract');
+
+  const contentCode = fs.readFileSync(path.join(__dirname, 'extension', 'content.js'), 'utf8');
+  assert.ok(contentCode.includes('var EXT_MODE = true'), 'content.js must carry the EXT_MODE prelude');
+  run(['--check', 'extension/content.js']);
+
+  const zipPath = path.join(__dirname, 'dist', `universal-smart-invert-extension-v${manifest.version}.zip`);
+  assert.ok(fs.existsSync(zipPath), 'packed zip must exist in dist/');
+  const zipBuf = fs.readFileSync(zipPath);
+  const cd = readCentralDirectory(zipBuf);
+  const names = cd.entries.map((e) => e.name);
+  for (const expected of ['manifest.json', 'content.js', 'icons/icon16.png', 'icons/icon32.png', 'icons/icon48.png', 'icons/icon128.png']) {
+    assert.ok(names.includes(expected), `zip central directory must include ${expected}`);
+  }
+  assert.ok(cd.entries.every((e) => e.method === 0), 'zip entries must be stored-mode');
+  console.log(`[Ext Smoke] OK — manifest v${manifest.version}; content.js ${contentCode.length} bytes, syntax OK; zip ${zipBuf.length} bytes, ${cd.count} entries, central directory parses`);
+}
 
 // Stripped userscript wrapper for plain browser context execution
 const executableScript = userscriptCode
@@ -78,14 +150,222 @@ const HTML_CONTENT = `<!DOCTYPE html>
 </body>
 </html>`;
 
-// 背景替换登录块基准页: 在脚本注入前预置 localStorage 偏好 (bgReplace=true)
+// v3.0 基准页通用种子函数: 双写 svi:prefs (Store 命名空间) 与 legacy v4 键
+const SEED_SNIPPET = `
+  (function () {
+    window.sviSeed = function (overrides) {
+      try {
+        var base = {};
+        try { base = JSON.parse(localStorage.getItem('svi:prefs') || localStorage.getItem('universal_smart_invert_v4') || '{}'); } catch (e) {}
+        for (var k in overrides) { if (Object.prototype.hasOwnProperty.call(overrides, k)) base[k] = overrides[k]; }
+        var prefsCopy = Object.assign({}, base);
+        delete prefsCopy.manualOverrides; // v3.0: 手动覆盖落盘位于 svi:overrides
+        localStorage.setItem('universal_smart_invert_v4', JSON.stringify(base));
+        localStorage.setItem('svi:prefs', JSON.stringify(prefsCopy));
+      } catch (e) {}
+    };
+  })();
+`;
+
+// 画布 → captureStream → video 的基准生成器 (headless 友好, 无需真实视频文件)
+const CANVAS_VIDEO_SNIPPET = `
+  (function () {
+    var cv = document.createElement('canvas');
+    cv.width = 640; cv.height = 360;
+    var ctx = cv.getContext('2d');
+    var phase = 0;
+    setInterval(function () {
+      phase++;
+      ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, 320, 360);   // 左半白 (亮度反色目标)
+      ctx.fillStyle = '#1e50c8'; ctx.fillRect(320, 0, 320, 360); // 右半高饱和蓝 (应保留)
+      ctx.fillStyle = 'rgba(0,0,0,0.06)'; ctx.fillRect((phase * 7) % 640, 0, 30, 360); // 移动条纹驱动新帧
+    }, 50);
+    var stream = cv.captureStream(30);
+    var v = document.getElementById('bench-video');
+    v.srcObject = stream;
+    var p = v.play();
+    if (p && p.catch) p.catch(function () {});
+  })();
+`;
+
+// —— v3.0 Scenario 4/5: 图片部分反色 (luma / key) ——
+const FX_LUMA_HTML = `<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><title>FX Luma Bench</title>
+<script>${SEED_SNIPPET}; sviSeed({ imgFxMode: 'luma' });<\/script>
+<style>body { background: #121212; } img { display:block; width:200px; height:120px; margin: 12px; }</style>
+</head><body>
+  <img id="fx-half" src="/img/fx-halfwhite.svg" alt="halfwhite">
+  <img id="fx-photo" src="/img/fx-photo.svg" alt="photo">
+  <script>
+    ${executableScript}
+  <\/script>
+</body></html>`;
+
+const FX_KEY_HTML = `<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><title>FX Key Bench</title>
+<script>${SEED_SNIPPET}; sviSeed({ imgFxMode: 'key', imgFxParams: { lumCutoff: 190, satCutoff: 0.30, keyColor: '#ff0000', keyTol: 60 } });<\/script>
+<style>body { background: #121212; } img { display:block; width:200px; height:120px; margin: 12px; }</style>
+</head><body>
+  <img id="fx-key" src="/img/fx-redwhite.svg" alt="redwhite">
+  <script>
+    ${executableScript}
+  <\/script>
+</body></html>`;
+
+// —— v3.0 Scenario 6: 视频特效 GPU 覆盖层 (luma) + PiP 流 ——
+const VIDEO_FX_HTML = `<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><title>Video FX Bench</title>
+<script>${SEED_SNIPPET}; sviSeed({ videoFxMode: 'luma', autoDetect: false });<\/script>
+<style>body { background: #121212; margin: 0; padding: 16px; } #player { position: relative; width: 640px; height: 360px; } #bench-video { width: 100%; height: 100%; display: block; }</style>
+</head><body>
+  <div id="player"><video id="bench-video" muted playsinline></video></div>
+  <script>
+    ${CANVAS_VIDEO_SNIPPET}
+  <\/script>
+  <script>
+    ${executableScript}
+  <\/script>
+</body></html>`;
+
+// —— v3.0 Scenario 7: 时间线记忆 (reference 预布防) ——
+const VIDEO_TL_HTML = `<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><title>Video Timeline Bench</title>
+<script>${SEED_SNIPPET}; sviSeed({ autoDetect: false, timelineMode: 'reference', imgFxMode: 'full', videoFxMode: 'off' });<\/script>
+<style>body { background: #121212; margin: 0; padding: 16px; } #player { position: relative; width: 640px; height: 360px; } #bench-video { width: 100%; height: 100%; display: block; }</style>
+</head><body>
+  <div id="player"><video id="bench-video" muted playsinline></video></div>
+  <script>
+    ${CANVAS_VIDEO_SNIPPET}
+  <\/script>
+  <script>
+    ${executableScript}
+  <\/script>
+</body></html>`;
+
+// —— v3.0 Scenario 8: 自学习规则 (3 次 Alt+点击修正 .thumb-x 深色图 → 学习规则让第 4 张自动反色) ——
+const LEARN_HTML = `<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><title>RuleLearner Bench</title>
+<script>${SEED_SNIPPET}; sviSeed({ imgFxMode: 'full' });
+  // 场景确定性: 仅在本标签会话首次进入时清除历史学习规则与手动覆盖 (基准可重复运行, 且重载不误清)
+  try {
+    if (!sessionStorage.getItem('sviBenchCleaned')) {
+      localStorage.removeItem('svi:learned');
+      localStorage.removeItem('svi:overrides');
+      sessionStorage.setItem('sviBenchCleaned', '1');
+    }
+  } catch (e) {}
+<\/script>
+<style>body { background: #121212; } img { display:block; width:160px; height:120px; margin: 10px; }</style>
+</head><body>
+  <img id="learn-1" class="thumb-x" src="/img/learn-dark-1.svg" alt="dark1">
+  <img id="learn-2" class="thumb-x" src="/img/learn-dark-2.svg" alt="dark2">
+  <img id="learn-3" class="thumb-x" src="/img/learn-dark-3.svg" alt="dark3">
+  <img id="learn-4" class="thumb-x" src="/img/learn-dark-4.svg" alt="dark4">
+  <script>
+    ${executableScript}
+  <\/script>
+</body></html>`;
+
+// —— v3.0 Scenario 9: 媒体覆盖 (canvas / 视频海报 / Shadow DOM img / SVG image / input image) ——
+const MEDIA_HTML = `<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><title>Media Coverage Bench</title>
+<script>${SEED_SNIPPET}; sviSeed({ imgFxMode: 'full' });<\/script>
+<style>body { background: #121212; color: #eee; padding: 16px; } canvas { display:block; width:160px; height:120px; margin: 10px 0; } video { display:block; width:320px; height:180px; margin: 10px 0; } svg { display:block; width:200px; height:120px; margin: 10px 0; } input { display:block; width:200px; height:120px; margin: 10px 0; }</style>
+</head><body>
+  <canvas id="light-canvas" width="160" height="120"></canvas>
+  <video id="poster-video" poster="/img/light-poster.svg" muted playsinline></video>
+  <div id="shadow-host"></div>
+  <svg viewBox="0 0 200 120" width="200" height="120"><image id="svg-image" href="/img/white-diagram.svg" x="0" y="0" width="200" height="120"/></svg>
+  <input type="image" id="input-image" src="/img/gray-chart.svg" alt="input image">
+  <script>
+    // 浅色 canvas (脚本注入前预绘)
+    var lc = document.getElementById('light-canvas');
+    var lctx = lc.getContext('2d');
+    lctx.fillStyle = '#ffffff'; lctx.fillRect(0, 0, 160, 120);
+    lctx.strokeStyle = '#333'; lctx.strokeRect(10, 10, 140, 100);
+    // Shadow DOM (在油猴补丁之前创建 → 依赖 collectExisting 兜底收集)
+    document.getElementById('shadow-host').attachShadow({ mode: 'open' })
+      .innerHTML = '<img id="shadow-img" src="/img/cream-slide.svg" style="display:block;width:200px;height:120px;">';
+  <\/script>
+  <script>
+    ${executableScript}
+  <\/script>
+</body></html>`;
+
+// —— v3.0 Scenario 10: 存储迁移与管理 (本页在脚本注入前种入 v2.0 形状键并移除 svi:prefs → 走迁移路径) ——
+const STORAGE_HTML = `<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><title>Storage Bench</title>
+<script>
+  ${SEED_SNIPPET};
+  (function () {
+    try {
+      localStorage.setItem('universal_smart_invert_v4', JSON.stringify({ bgReplace: true, statsEnabled: false }));
+      localStorage.removeItem('svi:prefs');
+      localStorage.removeItem('svi:overrides');
+    } catch (e) {}
+  })();
+<\/script>
+</head><body>
+  <h1>Storage Bench</h1>
+  <script>
+    ${executableScript}
+  <\/script>
+</body></html>`;
+
+// —— v3.0 Scenario 12: 共存握手 —— 注入真实构建产物 extension/content.js (含 EXT_MODE 前奏)
+//     与 userscript, 两种顺序。前奏将 EXT_MODE 限制在 wrapper 作用域内 (对应真实内容脚本的
+//     isolated world 语义): userscript 侧始终为 kind 'us', 插件侧为 'ext', 经
+//     documentElement.dataset.sviOwner 裁决唯一所有者。
+function coexistUsFirstHtml(extensionCode) {
+  return `<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><title>Coexistence us-first (real extension bundle)</title></head>
+<body>
+  <h1>Coexistence: userscript first, built extension bundle second</h1>
+  <script>
+    ${executableScript}
+    window.__svi_us = window.__svi;
+  <\/script>
+  <script>
+    ${extensionCode}
+    window.__svi_ext = window.__svi;
+  <\/script>
+</body></html>`;
+}
+
+function coexistExtFirstHtml(extensionCode) {
+  return `<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><title>Coexistence ext-first (real extension bundle)</title></head>
+<body>
+  <h1>Coexistence: built extension bundle first, userscript second</h1>
+  <script>
+    ${extensionCode}
+    window.__svi_ext = window.__svi;
+  <\/script>
+  <script>
+    ${executableScript}
+    window.__svi_us = window.__svi;
+  <\/script>
+</body></html>`;
+}
+
+// 背景替换登录块基准页: 在脚本注入前预置偏好 (bgReplace=true)
+// v3.0: 偏好经 Store 读取 svi:prefs 命名空间 (迁移后) —— 种子需双写 legacy v4 键与 svi:prefs
 const LOGIN_HTML = `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
   <title>Background Replace Login Bench</title>
   <script>
-    localStorage.setItem('universal_smart_invert_v4', JSON.stringify({ bgReplace: true }));
+    ${SEED_SNIPPET}; sviSeed({ bgReplace: true });
   <\/script>
   <style>
     body { margin: 0; padding: 24px; background: #fafafa; color: #111111; font-family: sans-serif; }
@@ -109,6 +389,18 @@ const LOGIN_HTML = `<!DOCTYPE html>
 </html>`;
 
 // 1. Create HTTP test servers (main + cross-origin CORS SVG host)
+// Scenario 12 pages are registered in main() after the extension smoke builds the real bundle.
+const PAGES = {
+  '/login-page': LOGIN_HTML,
+  '/fx-luma-page': FX_LUMA_HTML,
+  '/fx-key-page': FX_KEY_HTML,
+  '/video-fx-page': VIDEO_FX_HTML,
+  '/video-tl-page': VIDEO_TL_HTML,
+  '/learn-page': LEARN_HTML,
+  '/media-page': MEDIA_HTML,
+  '/storage-page': STORAGE_HTML,
+};
+
 const server = http.createServer((req, res) => {
   const url = req.url.split('?')[0];
   if (url === '/' || url === '/index.html') {
@@ -116,9 +408,9 @@ const server = http.createServer((req, res) => {
     res.end(HTML_CONTENT);
     return;
   }
-  if (url === '/login-page') {
+  if (PAGES[url]) {
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-    res.end(LOGIN_HTML);
+    res.end(PAGES[url]);
     return;
   }
   if (SVG_TEMPLATES[url]) {
@@ -157,27 +449,58 @@ function rgbLum(cssColor) {
 }
 
 async function main() {
+  // —— v3.0 Phase 0: node-only extension smoke (design §9 item 11) ——
+  // Runs before the browser phase; a failure here exits non-zero even
+  // without Chrome, and the built bundle feeds the Scenario 12 pages.
+  runExtensionSmoke();
+  const extensionCode = fs.readFileSync(path.join(__dirname, 'extension', 'content.js'), 'utf8');
+  PAGES['/coexist-us-first'] = coexistUsFirstHtml(extensionCode);
+  PAGES['/coexist-ext-first'] = coexistExtFirstHtml(extensionCode);
+
   await listen(server, PORT);
   await listen(corsServer, PORT2);
   console.log(`[TestServer] Main bench at http://127.0.0.1:${PORT} (login page: /login-page)`);
   console.log(`[TestServer] Cross-origin CORS SVG host at http://127.0.0.1:${PORT2}`);
 
   // 2. Launch Chrome headless with CDP (graceful skip when Chrome is unavailable)
+  //    (the node-only extension smoke in Phase 0 has already run at this point)
   if (!fs.existsSync(CHROME_PATH)) {
-    console.warn(`[Browser] Chrome not found at ${CHROME_PATH}; skipping browser end-to-end tests.`);
-    console.warn('[Browser] (Unit tests in test.js still cover the v2.0 pure logic.)');
+    console.warn(`[Browser] Chrome not found (tried ${CHROME_CANDIDATES.filter(Boolean).join(', ')}); skipping browser end-to-end tests.`);
+    console.warn('[Browser] Set SVI_CHROME_PATH to point at a Chrome binary to enable the bench.');
+    console.warn('[Browser] (Unit tests in test.js and the node-only extension smoke still passed.)');
     server.close();
     corsServer.close();
     process.exit(0);
   }
+
+  // v3.0 加固: 若 9222 端口已被遗留 Chrome 占用, 先尝试优雅关闭, 避免连到过期实例
+  try {
+    const probe = await fetch(`http://127.0.0.1:${CDP_PORT}/json/version`).then((r) => r.json()).catch(() => null);
+    if (probe && probe.webSocketDebuggerUrl) {
+      console.warn('[Browser] Stale CDP endpoint detected; closing leftover Chrome ...');
+      await new Promise((resolve) => {
+        const sws = new WebSocket(probe.webSocketDebuggerUrl);
+        sws.onopen = () => {
+          try { sws.send(JSON.stringify({ id: 1, method: 'Browser.close', params: {} })); } catch (e) {}
+          setTimeout(resolve, 1200);
+        };
+        sws.onerror = () => resolve();
+      });
+      await new Promise((r) => setTimeout(r, 800));
+    }
+  } catch (e) { /* ignore */ }
 
   console.log(`[Browser] Launching Headless Chrome: ${CHROME_PATH}`);
   const chromeProc = spawn(CHROME_PATH, [
     `--remote-debugging-port=${CDP_PORT}`,
     '--headless=new',
     '--disable-gpu',
+    '--enable-unsafe-swiftshader', // v3.0: 视频特效 GPU 覆盖层基准需要 SwiftShader WebGL
     '--no-first-run',
     '--no-default-browser-check',
+    // CI (ubuntu) runners: sandbox of the bench Chrome instance is unnecessary
+    // and often blocks in containerized runners — disabled for the bench only.
+    ...(process.platform === 'linux' ? ['--no-sandbox'] : []),
     '--user-data-dir=' + path.join(__dirname, '.chrome-test-profile'),
     `http://127.0.0.1:${PORT}`
   ]);
@@ -228,12 +551,14 @@ async function main() {
       });
     }
 
+    let pageErrorCount = 0; // v3.0: 页面异常计数 (file:// 场景要求零异常)
     ws.addEventListener('message', (evt) => {
       const data = JSON.parse(evt.data);
       if (data.method === 'Runtime.consoleAPICalled') {
         console.log('[Chrome Console]', ...data.params.args.map(a => a.value || a.description));
       }
       if (data.method === 'Runtime.exceptionThrown') {
+        pageErrorCount++;
         console.error('[Chrome Exception]', data.params.exceptionDetails);
       }
     });
@@ -481,6 +806,468 @@ async function main() {
     assert.strictEqual(login.bgrOn, true, 'background replace must be active (data-svi-bgr-on)');
     assert.ok(login.bodyLum >= 0 && login.bodyLum < 120, 'light body background must be replaced with dark equivalent (R1)');
     assert.ok(login.loginLum > 200, 'login box background must stay unchanged (R1 login-block safe)');
+
+    // ============================================================
+    // v3.0 辅助: 页面内条件等待 (轮询 CDP evaluate)
+    // ============================================================
+    async function waitForExpr(expression, timeoutMs, pollMs) {
+      const deadline = Date.now() + (timeoutMs || 10000);
+      while (Date.now() < deadline) {
+        try {
+          const r = await sendCdp('Runtime.evaluate', { expression, returnByValue: true });
+          if (r && r.result && r.result.value === true) return true;
+        } catch (e) { /* ignore */ }
+        await new Promise((r2) => setTimeout(r2, pollMs || 300));
+      }
+      return false;
+    }
+
+    function rgbDelta(a, b) {
+      return [Math.abs(a[0] - b[0]), Math.abs(a[1] - b[1]), Math.abs(a[2] - b[2])];
+    }
+
+    // ============================================================
+    // Scenario 4 (R1): luma 部分反色 —— content:url 投递 + blob 像素读回 + 悬停还原 + kill switch
+    // ============================================================
+    console.log('[Test] Scenario 4: navigating to /fx-luma-page (luma fx) ...');
+    await sendCdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/fx-luma-page` });
+    await new Promise((r) => setTimeout(r, 4500));
+
+    const fxLuma = (await sendCdp('Runtime.evaluate', {
+      expression: `(async () => {
+        const img = document.getElementById('fx-half');
+        const out = {
+          hasFxAttr: img.getAttribute('data-svi-fx') !== null,
+          cssInverted: img.getAttribute('data-svi-inverted') === 'true',
+          fxStyleHasContentRule: ((document.getElementById('svi-fx-style') || {textContent: ''}).textContent.indexOf('content: url(') !== -1),
+          contentComputed: getComputedStyle(img).content
+        };
+        const fx = window.__svi_image_fx;
+        let entry = null;
+        if (fx && fx.lru) { for (const v of fx.lru.values()) { entry = v; break; } }
+        out.hasBlob = !!(entry && entry.blobUrl);
+        if (entry) {
+          const im = await new Promise((resolve, reject) => {
+            const i2 = new Image();
+            i2.onload = () => resolve(i2);
+            i2.onerror = () => reject(new Error('blob load fail'));
+            i2.src = entry.blobUrl;
+          });
+          const cv = document.createElement('canvas');
+          cv.width = im.naturalWidth; cv.height = im.naturalHeight;
+          const ctx = cv.getContext('2d');
+          ctx.drawImage(im, 0, 0);
+          const px = (x, y) => Array.from(ctx.getImageData(x, y, 1, 1).data.slice(0, 3));
+          out.whiteRegion = px(30, 60);
+          out.blueRegion = px(170, 60);
+        }
+        const photo = document.getElementById('fx-photo');
+        out.photoHasFx = photo.getAttribute('data-svi-fx') !== null;
+        return out;
+      })()`,
+      returnByValue: true,
+      awaitPromise: true
+    })).result.value;
+    console.log('Luma fx result:', JSON.stringify(fxLuma));
+    assert.strictEqual(fxLuma.hasFxAttr, true, 'luma: img must carry data-svi-fx');
+    assert.strictEqual(fxLuma.cssInverted, false, 'luma: data-svi-inverted must stay OFF for content-swapped img');
+    assert.strictEqual(fxLuma.fxStyleHasContentRule, true, 'luma: content:url rule must be injected');
+    assert.strictEqual(fxLuma.hasBlob, true, 'luma: processed blob must be cached in engine LRU');
+    assert.ok(fxLuma.whiteRegion[0] < 60 && fxLuma.whiteRegion[1] < 60 && fxLuma.whiteRegion[2] < 60,
+      'luma: white region must be inverted to dark in processed blob, got ' + JSON.stringify(fxLuma.whiteRegion));
+    const blueDelta = rgbDelta(fxLuma.blueRegion, [30, 80, 200]);
+    assert.ok(blueDelta.every((d) => d <= 40),
+      'luma: saturated blue region must stay within ΔRGB ≤ 40, got ' + JSON.stringify(fxLuma.blueRegion));
+    assert.strictEqual(fxLuma.photoHasFx, false, 'luma: colorful photo must NOT be fx-delivered');
+
+    // 悬停还原 (CDP 真实鼠标事件触发 :hover 与委托监听双通道)
+    const fxRect = JSON.parse((await sendCdp('Runtime.evaluate', {
+      expression: `JSON.stringify(document.getElementById('fx-half').getBoundingClientRect())`,
+      returnByValue: true
+    })).result.value);
+    await sendCdp('Input.dispatchMouseEvent', {
+      type: 'mouseMoved',
+      x: Math.round(fxRect.left + fxRect.width / 2),
+      y: Math.round(fxRect.top + fxRect.height / 2)
+    });
+    await new Promise((r) => setTimeout(r, 250));
+    const hoverRes = (await sendCdp('Runtime.evaluate', {
+      expression: `(() => {
+        const img = document.getElementById('fx-half');
+        return { hoverClass: img.classList.contains('svi-fx-hover'), content: getComputedStyle(img).content };
+      })()`,
+      returnByValue: true
+    })).result.value;
+    console.log('Hover state:', JSON.stringify(hoverRes));
+    assert.ok(hoverRes.content.indexOf('blob:') === -1, 'hover must restore original rendering (content unset), got ' + hoverRes.content);
+    await sendCdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 4, y: 4 });
+    await new Promise((r) => setTimeout(r, 250));
+    const unhoverRes = (await sendCdp('Runtime.evaluate', {
+      expression: `getComputedStyle(document.getElementById('fx-half')).content`,
+      returnByValue: true
+    })).result.value;
+    assert.ok(String(unhoverRes).indexOf('blob:') !== -1, 'moving away must restore the fx content delivery');
+
+    // Alt+点击 kill switch
+    const killRes = (await sendCdp('Runtime.evaluate', {
+      expression: `(() => {
+        const img = document.getElementById('fx-half');
+        img.dispatchEvent(new MouseEvent('click', { altKey: true, bubbles: true, cancelable: true }));
+        const off1 = img.getAttribute('data-svi-fx-off') === 'true';
+        const content1 = getComputedStyle(img).content;
+        img.dispatchEvent(new MouseEvent('click', { altKey: true, bubbles: true, cancelable: true }));
+        const off2 = img.getAttribute('data-svi-fx-off') === 'true';
+        return { off1, content1, off2 };
+      })()`,
+      returnByValue: true
+    })).result.value;
+    assert.strictEqual(killRes.off1, true, 'Alt+click must toggle data-svi-fx-off ON');
+    assert.ok(killRes.content1.indexOf('blob:') === -1, 'kill switch must show original image');
+    assert.strictEqual(killRes.off2, false, 'second Alt+click must re-enable the fx delivery');
+
+    // ============================================================
+    // Scenario 5 (R1): key 键色反色 —— 仅键色区域被反色
+    // ============================================================
+    console.log('[Test] Scenario 5: navigating to /fx-key-page (key fx) ...');
+    await sendCdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/fx-key-page` });
+    await new Promise((r) => setTimeout(r, 4500));
+    const fxKey = (await sendCdp('Runtime.evaluate', {
+      expression: `(async () => {
+        const fx = window.__svi_image_fx;
+        let entry = null;
+        if (fx && fx.lru) { for (const v of fx.lru.values()) { entry = v; break; } }
+        if (!entry) return { hasBlob: false };
+        const im = await new Promise((resolve, reject) => {
+          const i2 = new Image();
+          i2.onload = () => resolve(i2);
+          i2.onerror = () => reject(new Error('blob load fail'));
+          i2.src = entry.blobUrl;
+        });
+        const cv = document.createElement('canvas');
+        cv.width = im.naturalWidth; cv.height = im.naturalHeight;
+        const ctx = cv.getContext('2d');
+        ctx.drawImage(im, 0, 0);
+        const px = (x, y) => Array.from(ctx.getImageData(x, y, 1, 1).data.slice(0, 3));
+        return { hasBlob: true, redRegion: px(30, 60), whiteRegion: px(170, 60) };
+      })()`,
+      returnByValue: true,
+      awaitPromise: true
+    })).result.value;
+    console.log('Key fx result:', JSON.stringify(fxKey));
+    assert.strictEqual(fxKey.hasBlob, true, 'key: processed blob must exist');
+    const redDelta = rgbDelta(fxKey.redRegion, [0, 255, 255]);
+    assert.ok(redDelta.every((d) => d <= 40),
+      'key: red (key color) region must invert to cyan, got ' + JSON.stringify(fxKey.redRegion));
+    const whiteDelta = rgbDelta(fxKey.whiteRegion, [255, 255, 255]);
+    assert.ok(whiteDelta.every((d) => d <= 5),
+      'key: white (non-key) region must stay unchanged, got ' + JSON.stringify(fxKey.whiteRegion));
+
+    // ============================================================
+    // Scenario 6 (R2): 视频特效 GPU 覆盖层 (SwiftShader) + PiP 流
+    // ============================================================
+    console.log('[Test] Scenario 6: navigating to /video-fx-page (WebGL overlay luma) ...');
+    await sendCdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/video-fx-page` });
+    const videoReady = await waitForExpr(`(() => {
+      const v = document.getElementById('bench-video');
+      return !!(v && v.currentTime > 0.4 && window.__svi && window.__svi.engines.videoFx);
+    })()`, 15000);
+    assert.ok(videoReady, 'bench video must be playing (currentTime advancing)');
+
+    // 手动开启反色 → 覆盖层创建并 luma 渲染 (autoDetect 已种子关闭)
+    await sendCdp('Runtime.evaluate', { expression: `window.__svi.engines.hil.onUserToggleInvert(); 'on'`, returnByValue: true });
+    const overlayReady = await waitForExpr(`(() => {
+      const ov = document.querySelector('.svi-fx-overlay');
+      return !!(ov && ov.width >= 2);
+    })()`, 8000);
+    console.log('Overlay ready:', overlayReady);
+    await new Promise((r) => setTimeout(r, 1200));
+    const overlayData = (await sendCdp('Runtime.evaluate', {
+      expression: `(() => {
+        const ov = document.querySelector('.svi-fx-overlay');
+        if (!ov) return { found: false, available: window.__svi.engines.videoFx.available, reason: window.__svi.engines.videoFx.unavailableReason };
+        const cv = document.createElement('canvas');
+        cv.width = ov.width; cv.height = ov.height;
+        const ctx = cv.getContext('2d');
+        ctx.drawImage(ov, 0, 0);
+        const px = (x, y) => Array.from(ctx.getImageData(x, y, 1, 1).data.slice(0, 3));
+        return {
+          found: true,
+          w: ov.width, h: ov.height,
+          internalCapped: ov.width <= 1920 && ov.height <= 1080,
+          leftWhite: px(Math.round(ov.width * 0.25), Math.round(ov.height / 2)),
+          rightBlue: px(Math.round(ov.width * 0.75), Math.round(ov.height / 2)),
+          cssFilterOnVideo: document.getElementById('bench-video').style.getPropertyValue('filter') || '(none)'
+        };
+      })()`,
+      returnByValue: true
+    })).result.value;
+    console.log('Overlay readback:', JSON.stringify(overlayData));
+    assert.strictEqual(overlayData.found, true, 'WebGL overlay canvas must exist for positioned video (got reason: ' + (overlayData.reason || 'n/a') + ')');
+    assert.strictEqual(overlayData.internalCapped, true, 'overlay internal resolution must be capped at 1080p');
+    assert.ok(overlayData.leftWhite[0] < 90 && overlayData.leftWhite[1] < 90 && overlayData.leftWhite[2] < 90,
+      'overlay luma: white half must render inverted (dark), got ' + JSON.stringify(overlayData.leftWhite));
+    const ovBlueDelta = rgbDelta(overlayData.rightBlue, [30, 80, 200]);
+    assert.ok(ovBlueDelta.every((d) => d <= 45),
+      'overlay luma: saturated blue half must be preserved, got ' + JSON.stringify(overlayData.rightBlue));
+    assert.strictEqual(overlayData.cssFilterOnVideo, '(none)', 'CSS filter must be suppressed while overlay is active');
+
+    // PiP 路径: 处理流必须产出至少一条视频轨
+    const pipStream = (await sendCdp('Runtime.evaluate', {
+      expression: `(() => {
+        const s = window.__svi.engines.videoFx.captureProcessedStream(document.getElementById('bench-video'));
+        return { tracks: s.getTracks().length, kind: s.getTracks()[0] ? s.getTracks()[0].kind : null };
+      })()`,
+      returnByValue: true
+    })).result.value;
+    console.log('PiP stream:', JSON.stringify(pipStream));
+    assert.ok(pipStream.tracks >= 1, 'captureStream must yield at least one track');
+    assert.strictEqual(pipStream.kind, 'video', 'first track must be a video track');
+
+    // ============================================================
+    // Scenario 7 (R3): 时间线记忆 —— 手动修正记录片段, 重载后 reference 模式自动布防
+    // ============================================================
+    console.log('[Test] Scenario 7: navigating to /video-tl-page (timeline record) ...');
+    await sendCdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/video-tl-page` });
+    const tlPlaying = await waitForExpr(`(() => {
+      const v = document.getElementById('bench-video');
+      return !!(v && v.currentTime > 0.4 && window.__svi && window.__svi.engines.hil);
+    })()`, 15000);
+    assert.ok(tlPlaying, 'timeline bench video must be playing');
+    await sendCdp('Runtime.evaluate', { expression: `window.__svi.engines.hil.onUserToggleInvert(); 'on'`, returnByValue: true });
+    await new Promise((r) => setTimeout(r, 1600));
+    await sendCdp('Runtime.evaluate', { expression: `window.__svi.engines.hil.onUserToggleInvert(); 'off'`, returnByValue: true });
+    await new Promise((r) => setTimeout(r, 900)); // Store 400ms 防抖落盘
+    const segRes = (await sendCdp('Runtime.evaluate', {
+      expression: `(() => {
+        const data = window.__svi.Store.get('timeline', {});
+        const keys = Object.keys(data);
+        let segs = null;
+        for (const k of keys) { if (data[k].segs && data[k].segs.length) { segs = data[k].segs; break; } }
+        return { keyCount: keys.length, segs };
+      })()`,
+      returnByValue: true
+    })).result.value;
+    console.log('Recorded timeline:', JSON.stringify(segRes));
+    assert.ok(segRes.segs && segRes.segs.length >= 1, 'timeline must record at least one invert-active segment');
+
+    console.log('[Test] Scenario 7: reloading to verify reference-mode auto-arm ...');
+    await sendCdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/video-tl-page` });
+    const segEnd = segRes.segs[segRes.segs.length - 1][1];
+    const armed = await waitForExpr(`(() => {
+      const v = document.getElementById('bench-video');
+      return !!(v && v.currentTime > 0.9 && v.currentTime < ${(segEnd + 0.4).toFixed(2)} && window.__svi && window.__svi.runtime.invertActive === true);
+    })()`, 15000);
+    assert.ok(armed, 'reference mode must auto-arm inversion inside the learned segment (no user action)');
+    const disarmed = await waitForExpr(`(() => {
+      const v = document.getElementById('bench-video');
+      return !!(v && v.currentTime > ${(segEnd + 0.6).toFixed(2)} && window.__svi.runtime.invertActive === false);
+    })()`, 15000);
+    assert.ok(disarmed, 'reference mode must disarm outside the learned segment');
+
+    // ============================================================
+    // Scenario 8 (R4): 自学习规则 —— 3 次 Alt+点击修正 → 学习规则在全新加载中自动反色第 4 张
+    // ============================================================
+    console.log('[Test] Scenario 8: navigating to /learn-page (rule learning) ...');
+    await sendCdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/learn-page` });
+    await new Promise((r) => setTimeout(r, 3500));
+    const clickRes = (await sendCdp('Runtime.evaluate', {
+      expression: `(() => {
+        let invertedBefore = 0;
+        for (let i = 1; i <= 3; i++) {
+          const img = document.getElementById('learn-' + i);
+          if (img.getAttribute('data-svi-inverted') === 'true') invertedBefore++;
+          img.dispatchEvent(new MouseEvent('click', { altKey: true, bubbles: true, cancelable: true }));
+        }
+        return { invertedBefore, rules: window.__svi.RuleLearner.rulesFor(window.__svi.profileKey()) };
+      })()`,
+      returnByValue: true
+    })).result.value;
+    console.log('RuleLearner after 3 corrections:', JSON.stringify(clickRes));
+    assert.strictEqual(clickRes.invertedBefore, 0, 'dark images must not be auto-inverted before corrections');
+    assert.ok(clickRes.rules.some((r) => r.stem === 'img.thumb-x' && r.hits >= 3), '3 corrections must aggregate into one learned rule with hits ≥ 3');
+    await new Promise((r) => setTimeout(r, 900)); // 落盘
+    await sendCdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/learn-page` });
+    await new Promise((r) => setTimeout(r, 4000));
+    const learnedRes = (await sendCdp('Runtime.evaluate', {
+      expression: `(() => {
+        const out = {};
+        for (let i = 1; i <= 4; i++) {
+          out['learn-' + i] = document.getElementById('learn-' + i).getAttribute('data-svi-inverted') === 'true';
+        }
+        out.smartSection = !!document.getElementById('svi-sec-smart');
+        out.smartText = document.getElementById('svi-sec-smart') ? document.getElementById('svi-sec-smart').textContent : '';
+        return out;
+      })()`,
+      returnByValue: true
+    })).result.value;
+    console.log('After reload:', JSON.stringify(learnedRes));
+    assert.strictEqual(learnedRes['learn-4'], true, 'learned rule must auto-invert the untouched 4th dark image on fresh load');
+    assert.ok(learnedRes.smartSection, '🧠智能 section must exist');
+    assert.ok(learnedRes.smartText.indexOf('img.thumb-x') !== -1, 'learned rule must be listed in the 🧠智能 section');
+
+    // ============================================================
+    // Scenario 9 (R8): 媒体覆盖 —— canvas / 视频海报 / Shadow DOM img / SVG image / input image
+    // ============================================================
+    console.log('[Test] Scenario 9: navigating to /media-page (media coverage) ...');
+    await sendCdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/media-page` });
+    await new Promise((r) => setTimeout(r, 6000));
+    const mediaRes = (await sendCdp('Runtime.evaluate', {
+      expression: `(() => {
+        const cv = document.getElementById('light-canvas');
+        const pv = document.getElementById('poster-video');
+        const sh = document.getElementById('shadow-host').shadowRoot.getElementById('shadow-img');
+        const si = document.getElementById('svg-image');
+        const ii = document.getElementById('input-image');
+        return {
+          canvasInverted: cv.getAttribute('data-svi-inverted') === 'true',
+          posterLight: pv.dataset.sviPoster === 'light',
+          shadowImgInverted: !!(sh && sh.getAttribute('data-svi-inverted') === 'true'),
+          svgImageInverted: !!(si && si.getAttribute('data-svi-inverted') === 'true'),
+          inputImageInverted: !!(ii && ii.getAttribute('data-svi-inverted') === 'true'),
+          overlayCanvasTouched: !!cv.classList.contains('svi-fx-overlay')
+        };
+      })()`,
+      returnByValue: true
+    })).result.value;
+    console.log('Media coverage:', JSON.stringify(mediaRes));
+    assert.strictEqual(mediaRes.canvasInverted, true, 'light canvas must be inverted');
+    assert.strictEqual(mediaRes.posterLight, true, 'light video poster must be tagged data-svi-poster=light');
+    assert.strictEqual(mediaRes.shadowImgInverted, true, 'shadow-DOM img must be inverted');
+    assert.strictEqual(mediaRes.svgImageInverted, true, 'inline SVG <image> must be inverted');
+    assert.strictEqual(mediaRes.inputImageInverted, true, 'input[type=image] must be inverted');
+
+    // ============================================================
+    // Scenario 10 (R6): 存储迁移与管理 —— v2.0 键迁移 / 键删除 / 导出解析
+    // (迁移由 /storage-page 自身的注入前种子驱动: 种 v4 + 删 svi:prefs → 用户脚本
+    //  引导时走遗留迁移路径, 同页断言, 避免 pagehide 落盘覆盖种子)
+    // ============================================================
+    console.log('[Test] Scenario 10: navigating to /storage-page (storage migration) ...');
+    await sendCdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/storage-page` });
+    await new Promise((r) => setTimeout(r, 4500));
+    const storageRes = (await sendCdp('Runtime.evaluate', {
+      expression: `(() => {
+        const out = {};
+        const sp = localStorage.getItem('svi:prefs');
+        out.sviPrefsParses = !!sp;
+        if (sp) {
+          try {
+            const parsed = JSON.parse(sp);
+            out.markerStatsEnabled = parsed.statsEnabled === false;
+            out.markerBgReplace = parsed.bgReplace === true;
+            out.noManualOverrides = !('manualOverrides' in parsed);
+          } catch (e) { out.sviPrefsParses = false; }
+        }
+        out.legacyV4Untouched = !!localStorage.getItem('universal_smart_invert_v4');
+        out.overridesKey = !!localStorage.getItem('svi:overrides');
+        out.backend = window.__svi.Store.backend;
+        out.describeCount = window.__svi.Store.describe().length;
+        out.storageSection = !!document.getElementById('svi-sec-storage');
+        out.badgeText = (document.querySelector('#svi-sec-storage .svi-backend-badge') || {textContent: ''}).textContent;
+        out.exportParses = (() => { try { JSON.stringify(window.__svi.Store.exportAll()); return true; } catch (e) { return false; } })();
+        // 键删除
+        try {
+          window.__svi.Store.remove('timeline');
+          window.__svi.Store.flush();
+          out.timelineDeleted = !localStorage.getItem('svi:timeline');
+        } catch (e) { out.timelineDeleted = false; }
+        return out;
+      })()`,
+      returnByValue: true
+    })).result.value;
+    console.log('Storage:', JSON.stringify(storageRes));
+    assert.strictEqual(storageRes.sviPrefsParses, true, 'svi:prefs must be recreated by migration');
+    assert.strictEqual(storageRes.markerStatsEnabled, true, 'migrated prefs must carry the v2.0 seeded marker (statsEnabled=false)');
+    assert.strictEqual(storageRes.markerBgReplace, true, 'migrated prefs must carry the v2.0 seeded bgReplace');
+    assert.strictEqual(storageRes.noManualOverrides, true, 'manualOverrides must not live inside svi:prefs');
+    assert.strictEqual(storageRes.legacyV4Untouched, true, 'legacy v4 key must be preserved for rollback');
+    assert.ok(storageRes.describeCount >= 1, 'storage manager must list keys');
+    assert.strictEqual(storageRes.storageSection, true, '💾存储 section must exist');
+    assert.ok(storageRes.badgeText.length > 0, 'backend badge must show a label');
+    assert.strictEqual(storageRes.exportParses, true, 'export JSON must serialize');
+    assert.strictEqual(storageRes.timelineDeleted, true, 'key delete must remove the backend entry');
+
+    // ============================================================
+    // Scenario 11 (R7): file:// 支持 —— 引导 + UI + 零页面异常
+    // ============================================================
+    console.log('[Test] Scenario 11: file:// page ...');
+    const os = require('os');
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'svi-file-test-'));
+    const FILE_PAGE = `<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><title>SVI file bench</title>
+<style>img { display:block; width:200px; height:120px; }</style>
+</head><body>
+  <h1>file bench</h1>
+  <img id="f-img" src="./pic.svg" alt="local pic">
+  <script>
+    ${executableScript}
+  <\/script>
+</body></html>`;
+    fs.writeFileSync(path.join(tmpDir, 'page.html'), FILE_PAGE);
+    fs.writeFileSync(path.join(tmpDir, 'pic.svg'), SVG_TEMPLATES['/img/white-diagram.svg']);
+    const fileUrl = 'file:///' + path.resolve(tmpDir, 'page.html').replace(/\\/g, '/');
+    console.log('[Test] file URL:', fileUrl);
+    pageErrorCount = 0;
+    await sendCdp('Page.navigate', { url: fileUrl });
+    await new Promise((r) => setTimeout(r, 4500));
+    const fileRes = (await sendCdp('Runtime.evaluate', {
+      expression: `(() => ({
+        booted: !!(window.__svi && window.__svi.version),
+        version: window.__svi ? window.__svi.version : null,
+        hasPill: !!document.querySelector('.svi-trigger-pill'),
+        hasStorageSection: !!document.getElementById('svi-sec-storage'),
+        imgTagged: !!document.getElementById('f-img').getAttribute('data-svi-failed'),
+        runtimeBlockedFlag: !!(window.__svi && window.__svi.runtime && window.__svi.runtime.fileAccessBlocked)
+      }))()`,
+      returnByValue: true
+    })).result.value;
+    console.log('file:// result:', JSON.stringify(fileRes), 'pageErrors =', pageErrorCount);
+    assert.strictEqual(fileRes.booted, true, 'script must boot on file:// pages');
+    assert.strictEqual(fileRes.version, '3.0.0', 'file:// page must report v3.0.0');
+    assert.strictEqual(fileRes.hasPill, true, 'UI must be present on file:// pages');
+    assert.strictEqual(fileRes.hasStorageSection, true, 'storage section (with file hint) must exist');
+    assert.strictEqual(pageErrorCount, 0, 'file:// page must boot with zero uncaught page errors');
+
+    // ============================================================
+    // Scenario 12 (R9-core): 共存握手 —— 首启动者认领, 后到者休眠 (两种顺序)
+    // v3.0: 第二参与方为真实构建产物 extension/content.js (含 EXT_MODE 前奏),
+    // 不再是模拟的 window.EXT_MODE 注入。
+    // ============================================================
+    console.log('[Test] Scenario 12: coexistence handshake (us first) ...');
+    await sendCdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/coexist-us-first` });
+    await new Promise((r) => setTimeout(r, 3000));
+    const coexistUs = (await sendCdp('Runtime.evaluate', {
+      expression: `(() => ({
+        owner: (document.documentElement.dataset.sviOwner || '').split('|')[0],
+        usBooted: !!(window.__svi_us && window.__svi_us.version && !window.__svi_us.dormant),
+        extDormant: !!(window.__svi_ext && window.__svi_ext.dormant === true),
+        singleUI: document.querySelectorAll('.svi-capsule-root').length
+      }))()`,
+      returnByValue: true
+    })).result.value;
+    console.log('Coexistence us-first:', JSON.stringify(coexistUs));
+    assert.strictEqual(coexistUs.owner, 'us', 'userscript must claim the page');
+    assert.strictEqual(coexistUs.usBooted, true, 'first booter must boot normally');
+    assert.strictEqual(coexistUs.extDormant, true, 'second (ext-kind) booter must go dormant');
+    assert.strictEqual(coexistUs.singleUI, 1, 'exactly one UI instance must exist');
+
+    console.log('[Test] Scenario 12: coexistence handshake (ext first) ...');
+    await sendCdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/coexist-ext-first` });
+    await new Promise((r) => setTimeout(r, 3000));
+    const coexistExt = (await sendCdp('Runtime.evaluate', {
+      expression: `(() => ({
+        owner: (document.documentElement.dataset.sviOwner || '').split('|')[0],
+        extBooted: !!(window.__svi_ext && window.__svi_ext.version && !window.__svi_ext.dormant),
+        usDormant: !!(window.__svi_us && window.__svi_us.dormant === true),
+        singleUI: document.querySelectorAll('.svi-capsule-root').length
+      }))()`,
+      returnByValue: true
+    })).result.value;
+    console.log('Coexistence ext-first:', JSON.stringify(coexistExt));
+    assert.strictEqual(coexistExt.owner, 'ext', 'ext-kind script must claim the page');
+    assert.strictEqual(coexistExt.extBooted, true, 'ext-first booter must boot normally');
+    assert.strictEqual(coexistExt.usDormant, true, 'second (userscript) booter must go dormant');
+    assert.strictEqual(coexistExt.singleUI, 1, 'exactly one UI instance must exist');
 
     console.log('\n🎉 ALL BROWSER AUTOMATION TESTS PASSED 100% SUCCESFULLY!\n');
 

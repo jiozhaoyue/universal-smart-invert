@@ -426,7 +426,7 @@ vm.runInThisContext(scriptSource, { filename: 'universal-smart-invert.user.js' }
 
 const svi = window.__svi;
 assert.ok(svi, 'window.__svi must be exported for tests');
-assert.strictEqual(svi.version, '2.0.0', 'script version must be 2.0.0');
+assert.strictEqual(svi.version, '3.0.0', 'script version must be 3.0.0');
 
 // —— 7a. v3 → v4 迁移: 剥离运行时键, 保留偏好, 旧键不动 (R7) ——
 const v4raw = storageData['universal_smart_invert_v4'];
@@ -590,7 +590,7 @@ assert.ok(ghRule.forceInvert.some((s) => s.includes('.markdown-body img')), 'git
 const export1 = svi.exportStats();
 assert.strictEqual(export1.schema, 1, 'export envelope schema');
 assert.ok(typeof export1.exportedAt === 'string' && export1.exportedAt.length > 0, 'exportedAt ISO string');
-assert.strictEqual(export1.version, '2.0.0', 'export version');
+assert.strictEqual(export1.version, '3.0.0', 'export version');
 assert.ok(export1.counters && typeof export1.counters === 'object', 'export counters object');
 assert.ok(typeof export1.counters.imagesAnalyzed === 'number', 'counter imagesAnalyzed');
 assert.ok(typeof export1.counters.taintFallbacks === 'number', 'counter taintFallbacks');
@@ -611,12 +611,385 @@ assert.strictEqual(svi.stats.log.length, 0, 'clear empties log');
 svi.stats.load();
 assert.strictEqual(svi.stats.log.length, 0, 'load after clear starts clean');
 
-console.log('✓ v2.0 site-engine export tests passed: migration / pattern match / profile merge / small-element classify / color mapping / shield / manual overrides / BUILTIN_RULES / stats');
+// ============================================================
+// v3.0 新增单测 (design §9 Node list): transformPixel / segments /
+// selectorStem / RuleLearner / Store (chrome.storage.sync mock) /
+// mediaDominantViewport / rect math
+// ============================================================
+
+// —— 8a. transformPixel 各模式 (R1) ——
+const tp = svi.transformPixel;
+// invert-full: 恒反色
+assert.deepStrictEqual(tp(10, 20, 30, 'invert-full'), [245, 235, 225], 'invert-full always inverts');
+// luma: 亮色低饱和像素反色, 彩色像素保留 (null)
+assert.deepStrictEqual(tp(255, 255, 255, 'luma', { lumCutoff: 190, satCutoff: 0.30 }), [0, 0, 0], 'luma inverts light pixel');
+assert.deepStrictEqual(tp(250, 250, 245, 'luma', { lumCutoff: 190, satCutoff: 0.30 }), [5, 5, 10], 'luma inverts near-white pixel');
+assert.strictEqual(tp(200, 60, 30, 'luma', { lumCutoff: 190, satCutoff: 0.30 }), null, 'luma keeps saturated colorful pixel');
+assert.strictEqual(tp(80, 80, 80, 'luma', { lumCutoff: 190, satCutoff: 0.30 }), null, 'luma keeps dark pixel (below cutoff)');
+// key: 仅键色附近像素反色
+assert.deepStrictEqual(tp(250, 10, 10, 'key', { keyColor: '#ff0000', keyTol: 60 }), [5, 245, 245], 'key inverts near-key pixel');
+assert.strictEqual(tp(255, 255, 255, 'key', { keyColor: '#ff0000', keyTol: 60 }), null, 'key keeps white pixel far from key');
+assert.deepStrictEqual(tp(230, 230, 230, 'key', { keyColor: '#ffffff', keyTol: 60 }), [25, 25, 25], 'key inverts near-white with white key');
+assert.strictEqual(tp(200, 60, 30, 'key', { keyColor: '#ffffff', keyTol: 60 }), null, 'key keeps colorful pixel away from white key');
+// rect: 像素函数 = 全反色 (边界由循环控制)
+assert.deepStrictEqual(tp(10, 20, 30, 'rect'), [245, 235, 225], 'rect pixel fn is invert-full');
+// 效果模式
+const gray = tp(200, 60, 30, 'grayscale');
+assert.ok(gray[0] === gray[1] && gray[1] === gray[2], 'grayscale output must be neutral');
+assert.ok(gray[0] > 80 && gray[0] < 120, 'grayscale uses BT.601 luma');
+const sep = tp(200, 60, 30, 'sepia');
+assert.ok(sep[0] > sep[1] && sep[1] > sep[2], 'sepia output must be warm-ordered r>g>b');
+assert.ok(sep[0] > 120, 'sepia brightens red channel');
+const br = tp(100, 100, 100, 'brightness', { brightness: 1.2 });
+assert.deepStrictEqual(br, [120, 120, 120], 'brightness scales channels');
+assert.strictEqual(tp(5, 5, 5, 'unknown-mode'), null, 'unknown mode keeps original');
+// 与 shader 相同的 luma 语义 (白 255 判定): relLuminance(255,255,255)=254 ≥ 190
+assert.strictEqual(svi.relLuminance(255, 255, 255) >= 190, true, 'BT.601 white luma above cutoff');
+
+// —— 8b. mergeSegments (重叠/间隔合并) + lookupSegment 边界 (R3) ——
+const ms = svi.mergeSegments;
+assert.deepStrictEqual(ms([[0, 1], [0.5, 2]], 0), [[0, 2]], 'overlapping segments merge');
+assert.deepStrictEqual(ms([[0, 1], [3, 4]], 2), [[0, 4]], 'gap within gapMs merges');
+assert.deepStrictEqual(ms([[0, 1], [3, 4]], 1.9), [[0, 1], [3, 4]], 'gap beyond gapMs stays separate');
+assert.deepStrictEqual(ms([[5, 6], [0, 1], [0.5, 2]], 0.2), [[0, 2], [5, 6]], 'input order independent');
+assert.deepStrictEqual(ms([], 2), [], 'empty input');
+const segsInput = [[0, 1], [1, 2]];
+ms(segsInput, 0);
+assert.deepStrictEqual(segsInput, [[0, 1], [1, 2]], 'mergeSegments must not mutate input');
+const ls = svi.lookupSegment;
+assert.deepStrictEqual(ls([[0.5, 2]], 0.5), [0.5, 2], 'lookup at t0 boundary (inclusive)');
+assert.deepStrictEqual(ls([[0.5, 2]], 2), [0.5, 2], 'lookup at t1 boundary (inclusive)');
+assert.strictEqual(ls([[0.5, 2]], 2.01), null, 'outside segment returns null');
+assert.strictEqual(ls([[0.5, 2]], 0.49), null, 'before segment returns null');
+assert.deepStrictEqual(ls([[0, 1], [3, 4]], 3.5), [3, 4], 'lookup in second segment');
+
+// —— 8c. selectorStem 形状 (R4): tag + 首个 class; 无 class 回退 #id (id 每元素唯一, 恒加入会破坏聚合) ——
+const ss = svi.selectorStem;
+assert.strictEqual(ss({ tagName: 'IMG', id: '', className: 'thumb-x primary' }), 'img.thumb-x', 'tag + first class');
+assert.strictEqual(ss({ tagName: 'IMG', id: 'learn-1', className: 'thumb-x' }), 'img.thumb-x', 'same-class elements must share a stem (id not included)');
+assert.strictEqual(ss({ tagName: 'DIV', id: 'hero', className: '' }), 'div#hero', 'id fallback when no class');
+assert.strictEqual(ss({ tagName: 'span', id: '', className: '' }), 'span', 'bare tag');
+assert.strictEqual(ss({ tagName: 'IMAGE', id: '', className: { baseVal: 'svg-img' } }), 'image.svg-img', 'SVG className.baseVal support');
+assert.strictEqual(ss(null), '', 'null element');
+
+// —— 8d. RuleLearner 聚合 (2 次命中激活, 删除, 反转重置) (R4) ——
+const rl = svi.RuleLearner;
+const testHost = 'learn.test';
+// 记录 2 次 invert → 激活
+rl.record(testHost, { tagName: 'IMG', id: '', className: 'thumb-x' }, 'invert');
+assert.strictEqual(rl.decideFor(testHost, { tagName: 'IMG', id: '', className: 'thumb-x' }), null, '1 hit below threshold (learnHits=2)');
+rl.record(testHost, { tagName: 'IMG', id: '', className: 'thumb-x' }, 'invert');
+assert.strictEqual(rl.decideFor(testHost, { tagName: 'IMG', id: '', className: 'thumb-x' }), 'invert', '2 hits activate learned rule');
+assert.strictEqual(rl.decideFor(testHost, { tagName: 'IMG', id: '', className: 'other' }), null, 'different stem not matched');
+assert.strictEqual(rl.rulesFor(testHost).length, 1, 'rules listed per host');
+// protect 反转: 计数重置
+rl.record(testHost, { tagName: 'IMG', id: '', className: 'thumb-x' }, 'protect');
+assert.strictEqual(rl.decideFor(testHost, { tagName: 'IMG', id: '', className: 'thumb-x' }), null, 'action flip resets hits below threshold');
+rl.record(testHost, { tagName: 'IMG', id: '', className: 'thumb-x' }, 'protect');
+assert.strictEqual(rl.decideFor(testHost, { tagName: 'IMG', id: '', className: 'thumb-x' }), 'protect', 'protect re-activates at threshold');
+// 删除
+assert.strictEqual(rl.deleteRule(testHost, 'img.thumb-x'), true, 'deleteRule removes');
+assert.strictEqual(rl.decideFor(testHost, { tagName: 'IMG', id: '', className: 'thumb-x' }), null, 'deleted rule no longer applies');
+// Store 持久化 (svi:learned)
+assert.ok(svi.Store.get('learned'), 'RuleLearner persists via Store');
+
+// —— 8e. Store: chrome.storage.sync 模拟 (8KB 分片 / 镜像读写 / 防抖 / 导出导入 / 遗留迁移) (R6) ——
+// 构造异步 chrome.storage.sync 形状的后端 mock
+function makeChromeSyncMock() {
+  const area = new Map();
+  let writeCount = 0;
+  const api = {
+    get(keyOrKeys, cb) {
+      setTimeout(() => {
+        if (keyOrKeys === null) {
+          const out = {};
+          for (const [k, v] of area) out[k] = v;
+          cb(out);
+        } else if (typeof keyOrKeys === 'string') {
+          const out = {};
+          if (area.has(keyOrKeys)) out[keyOrKeys] = area.get(keyOrKeys);
+          cb(out);
+        } else {
+          cb({});
+        }
+      }, 1);
+    },
+    set(obj, cb) {
+      writeCount++;
+      setTimeout(() => {
+        for (const k of Object.keys(obj)) area.set(k, obj[k]);
+        if (cb) cb();
+      }, 1);
+    },
+    remove(keys, cb) {
+      setTimeout(() => {
+        for (const k of Array.isArray(keys) ? keys : [keys]) area.delete(k);
+        if (cb) cb();
+      }, 1);
+    },
+  };
+  api.__writeCount = () => writeCount;
+  api.__snapshot = () => Object.fromEntries(area);
+  return api;
+}
+
+// 用隔离的 Store 克隆测试 (不污染全局单例): 实例自有 mirror/pending + 注入 chrome mock 后端
+function makeTestStore(mock) {
+  const st = Object.create(svi.Store);
+  st.mirror = new Map();     // 遮蔽原型上的共享 Map (隔离)
+  st.pending = new Set();
+  st._removed = new Set();
+  st.__useBackend('chrome-sync', Object.create(svi.Store)._makeChromeApi.call({ PREFIX: 'svi:' }, mock));
+  st.detectBackend = () => 'chrome-sync'; // 锁定后端 (Node 无全局 chrome)
+  return st;
+}
+{
+  const mock = makeChromeSyncMock();
+  const localStore = makeTestStore(mock);
+
+  // 镜像读后写 (同步)
+  localStore.set('unitA', { hello: 'world' });
+  assert.strictEqual(localStore.get('unitA').hello, 'world', 'mirror read-after-write is sync');
+
+  // 大值分片: 20000 字符 → 多 chunk + meta 清单
+  const big = { blob: 'x'.repeat(20000) };
+  localStore.set('unitBig', big);
+  assert.ok(JSON.stringify(big).length > localStore.CHUNK_SIZE, 'test value exceeds chunk size');
+  localStore.flush();
+  setTimeout(() => {
+    const snap = mock.__snapshot();
+    const metaKey = 'svi:unitBig.meta';
+    assert.ok(snap[metaKey], 'chunked write emits meta manifest');
+    const meta = JSON.parse(snap[metaKey]);
+    assert.ok(meta.chunks >= 3, 'large value split into multiple chunks');
+    assert.ok(snap['svi:unitBig#0'], 'chunk #0 written');
+    assert.ok(!('svi:unitBig' in snap), 'plain key removed when chunked');
+
+    // 重新装载: readRawAsync 重组 → mirror 还原
+    setTimeout(() => {
+      localStore.mirror.clear();
+      localStore.ready = false;
+      localStore.init().then(() => {
+        const restored = localStore.get('unitBig');
+        assert.ok(restored && restored.blob && restored.blob.length === 20000, 'chunked value reassembles on load');
+        assert.strictEqual(localStore.get('unitA').hello, 'world', 'small value roundtrips');
+
+        // 防抖合并: 多次 set 后 pending 仅含一个逻辑键, 手动 flush 等效于防抖到期 → 单次写入最新值
+        localStore.set('deb', 1);
+        localStore.set('deb', 2);
+        localStore.set('deb', 3);
+        assert.ok(localStore.pending.has('deb'), 'multiple sets collapse to one pending key');
+        localStore.flush();
+        setTimeout(() => {
+          assert.strictEqual(localStore.get('deb'), 3, 'debounced flush keeps latest value');
+          const snap2 = mock.__snapshot();
+          assert.strictEqual(JSON.parse(snap2['svi:deb']), 3, 'debounce collapses to single write');
+
+          // 导出/导入往返
+          const exported = localStore.exportAll();
+          assert.ok(exported['svi:unitA'], 'exportAll exposes namespaced keys');
+          const store2 = makeTestStore(makeChromeSyncMock());
+          assert.ok(store2.importAll(exported) >= 2, 'importAll accepts namespaced payload');
+          assert.strictEqual(store2.get('unitA').hello, 'world', 'import/export roundtrip preserves values');
+
+          // remove 落盘
+          localStore.remove('unitA');
+          localStore.flush();
+          setTimeout(() => {
+            assert.ok(!('svi:unitA' in mock.__snapshot()), 'removed key disappears from backend');
+            console.log('✓ v3.0 Store chrome.storage.sync mock tests passed (chunking / mirror / debounce / export-import / remove)');
+          }, 30);
+        }, 600);
+      });
+    }, 30);
+  }, 30);
+}
+
+// —— 8e-2. Store 回归: bootSync 后 chrome 后端必须仍可 init (插件版持久化曾因 ready 提前置位而失效) ——
+{
+  const chromeMock = makeChromeSyncMock();
+  const st = makeTestStore(chromeMock);
+  st.set('prefs', { brightness: 0.77 });
+  st.flush();
+  setTimeout(() => {
+    // 全新启动模拟 (不经 makeTestStore 的 __useBackend —— 那会预置 ready)
+    const st2 = Object.create(svi.Store);
+    st2.mirror = new Map();
+    st2.pending = new Set();
+    st2._removed = new Set();
+    // 模拟真实 chrome: bootSync 检测为 chrome-sync 后 ready 不得为 true
+    st2.detectBackend = () => 'chrome-sync';
+    st2._api = null;   // 遮蔽单例继承的 local api (chrome 全新启动时 _api 为 null)
+    st2.ready = false; // 遮蔽单例继承值 (回归点: 旧代码 bootSync 会无条件置 true, init() 因此空转)
+    st2.bootSync();
+    assert.strictEqual(st2.backend, 'chrome-sync', 'chrome backend detected');
+    assert.strictEqual(st2.ready, false, 'bootSync must NOT mark chrome backend ready (init() would no-op and chrome.storage would never load)');
+    // 将远端快照搬进 st2 的 api (模拟已存在的云端数据)
+    const snap = chromeMock.__snapshot();
+    st2._api = Object.create(svi.Store)._makeChromeApi.call({ PREFIX: 'svi:' }, {
+      get(keyOrKeys, cb) {
+        setTimeout(() => {
+          if (keyOrKeys === null) {
+            const out = {};
+            for (const [k, v] of Object.entries(snap)) out[k] = v;
+            cb(out);
+          } else {
+            cb(snap[keyOrKeys] !== undefined ? { [keyOrKeys]: snap[keyOrKeys] } : {});
+          }
+        }, 1);
+      },
+      set(obj, cb) { setTimeout(() => cb(), 1); },
+      remove(keys, cb) { setTimeout(() => cb(), 1); },
+    });
+    st2.init().then(() => {
+      const p = st2.get('prefs');
+      assert.ok(p && p.brightness === 0.77, 'init() loads remote namespace into mirror after boot (regression: extension persistence)');
+      assert.strictEqual(st2.ready, true, 'init completes ready flag');
+    }).catch(() => { assert.fail('init() should not reject'); });
+  }, 40);
+}
+
+// —— 8e-3. Store 回归: sync 配额写失败 → 降级 chrome.storage.local (数据不丢失, 不抛错) ——
+{
+  const syncArea = new Map();
+  const localArea = new Map();
+  const runtimeStub = { lastError: null };
+  const mkApi = (area, fail) => ({
+    get(keyOrKeys, cb) {
+      setTimeout(() => {
+        if (keyOrKeys === null) {
+          const out = {};
+          for (const [k, v] of area) out[k] = v;
+          cb(out);
+        } else if (typeof keyOrKeys === 'string') {
+          cb(area.has(keyOrKeys) ? { [keyOrKeys]: area.get(keyOrKeys) } : {});
+        } else { cb({}); }
+      }, 1);
+    },
+    set(obj, cb) {
+      setTimeout(() => {
+        for (const k of Object.keys(obj)) if (!fail) area.set(k, obj[k]);
+        // 模拟 chrome 行为: lastError 在回调执行期间可读, 回调返回后清理
+        if (fail) runtimeStub.lastError = new Error('QUOTA_BYTES_PER_ITEM exceeded');
+        if (cb) cb();
+        runtimeStub.lastError = null;
+      }, 1);
+    },
+    remove(keys, cb) {
+      setTimeout(() => {
+        for (const k of Array.isArray(keys) ? keys : [keys]) area.delete(k);
+        if (cb) cb();
+      }, 1);
+    },
+  });
+  global.chrome = { runtime: runtimeStub, storage: { sync: mkApi(syncArea, true), local: mkApi(localArea, false) } };
+  try {
+    const st = makeTestStore(makeChromeSyncMock());
+    st.backend = 'chrome-sync';
+    st.useChunking = true;
+    st._api = Object.create(svi.Store)._makeChromeApi.call({ PREFIX: 'svi:' }, global.chrome.storage.sync);
+    st.detectBackend = () => 'chrome-sync';
+    st.set('big', { blob: 'y'.repeat(9000) });
+    st.flush();
+    setTimeout(() => {
+      assert.strictEqual(st.backend, 'chrome-local', 'quota failure degrades backend to chrome-local');
+      assert.strictEqual(st.useChunking, false, 'local backend skips chunking');
+      const saved = localArea.get('svi:big');
+      assert.ok(saved && JSON.parse(saved).blob.length === 9000, 'failed value rewritten into chrome.storage.local');
+      console.log('✓ v3.0 Store quota-degrade regression passed (sync → local fallback)');
+    }, 120);
+  } finally {
+    // 清理全局桩 (避免影响其它用例的 chrome 探测)
+    setTimeout(() => { try { delete global.chrome; } catch (e) { global.chrome = undefined; } }, 300);
+  }
+}
+
+// —— 8e-4. Store 回归: 分片键删除必须连 meta/#i 一起清 (否则重启后旧值"复活") + chunkRaw 字节预算 ——
+{
+  const mock = makeChromeSyncMock();
+  const st = makeTestStore(mock);
+  st.set('chunked', { blob: 'z'.repeat(20000) });
+  st.flush();
+  setTimeout(() => {
+    let snap = mock.__snapshot();
+    assert.ok(snap['svi:chunked.meta'], 'chunked key has meta manifest');
+    st.remove('chunked');
+    st.flush();
+    setTimeout(() => {
+      snap = mock.__snapshot();
+      assert.ok(!('svi:chunked' in snap), 'logical key removed');
+      assert.ok(!('svi:chunked.meta' in snap), 'chunk manifest removed with key (regression: stale chunks resurrect deleted values)');
+      assert.ok(!('svi:chunked#0' in snap), 'chunk #0 removed with key');
+      // chunkRaw: 多字节内容每片 UTF-8 字节数不超预算
+      const cjk = { blob: '中'.repeat(5000) }; // 每字符 3 字节
+      const parts = svi.Store.chunkRaw.call({ CHUNK_SIZE: 7000 }, JSON.stringify(cjk));
+      assert.ok(parts.length >= 3, 'multibyte value splits into multiple chunks');
+      const enc = (s) => {
+        let n = 0;
+        for (let i = 0; i < s.length; i++) {
+          const c = s.charCodeAt(i);
+          n += c >= 0xD800 && c <= 0xDBFF && i + 1 < s.length ? 4 : (c < 0x80 ? 1 : (c < 0x800 ? 2 : 3));
+        }
+        return n;
+      };
+      for (const p of parts) assert.ok(enc(p) <= 7000, 'each chunk within UTF-8 byte budget');
+      console.log('✓ v3.0 Store chunk-removal + byte-budget regression passed');
+    }, 60);
+  }, 60);
+}
+
+// 遗留键迁移: svi:prefs 缺失时从 universal_smart_invert_v4 读取 (legacy 键原样保留)
+{
+  // 当前单例 Store 在脚本 boot 时已完成迁移 —— 断言其结果
+  assert.ok(svi.Store.get('prefs') || storageData['universal_smart_invert_v4'], 'Store migration produced prefs from legacy key');
+  const migrated = svi.Store.get('prefs');
+  if (migrated) {
+    assert.ok(!('manualOverrides' in migrated), 'manualOverrides split out of svi:prefs into svi:overrides');
+    assert.ok(svi.Store.get('overrides'), 'svi:overrides carries manual overrides');
+  }
+  assert.ok(storageData['universal_smart_invert_v3'], 'legacy v3 key untouched');
+}
+
+// —— 8f. mediaDominantViewport (R3/R4 媒体主导) ——
+const mdv = svi.mediaDominantViewport;
+const fakeVideo = {
+  getBoundingClientRect() { return { width: 800, height: 600, left: 0, top: 0 }; },
+};
+assert.ok(Math.abs(mdv(fakeVideo, 1280, 720) - (800 * 600) / (1280 * 720)) < 1e-9, 'viewport coverage ratio');
+assert.strictEqual(mdv(fakeVideo, 800, 600), 1, 'full-viewport video clamps to 1');
+assert.strictEqual(mdv(fakeVideo, 400, 300), 1, 'oversized video clamps to 1');
+assert.strictEqual(mdv(null, 800, 600), 0, 'null video → 0');
+assert.strictEqual(mdv(fakeVideo, 0, 0), 0, 'zero viewport → 0');
+
+// —— 8g. rect 相对区域数学 (R1) ——
+// 相对 rect 归一化: 区域 [0.25, 0.25, 0.5, 0.5] 于 200x100 图像 → 像素边界 (50..100, 25..50)
+{
+  const w = 200;
+  const h = 100;
+  const rel = { x: 0.25, y: 0.25, w: 0.5, h: 0.5 };
+  const x0 = Math.round(rel.x * w);
+  const y0 = Math.round(rel.y * h);
+  const x1 = Math.round((rel.x + rel.w) * w);
+  const y1 = Math.round((rel.y + rel.h) * h);
+  assert.strictEqual(x0, 50, 'rect x0 pixel bound');
+  assert.strictEqual(y0, 25, 'rect y0 pixel bound');
+  assert.strictEqual(x1, 150, 'rect x1 pixel bound');
+  assert.strictEqual(y1, 75, 'rect y1 pixel bound');
+  assert.ok(x0 < x1 && y0 < y1, 'rect bounds well-formed');
+}
+
+// —— 8h. hash32 稳定性 (时间线指纹基础) ——
+assert.strictEqual(svi.hash32('https://example.com/a.png'), svi.hash32('https://example.com/a.png'), 'hash deterministic');
+assert.strictEqual(svi.hash32('a') !== svi.hash32('b'), true, 'different inputs differ');
+assert.ok(/^[0-9a-f]{8}$/.test(svi.hash32('anything')), 'hash output is 8 hex chars');
+
+console.log('✓ v3.0 core unit tests passed: transformPixel / mergeSegments / lookupSegment / selectorStem / RuleLearner / Store / mediaDominantViewport / rect / hash32');
 
 // 显式退出: 脚本启动桩中的常驻定时器 (统计落盘 interval、3s 后的引擎初始化循环) 会阻止进程自然退出
+// v3.0: 延长至 1500ms —— 等待异步 Store (chrome.storage mock) 单测链完成
 setTimeout(() => {
   console.log('✓ All unit, benchmark, multi-light-color, and v2.0 site-engine tests passed successfully!');
   process.exit(0);
-}, 200);
+}, 1500);
 
 

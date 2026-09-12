@@ -1,7 +1,7 @@
 # 全网通用智能视频与图片反色 (Universal Smart Video & Image Invert)
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-2.0.0-blue.svg?style=flat-square" alt="Version">
+  <img src="https://img.shields.io/badge/version-3.0.0-blue.svg?style=flat-square" alt="Version">
   <img src="https://img.shields.io/badge/license-MIT-green.svg?style=flat-square" alt="License">
   <img src="https://img.shields.io/badge/Tampermonkey-Supported-orange.svg?style=flat-square" alt="Tampermonkey">
   <img src="https://img.shields.io/badge/ScriptCat-Supported-purple.svg?style=flat-square" alt="ScriptCat">
@@ -97,6 +97,40 @@
 
 ---
 
+## 🆕 v3.0 重大升级 (部分反色 · 预测性反色 · 自学习 · 插件化)
+
+### 1. ✨ 部分反色与特效管线 (不止反色)
+- **图片部分反色（2D Canvas 离屏管线）**：`亮度反色 (luma)` 只反白底高明度像素、彩色照片原样保留；`键色反色 (key)` 只反指定颜色容差内的像素（"指定颜色反色"）；`区域反色 (rect)` 由 `Alt+Shift+拖拽` 圈选任意不规则区域；另有 `灰度 / 怀旧 (sepia) / 亮度 / 自定义滤镜` 等非反色特效；
+- **视频特效（WebGL 着色器覆盖层）**：与图片同款模式集跑在 GPU 上，逐帧处理（`requestVideoFrameCallback`），覆盖层精准贴合播放器、指针事件穿透，原 CSS 滤镜在覆盖层激活期间自动抑制（绝不双重处理）；WebGL 不可用时优雅回退 CSS 滤镜；
+- **画中画输出 📺**：处理后的画面经 `canvas.captureStream()` 直送 **画中画窗口**，边写代码边看深色网课；
+- 投递采用 `content: url(blob)` 内容替换（不动 `src`，不破坏懒加载），悬停瞬时还原、`Alt+点击` 单图杀停、按 `src+模式+参数` 缓存（LRU 上限 + Blob 主动回收）。
+
+### 2. 🔮 预测性视频反色与时间线记忆 (永不迟到)
+- **rVFC 逐帧采样**取代 250ms 轮询：检测到滤镜生效延迟从最高 250ms 降至 **约 1-2 个合成器帧**；
+- **TimelineLearner 时间线记忆**：反色生效期间自动按视频指纹记录 `[起,止]` 片段（合并、持久化），重放时按已学习的时间线 **提前布防反色**（"参考"模式：自动预布防、手动操作永远优先；"接管"模式：时间线直接控制），真正实现"提前定好会反色的时间"。
+
+### 3. 🧬 自学习元素规则 (拒绝手写规则)
+- 每次 `Alt+点击` 修正按"选择器词干"聚合，同一词干命中 N 次（默认 2，可调 2~6）自动生成站点学习规则（强制反色 / 保护）；
+- 学习规则 **优先于内置规则库**；内置规则表降级为种子/兜底层；
+- 🧠智能 设置板块直接列出本站已学习规则（词干 / 动作 / 命中次数），可一键删除。
+
+### 4. 💾 浏览器存储与云同步 + 存储管理
+- 全部持久化状态收敛到 **`svi:` 命名空间**，经统一 `Store` 抽象读写，后端链：**`chrome.storage.sync`（插件版云同步）→ GM 存储（可随油猴云同步, 取决于油猴的同步设置）→ localStorage**；
+- 异步后端 + 内存镜像：读取零成本，写入 400ms 防抖批量落盘；`chrome.storage.sync` 单条 8KB 配额自动分片重组；v2.0 旧键自动无损迁移（旧键保留可回滚）；
+- 💾存储 设置板块：后端徽章、逐键大小/预览/删除、JSON 导出 / 导入 / 一键清空。
+
+### 5. 🧩 媒体全覆盖与 file:// 支持
+- 新覆盖：`<canvas>`（浅色图表检测）、**视频海报图**、**Shadow DOM** 内图片（幂等 `attachShadow` 补丁 + 有界收集）、内联 SVG `<image>`、`input[type=image]`；
+- `@match file:///*`：本地 HTML 文件页可正常引导与反色；本地图片解码被浏览器拦截时优雅降级并给出一次性提示，绝不崩溃。
+
+### 6. 🧰 浏览器插件版与 CI / 自动发布
+- `universal-smart-invert.user.js` 仍是唯一源头；插件版由 **零依赖 Node 脚本** 自动派生：`scripts/build-extension.js`（MV3 `manifest.json` 版本/名称/描述与脚本头自动同步 + chrome.storage 适配 + GM 垫片）、`scripts/gen-icons.js`（手写 PNG 编码器）、`scripts/pack.js`（自研 ZIP 打包器）；
+- **共存握手**：油猴脚本与插件版可同时安装，先启动者认领页面（5 秒心跳），后到者休眠启动，绝不双重滤镜；
+- **GitHub Actions**：`ci.yml`（单测 + 构建冒烟 + 独立 headless Chrome 基准）与 `release.yml`（推送 `v*` 标签 → 测试 → 构建 → zip/CRX → GitHub Release → Chrome Web Store 上传与发布，secrets 缺失时自动跳过）；
+- 详细配置见 [PUBLISHING.md](./PUBLISHING.md) 「浏览器插件发布 (Extension)」章节。
+
+---
+
 ## 🚀 安装指南
 
 ### 步骤 1：安装用户脚本管理器
@@ -114,6 +148,12 @@
 ```
 https://raw.githubusercontent.com/jiozhaoyue/universal-smart-invert/main/universal-smart-invert.user.js
 ```
+
+### 方案 B：浏览器插件版 (v3.0 新增, Load Unpacked)
+不想装油猴？可以直接以 Chrome/Edge 扩展形态使用同一套能力：
+1. 本地运行 `node scripts/gen-icons.js && node scripts/build-extension.js && node scripts/pack.js`（零 npm 依赖）；
+2. 打开 `chrome://extensions` → 开启「开发者模式」→「加载已解压的扩展程序」→ 选择 `extension/` 目录；
+3. 与油猴脚本同时安装也安全：两者通过休眠握手自动协商，只保留一个活动实例（详见 [PUBLISHING.md](./PUBLISHING.md)）。
 
 ---
 
@@ -182,6 +222,12 @@ https://raw.githubusercontent.com/jiozhaoyue/universal-smart-invert/main/univers
 2. 进入控制台 ->「发布脚本」-> 粘贴 `universal-smart-invert.user.js`；
 3. 平台会自动解析 `@name`、`@version` 与元信息；
 4. 点击发布完成审核。
+
+### 3. 浏览器插件版与自动化发布 (v3.0 新增)
+1. 插件版由脚本自动派生（零 npm 依赖）：
+   `node scripts/gen-icons.js && node scripts/build-extension.js && node scripts/pack.js` → `extension/` + `dist/*.zip`；
+2. 推送 `v*` 标签即可触发 GitHub Actions：自动测试 → 构建 → zip/CRX → GitHub Release →（配置 secrets 后）Chrome Web Store 上传与发布；
+3. CRX 私钥与 CWS OAuth 凭据的一次性配置步骤详见 [PUBLISHING.md](./PUBLISHING.md)。
 
 ---
 

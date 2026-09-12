@@ -1,0 +1,153 @@
+# Tag-driven release: push a `v*` tag -> tests -> extension build -> zip ->
+# GitHub Release (+ CRX when CRX_PRIVATE_KEY exists) -> Chrome Web Store
+# upload + publish (only when the CWS_* secrets all exist).
+#
+# Missing secrets NEVER fail the release: the CRX and CWS steps skip cleanly
+# and the GitHub Release still ships the extension ZIP.
+#
+# NOTE: the `secrets` context is NOT allowed in `if:` conditions (step-level
+# included — the runner rejects the file with "Unrecognized named-value"),
+# so every guarded step keys off a boolean exported into GITHUB_ENV by a
+# preceding gate step instead.
+#
+# Required secrets (all optional — see PUBLISHING.md "浏览器插件发布 (Extension)"):
+#   CRX_PRIVATE_KEY   RSA private key PEM (openssl genrsa) used to sign the CRX3.
+#   CWS_CLIENT_ID     Google Cloud OAuth2 client id (Desktop app type)
+#   CWS_CLIENT_SECRET matching client secret
+#   CWS_REFRESH_TOKEN OAuth2 refresh token with chromewebstore scope
+#   CWS_PUBLISHER_ID  Chrome Web Store publisher id (required by
+#                     chrome-webstore-upload-cli's documented env interface)
+#   CWS_EXTENSION_ID  Chrome Web Store item id
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Test, build, pack and publish
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Syntax check userscript
+        run: node --check universal-smart-invert.user.js
+
+      - name: Unit tests
+        run: node test.js
+
+      - name: Build extension (icons -> content.js + manifest -> zip)
+        run: |
+          node scripts/gen-icons.js
+          node scripts/build-extension.js
+          node scripts/pack.js
+
+      - name: Smoke assertions (manifest valid, version sync, content.js syntax)
+        run: |
+          node --check extension/content.js
+          node -e '
+            const fs = require("fs");
+            const m = JSON.parse(fs.readFileSync("extension/manifest.json", "utf8"));
+            if (m.manifest_version !== 3) throw new Error("manifest_version must be 3");
+            const headerVersion = (fs.readFileSync("universal-smart-invert.user.js", "utf8").match(/\/\/\s*@version\s+(\S+)/) || [])[1];
+            if (!headerVersion) throw new Error("@version not found in userscript header");
+            if (m.version !== headerVersion) throw new Error("manifest.version " + m.version + " != userscript @version " + headerVersion);
+            if (JSON.stringify(m.permissions) !== JSON.stringify(["storage"])) throw new Error("manifest permissions must be [\"storage\"]");
+            console.log("Extension smoke OK:", m.name, m.version);
+          '
+
+      # Resolve the packed zip name from the built manifest (single source of
+      # truth; identical naming logic to scripts/pack.js). NOTE: GITHUB_ENV is
+      # only visible to SUBSEQUENT steps, so the existence check uses the
+      # shell-local variable, not $ZIP_NAME.
+      - name: Resolve artifact paths
+        run: |
+          ZIP_NAME="universal-smart-invert-extension-v$(node -p 'require("./extension/manifest.json").version').zip"
+          echo "ZIP_NAME=$ZIP_NAME" >> "$GITHUB_ENV"
+          test -f "dist/$ZIP_NAME"
+
+      # CRX packaging is gated on the secret via a GITHUB_ENV boolean: the
+      # `secrets` context cannot be used inside `if:` (the runner rejects the
+      # workflow file at parse time). The secret is passed into the step via
+      # `env` (secrets cannot be read inside `run:`), written to a temp PEM
+      # file, used by npx crx3, then deleted.
+      - name: Gate CRX packaging on secret availability
+        env:
+          CRX_PRIVATE_KEY: ${{ secrets.CRX_PRIVATE_KEY }}
+        run: |
+          if [ -n "$CRX_PRIVATE_KEY" ]; then
+            echo "CRX_ENABLED=true" >> "$GITHUB_ENV"
+          else
+            echo "CRX_ENABLED=false" >> "$GITHUB_ENV"
+            echo "CRX_PRIVATE_KEY secret missing - CRX packaging will be skipped."
+          fi
+
+      - name: Package CRX3 (skipped when CRX_PRIVATE_KEY secret is absent)
+        if: env.CRX_ENABLED == 'true'
+        env:
+          CRX_PRIVATE_KEY: ${{ secrets.CRX_PRIVATE_KEY }}
+        run: |
+          KEY_FILE="$RUNNER_TEMP/crx-private-key.pem"
+          printf '%s\n' "$CRX_PRIVATE_KEY" > "$KEY_FILE"
+          npx --yes crx3 -p "$KEY_FILE" -o dist/extension.crx extension/
+          rm -f "$KEY_FILE"
+          echo "CRX packaged: dist/extension.crx"
+
+      # Gate CWS steps on secret availability: a prior step exports
+      # CWS_ENABLED into the job environment, the publish steps key off
+      # `if: env.CWS_ENABLED == 'true'` (missing secrets -> skip cleanly).
+      # PUBLISHER_ID is part of chrome-webstore-upload-cli's documented
+      # required env interface (CLIENT_ID/CLIENT_SECRET/REFRESH_TOKEN/PUBLISHER_ID).
+      - name: Gate Chrome Web Store publishing on secret availability
+        env:
+          CWS_CLIENT_ID: ${{ secrets.CWS_CLIENT_ID }}
+          CWS_CLIENT_SECRET: ${{ secrets.CWS_CLIENT_SECRET }}
+          CWS_REFRESH_TOKEN: ${{ secrets.CWS_REFRESH_TOKEN }}
+          CWS_PUBLISHER_ID: ${{ secrets.CWS_PUBLISHER_ID }}
+          CWS_EXTENSION_ID: ${{ secrets.CWS_EXTENSION_ID }}
+        run: |
+          if [ -n "$CWS_CLIENT_ID" ] && [ -n "$CWS_CLIENT_SECRET" ] && [ -n "$CWS_REFRESH_TOKEN" ] && [ -n "$CWS_PUBLISHER_ID" ] && [ -n "$CWS_EXTENSION_ID" ]; then
+            echo "CWS_ENABLED=true" >> "$GITHUB_ENV"
+          else
+            echo "CWS_ENABLED=false" >> "$GITHUB_ENV"
+            echo "CWS secrets missing (need CWS_CLIENT_ID, CWS_CLIENT_SECRET, CWS_REFRESH_TOKEN, CWS_PUBLISHER_ID, CWS_EXTENSION_ID) - Chrome Web Store steps will be skipped."
+          fi
+
+      # chrome-webstore-upload-cli reads CLIENT_ID / CLIENT_SECRET /
+      # REFRESH_TOKEN / PUBLISHER_ID from the environment (not CLI flags);
+      # the item id is passed via --extension-id for clarity.
+      - name: Upload to Chrome Web Store (skipped when CWS secrets are absent)
+        if: env.CWS_ENABLED == 'true'
+        env:
+          CLIENT_ID: ${{ secrets.CWS_CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.CWS_CLIENT_SECRET }}
+          REFRESH_TOKEN: ${{ secrets.CWS_REFRESH_TOKEN }}
+          PUBLISHER_ID: ${{ secrets.CWS_PUBLISHER_ID }}
+          EXTENSION_ID: ${{ secrets.CWS_EXTENSION_ID }}
+        run: npx --yes chrome-webstore-upload-cli upload --source "dist/$ZIP_NAME" --extension-id "$EXTENSION_ID"
+
+      - name: Publish to Chrome Web Store (skipped when CWS secrets are absent)
+        if: env.CWS_ENABLED == 'true'
+        env:
+          CLIENT_ID: ${{ secrets.CWS_CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.CWS_CLIENT_SECRET }}
+          REFRESH_TOKEN: ${{ secrets.CWS_REFRESH_TOKEN }}
+          PUBLISHER_ID: ${{ secrets.CWS_PUBLISHER_ID }}
+          EXTENSION_ID: ${{ secrets.CWS_EXTENSION_ID }}
+        run: npx --yes chrome-webstore-upload-cli publish --extension-id "$EXTENSION_ID"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          fail_on_unmatched_files: true

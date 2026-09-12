@@ -1,0 +1,82 @@
+# Continuous Integration for universal-smart-invert.
+#
+# Job 1 (tests): syntax check + node unit tests + extension build pipeline
+#                (zero npm dependencies — plain Node only) + smoke assertions.
+# Job 2 (browser-bench): headless-Chrome end-to-end bench via CDP. Required and
+#                isolated: it runs in its own job with its own Chrome install so
+#                runner/Chrome issues cannot mask unit-test failures — but its
+#                failures DO fail CI (no continue-on-error).
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  tests:
+    name: Tests (node) + extension build smoke
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Syntax check userscript
+        run: node --check universal-smart-invert.user.js
+
+      - name: Unit tests
+        run: node test.js
+
+      - name: Build extension (icons -> content.js + manifest -> zip)
+        run: |
+          node scripts/gen-icons.js
+          node scripts/build-extension.js
+          node scripts/pack.js
+
+      - name: Smoke assertions (manifest valid, version sync, content.js syntax)
+        run: |
+          node --check extension/content.js
+          node -e '
+            const fs = require("fs");
+            const m = JSON.parse(fs.readFileSync("extension/manifest.json", "utf8"));
+            if (m.manifest_version !== 3) throw new Error("manifest_version must be 3");
+            if (m.name == null || m.description == null) throw new Error("manifest name/description missing");
+            const headerVersion = (fs.readFileSync("universal-smart-invert.user.js", "utf8").match(/\/\/\s*@version\s+(\S+)/) || [])[1];
+            if (!headerVersion) throw new Error("@version not found in userscript header");
+            if (m.version !== headerVersion) throw new Error("manifest.version " + m.version + " != userscript @version " + headerVersion);
+            if (JSON.stringify(m.permissions) !== JSON.stringify(["storage"])) throw new Error("manifest permissions must be [\"storage\"]");
+            const cs = m.content_scripts && m.content_scripts[0];
+            if (!cs || cs.run_at !== "document_end" || cs.all_frames !== true) throw new Error("content_scripts shape mismatch");
+            for (const size of ["16", "32", "48", "128"]) {
+              if (!fs.existsSync("extension/icons/icon" + size + ".png")) throw new Error("icons/icon" + size + ".png missing");
+            }
+            console.log("Extension smoke OK:", m.name, m.version);
+          '
+
+  browser-bench:
+    name: Browser bench (headless Chrome, required but isolated)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Setup Chrome
+        id: setup-chrome
+        uses: browser-actions/setup-chrome@v1
+        with:
+          chrome-version: stable
+
+      - name: Run browser bench (includes node-only extension smoke phase)
+        env:
+          SVI_CHROME_PATH: ${{ steps.setup-chrome.outputs.chrome-path }}
+        run: node test-browser.js
