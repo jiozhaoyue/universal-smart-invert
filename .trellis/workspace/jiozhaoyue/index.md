@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 7
+- **Total Sessions**: 8
 - **Last Active**: 2026-09-12
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~156 | Active |
+| `journal-1.md` | ~178 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 8 | 2026-09-12 | v3.2 video tune: independent picture adjustments | `adcd218` | `main` |
 | 7 | 2026-09-12 | v3.1 feedback hardening: GitHub pre-scroll fix, smart image policy, media inspector | `67b4cde` | `main` |
 | 6 | 2026-09-12 | v3.0: partial-effect pipeline, predictive video, self-learning rules, extension prep | `7db7bd4` | `main` |
 | 5 | 2026-09-12 | v2.0 Site Engine: background replace, per-site rules, tab isolation, stats | `0f078ba` | `main` |

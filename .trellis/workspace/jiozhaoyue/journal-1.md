@@ -154,3 +154,25 @@ Diagnosed GitHub README ineffectiveness via live CDP probes (pipeline OK; below-
 ### Status
 
 [OK] **Completed**
+
+
+## Session 8: v3.2 video tune: independent picture adjustments
+<!-- trellis-session: v=2 fp=7306f72bd1efb30d -->
+
+**Date**: 2026-09-12
+**Task**: v3.2 video tune: independent picture adjustments
+**Branch**: `main`
+
+### Summary
+
+Shipped v3.2.0: independent video picture tuning (brightness/contrast/saturate/warmth/grayscale) applied to all videos via stylesheet rule, composed into the inversion inline chain and the WebGL overlay shader (new u_sepia/u_gray uniforms), 🎚️ modal section with reusable slider rows + 护眼/夜间/鲜艳/还原 presets, persisted prefs with per-field normalization. Root-caused a bench flake: the fixed .chrome-test-profile persisted overrides across runs — profile now wiped per run. 18 bench scenarios + unit tests green; extension rebuilt to 3.2.0.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `adcd218` | chore(task): archive 09-12-v32-video-tune |
+
+### Status
+
+[OK] **Completed**
