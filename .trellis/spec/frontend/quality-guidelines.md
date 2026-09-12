@@ -73,6 +73,22 @@ rules below are battle-tested conventions from v1.4.0 → v2.0.0; follow them fo
 
 ---
 
+## v3.1 Additions (decision pipeline, inspector, policies)
+
+- **Manual overrides must force-refresh decision snapshots**: `recordDecision` snapshots are
+  normally write-once, but a user's Alt+click choice has higher precedence than any cached
+  decision — the override path records with `force=true`, or the mutation fast-path re-inverts
+  against the user's explicit choice.
+- **Decision order is: manual override → snapshot → learned → seed → policy → pixel analysis.**
+  A same-session pixel decision must never shadow a persisted override.
+- **`composedPath()` retargets for OPEN shadow roots too** — do not skip hosts with `n.shadowRoot`
+  when resolving the event target; the ShadowDomRegistry resolves both open and closed roots.
+- **Event-to-media resolution must match the scan selectors exactly** (e.g. `input[type="image" i]`,
+  not any `input`) or Alt+click on unrelated elements toasts and pollutes the rule learner.
+- **Lazy-collect UI sections must not auto-refresh on modal open** — the collect button drives the
+  (budgeted) scan; auto-refresh defeats the empty state and costs a page-wide sweep.
+- Any computed-style sweep needs a candidate cap (align with the engine budgets, 1500).
+
 ## Testing Requirements
 
 - `node --check universal-smart-invert.user.js` must pass.
