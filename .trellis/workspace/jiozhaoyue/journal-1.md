@@ -132,3 +132,25 @@ Shipped v3.0.0: canvas/WebGL partial-inversion and effect pipeline (luma-mask, c
 ### Status
 
 [OK] **Completed**
+
+
+## Session 7: v3.1 feedback hardening: GitHub pre-scroll fix, smart image policy, media inspector
+<!-- trellis-session: v=2 fp=c1b44c4bb58c1e8c -->
+
+**Date**: 2026-09-12
+**Task**: v3.1 feedback hardening: GitHub pre-scroll fix, smart image policy, media inspector
+**Branch**: `main`
+
+### Summary
+
+Diagnosed GitHub README ineffectiveness via live CDP probes (pipeline OK; below-fold images waited for viewport; badge decisions flipped between passes). v3.1.0: unified decideImage pipeline (override > snapshot > learned > seed > policy > pixels) with decide-once semantics, eager pre-scroll pass (live page: 7/29 inverted without scrolling vs 1/29 baseline), imagePolicy balanced/conservative/aggressive with grid+chrome-context detection (bilibili-style covers skip), current-page media inspector with toggle/locate, hoverRestore toggle, composedPath viewer compatibility; 8 check findings fixed; 17 bench scenarios green.
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `67b4cde` | docs(spec): v3.1 lessons (override force-refresh, decision order, composedPath retargeting, lazy-collect sections) |
+
+### Status
+
+[OK] **Completed**
