@@ -1,0 +1,248 @@
+{
+  "schema": 1,
+  "kind": "svi-rule-library",
+  "generatedAt": "2026-09-13T10:32:26.456Z",
+  "version": "4.2.0",
+  "count": 19,
+  "builtinRules": [
+    {
+      "pattern": "bilibili.com",
+      "name": "哔哩哔哩",
+      "protect": [
+        ".bpx-player-control-wrap",
+        ".bili-danmaku",
+        ".squirtle-video-page",
+        ".bilibili-player-video-danmaku"
+      ],
+      "forceInvert": [],
+      "bgImageSelectors": [
+        ".b-img__inner",
+        ".reply-image .b-img",
+        "[class*=\"image-box\"] img",
+        ".bili-comment-image"
+      ],
+      "disableVideoAuto": false,
+      "bgReplace": false
+    },
+    {
+      "pattern": "live.bilibili.com",
+      "name": "哔哩哔哩直播",
+      "protect": [
+        ".bilibili-live-player-video-danmaku",
+        ".bpx-player-control-wrap"
+      ],
+      "forceInvert": [],
+      "bgImageSelectors": [],
+      "disableVideoAuto": true,
+      "bgReplace": false
+    },
+    {
+      "pattern": "github.com",
+      "name": "GitHub",
+      "protect": [
+        ".Avatar",
+        ".avatar",
+        "img[src*=\"identicons\"]"
+      ],
+      "forceInvert": [
+        ".markdown-body img",
+        "img[src*=\"camo.githubusercontent.com\"]"
+      ],
+      "bgImageSelectors": [],
+      "disableVideoAuto": false,
+      "bgReplace": false
+    },
+    {
+      "pattern": "163.com",
+      "name": "网易 163 (邮箱/门户/博客)",
+      "protect": [],
+      "forceInvert": [
+        ".mail-body img",
+        "img[src*=\"coremail\"]"
+      ],
+      "bgImageSelectors": [
+        "[class*=\"bg-img\"]",
+        ".mail-bg"
+      ],
+      "disableVideoAuto": false,
+      "bgReplace": true
+    },
+    {
+      "pattern": "zhihu.com",
+      "name": "知乎",
+      "protect": [
+        ".Avatar",
+        ".avatar"
+      ],
+      "forceInvert": [
+        ".RichContent-inner img"
+      ],
+      "bgImageSelectors": [],
+      "disableVideoAuto": false,
+      "bgReplace": false
+    },
+    {
+      "pattern": "weibo.com",
+      "name": "微博",
+      "protect": [
+        ".avatar"
+      ],
+      "forceInvert": [],
+      "bgImageSelectors": [],
+      "disableVideoAuto": false,
+      "bgReplace": false
+    },
+    {
+      "pattern": "youtube.com",
+      "name": "YouTube",
+      "protect": [
+        ".ytp-chrome-bottom",
+        ".ytp-chrome-controls",
+        ".ytp-cued-thumbnail-overlay"
+      ],
+      "forceInvert": [],
+      "bgImageSelectors": [],
+      "disableVideoAuto": true,
+      "bgReplace": false
+    },
+    {
+      "pattern": "douyin.com",
+      "name": "抖音",
+      "protect": [
+        ".xg-controls",
+        ".xgplayer"
+      ],
+      "forceInvert": [],
+      "bgImageSelectors": [],
+      "disableVideoAuto": true,
+      "bgReplace": false
+    },
+    {
+      "pattern": "iqiyi.com",
+      "name": "爱奇艺",
+      "protect": [
+        ".iqp-player-interface"
+      ],
+      "forceInvert": [],
+      "bgImageSelectors": [],
+      "disableVideoAuto": true,
+      "bgReplace": false
+    },
+    {
+      "pattern": "youku.com",
+      "name": "优酷",
+      "protect": [
+        ".kui-control-bar"
+      ],
+      "forceInvert": [],
+      "bgImageSelectors": [],
+      "disableVideoAuto": true,
+      "bgReplace": false
+    },
+    {
+      "pattern": "v.qq.com",
+      "name": "腾讯视频",
+      "protect": [
+        ".txp_player_controls",
+        ".txp-popup"
+      ],
+      "forceInvert": [],
+      "bgImageSelectors": [],
+      "disableVideoAuto": true,
+      "bgReplace": false
+    },
+    {
+      "pattern": "twitter.com",
+      "name": "Twitter/X",
+      "protect": [],
+      "forceInvert": [],
+      "bgImageSelectors": [],
+      "disableVideoAuto": false,
+      "bgReplace": false
+    },
+    {
+      "pattern": "x.com",
+      "name": "Twitter/X",
+      "protect": [],
+      "forceInvert": [],
+      "bgImageSelectors": [],
+      "disableVideoAuto": false,
+      "bgReplace": false
+    },
+    {
+      "pattern": "qq.com",
+      "name": "腾讯 (QQ/邮箱/门户)",
+      "protect": [
+        ".avatar"
+      ],
+      "forceInvert": [],
+      "bgImageSelectors": [],
+      "disableVideoAuto": false,
+      "bgReplace": false
+    },
+    {
+      "pattern": "taobao.com",
+      "name": "淘宝",
+      "protect": [
+        "[class*=\"avatar\"]"
+      ],
+      "forceInvert": [],
+      "bgImageSelectors": [],
+      "disableVideoAuto": false,
+      "bgReplace": false
+    },
+    {
+      "pattern": "jd.com",
+      "name": "京东",
+      "protect": [
+        "#ttbar-login",
+        ".avatar"
+      ],
+      "forceInvert": [],
+      "bgImageSelectors": [],
+      "disableVideoAuto": false,
+      "bgReplace": false
+    },
+    {
+      "pattern": "stackoverflow.com",
+      "name": "Stack Overflow",
+      "protect": [
+        ".s-avatar"
+      ],
+      "forceInvert": [
+        ".s-prose img"
+      ],
+      "bgImageSelectors": [],
+      "disableVideoAuto": false,
+      "bgReplace": false
+    },
+    {
+      "pattern": "juejin.cn",
+      "name": "掘金",
+      "protect": [
+        ".avatar"
+      ],
+      "forceInvert": [
+        ".markdown-body img"
+      ],
+      "bgImageSelectors": [],
+      "disableVideoAuto": false,
+      "bgReplace": false
+    },
+    {
+      "pattern": "csdn.net",
+      "name": "CSDN",
+      "protect": [
+        ".avatar",
+        ".profile-img"
+      ],
+      "forceInvert": [
+        "#content_views img",
+        ".markdown_views img"
+      ],
+      "bgImageSelectors": [],
+      "disableVideoAuto": false,
+      "bgReplace": false
+    }
+  ]
+}

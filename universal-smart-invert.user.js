@@ -3,10 +3,10 @@
 // @name:zh-CN   全网通用智能视频与图片反色
 // @name:en      Universal Smart Video & Image Invert
 // @namespace    https://github.com/jiozhaoyue/universal-smart-invert
-// @version      4.1.0
-// @description  全网通用智能视频与图片反色脚本 (v4.1, AGPL-3.0 开源)。新增: 字体覆盖与文字描边 (Dark Reader 同款无障碍能力, 热生效); 保留 v4.0 电源热生效/双页签/三态能力卡片与 v3.x 全部引擎能力。
-// @description:zh-CN 全网通用智能视频与图片反色脚本 (v4.1, AGPL-3.0 开源)。新增: 字体覆盖与文字描边; 保留 v4.0 站点电源热生效/双页签/三态能力卡片与更早全部能力。
-// @description:en Universal smart video and image invert userscript (v4.1, AGPL-3.0 licensed). New: font override and text stroke (Dark Reader-style readability, hot-applied); all v4.0 hot site power, tabs, tri-state cards and earlier capabilities retained.
+// @version      4.2.0
+// @description  全网通用智能视频与图片反色脚本 (v4.2, AGPL-3.0 开源)。新增: 动态深色主题调节 (色调/亮度/对比度, 非滤镜路径) 与定时模式 (跨零点热切换); 保留 v4.1 字体可读性、v4.0 电源热生效/双页签/三态能力卡片与 v3.x 全部引擎能力。
+// @description:zh-CN 全网通用智能视频与图片反色脚本 (v4.2, AGPL-3.0 开源)。新增: 动态深色主题调节 (色调/亮度/对比度) 与定时模式; 保留字体可读性与站点电源热生效等全部能力。
+// @description:en Universal smart video and image invert userscript (v4.2, AGPL-3.0 licensed). New: dynamic dark theme tuning (tone/brightness/contrast, non-filter path) and time-window scheduler with hot switching; all v4.1 readability and v4.0 hot site power capabilities retained.
 // @author       jiozhaoyue
 // @license      AGPL-3.0-or-later
 // @icon         data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><circle cx=%2250%22 cy=%2250%22 r=%2246%22 fill=%22%231e293b%22 stroke=%22%2338bdf8%22 stroke-width=%228%22/><path d=%22M50 4 A46 46 0 0 1 50 96 Z%22 fill=%22%2338bdf8%22/></svg>
@@ -176,6 +176,14 @@
     fontOverride: false,       // 字体覆盖总开关: 关闭时零开销
     fontFamilyPreset: 'sans',  // 'sans' | 'serif' | 'mono' | 'rounded'
     textStroke: 0,             // 文字描边粗细 px (0 = 关闭, 0 ~ 1)
+
+    // ===== v4.2 新增偏好: 动态深色主题调节 (P1/P2) + 定时模式 (P5) =====
+    bgTone: 'pure-black',      // 动态主题色调: 'pure-black' | 'dark-gray' | 'warm-black'
+    bgBrightness: 1.0,         // 页面亮度倍率 (0.6 ~ 1.4, 仅动态主题生成路径, 非 filter)
+    bgContrast: 1.0,           // 页面对比度倍率 (0.7 ~ 1.5, 仅动态主题生成路径)
+    scheduleEnabled: false,    // 定时模式: 仅设定时段自动启用反色
+    scheduleStart: 21,         // 起始小时 (0 ~ 23)
+    scheduleEnd: 7,            // 结束小时 (0 ~ 23, 支持跨零点)
 
     // ===== v3.2 新增偏好: 独立视频画面调节 (与反色可组合) =====
     videoTune: {
@@ -880,6 +888,13 @@
       const strokeN = Number(merged.textStroke);
       merged.textStroke = (isNaN(strokeN) ? 0 : Math.max(0, Math.min(1, strokeN)));
     }
+    // v4.2 字段规范化: 动态主题与定时模式
+    if (['pure-black', 'dark-gray', 'warm-black'].indexOf(merged.bgTone) === -1) merged.bgTone = 'pure-black';
+    merged.bgBrightness = clampNumber(merged.bgBrightness, 0.6, 1.4, 1.0);
+    merged.bgContrast = clampNumber(merged.bgContrast, 0.7, 1.5, 1.0);
+    merged.scheduleEnabled = merged.scheduleEnabled === true;
+    merged.scheduleStart = Math.round(clampNumber(merged.scheduleStart, 0, 23, 21));
+    merged.scheduleEnd = Math.round(clampNumber(merged.scheduleEnd, 0, 23, 7));
     // 标签页隔离: 运行时状态绝不入库
     delete merged.invertActive;
 
@@ -972,7 +987,8 @@
       ? `filter ${state.transitionMs}ms cubic-bezier(0.4, 0, 0.2, 1)`
       : 'none';
     const profile = getSiteProfile();
-    const imgOn = !!state.imageInvert && profile.enabled !== false && profile.imageInvert !== false;
+    // v4.2: 站点电源 (含定时档) 挂起时强制熄灭门类 —— 挂起期间 profile 可能仍 enabled
+    const imgOn = !!state.imageInvert && runtime.siteActive !== false && profile.enabled !== false && profile.imageInvert !== false;
     if (document.documentElement) {
       document.documentElement.style.setProperty('--svi-img-filter', f);
       document.documentElement.style.setProperty('--svi-img-transition', t);
@@ -1104,9 +1120,19 @@
     }
   }
 
+  // ===== v4.2 P5: 定时模式 (时段外等同站点停用; 支持跨零点; 起止相同视为全天) =====
+  function scheduleActiveNow() {
+    if (!state.scheduleEnabled) return true;
+    const h = new Date().getHours();
+    const s = Math.round(Number(state.scheduleStart) || 0);
+    const e = Math.round(Number(state.scheduleEnd) || 0);
+    if (s === e) return true;
+    return s < e ? (h >= s && h < e) : (h >= s || h < e);
+  }
+
   function evaluateSitePower() {
     let on = true;
-    try { on = getSiteProfile().enabled !== false; } catch (e) { /* ignore */ }
+    try { on = getSiteProfile().enabled !== false && scheduleActiveNow(); } catch (e) { /* ignore */ }
     applySitePower(on);
   }
 
@@ -1234,6 +1260,42 @@
     const l2 = Math.min(46, Math.max(18, 100 - hsl[2]));
     const s2 = Math.min(hsl[1], 40);
     return hslToRgb(hsl[0], s2, l2);
+  }
+
+  // ===== v4.2 P1/P2: 动态深色主题调节 (纯函数, 单测契约) =====
+  // 默认参数 (pure-black/1/1) 恒等 —— 既有桶配色与 bench 登录块隔离场景不受影响。
+  // tone 只染背景/边框 (文字用 'pure-black' 传入以保持可读), brightness/contrast 作用于全部。
+  function applyDynamicThemeAdjust(rgb, tone, brightness, contrast) {
+    let r = rgb[0], g = rgb[1], b = rgb[2];
+    if (tone === 'dark-gray') {
+      // 抬底: 深色端不低于 ~#1a1c20 一带, 纯黑改深灰, 长时间阅读更柔和 (微冷偏防脏灰)
+      const floor = 26;
+      const lum = Math.min(r, Math.min(g, b));
+      if (lum < floor) {
+        const lift = floor - lum;
+        r += lift; g += lift; b += lift + 2;
+      }
+    } else if (tone === 'warm-black') {
+      // 暖色夜档: 压蓝增红, 近似低色温护眼
+      b *= 0.82; g *= 0.94; r *= 1.04;
+    }
+    const bMul = Number(brightness);
+    const cMul = Number(contrast);
+    if (bMul === 1 && cMul === 1) {
+      return [
+        Math.max(0, Math.min(255, Math.round(r))),
+        Math.max(0, Math.min(255, Math.round(g))),
+        Math.max(0, Math.min(255, Math.round(b))),
+      ];
+    }
+    const bm = (isNaN(bMul) ? 1 : Math.max(0.6, Math.min(1.4, bMul))) - 1;
+    const cm = isNaN(cMul) ? 1 : Math.max(0.7, Math.min(1.5, cMul));
+    const off = bm * 96;
+    return [
+      Math.max(0, Math.min(255, Math.round((r - 128) * cm + 128 + off))),
+      Math.max(0, Math.min(255, Math.round((g - 128) * cm + 128 + off))),
+      Math.max(0, Math.min(255, Math.round((b - 128) * cm + 128 + off))),
+    ];
   }
 
   function quantizeRgb(rgb) {
@@ -3529,6 +3591,7 @@
     // 逐帧采样 (rVFC): 白底检测 + 时间线预布防 + 媒体主导
     onFrame(video) {
       if (!video || document.hidden) return;
+      if (runtime.siteActive === false) return; // v4.2: 站点电源/定时档挂起闸
       this._lastFrameAt = Date.now(); // rVFC 链活性标记 (轮询互斥判定 + 死链复活看门狗)
       this.updateMediaDominance(video);
       const profile = getSiteProfile();
@@ -3543,6 +3606,7 @@
 
     tick() {
       if (!this.probe) return;
+      if (runtime.siteActive === false) return; // v4.2: 站点电源/定时档挂起闸
       const profile = getSiteProfile();
       if (profile.enabled === false || profile.videoInvert === false) return;
 
@@ -6368,7 +6432,7 @@
         const key = bucketKey(bgC);
         if (!this.bucketsBg.has(key)) {
           const q = quantizeRgb(bgC);
-          this.bucketsBg.set(key, mapLightToDark(q[0], q[1], q[2]));
+          this.bucketsBg.set(key, applyDynamicThemeAdjust(mapLightToDark(q[0], q[1], q[2]), state.bgTone, state.bgBrightness, state.bgContrast));
         }
         el.setAttribute('data-svi-bgr-bg', key);
       }
@@ -6378,7 +6442,8 @@
         const key = bucketKey(fgC);
         if (!this.bucketsFg.has(key)) {
           const q = quantizeRgb(fgC);
-          this.bucketsFg.set(key, mapDarkToLight(q[0], q[1], q[2]));
+          // 色调不染文字 (传 'pure-black'), 亮度/对比度照常生效
+          this.bucketsFg.set(key, applyDynamicThemeAdjust(mapDarkToLight(q[0], q[1], q[2]), 'pure-black', state.bgBrightness, state.bgContrast));
         }
         el.setAttribute('data-svi-bgr-fg', key);
       }
@@ -6392,7 +6457,7 @@
           const key = bucketKey(bdC);
           if (!this.bucketsBd.has(key)) {
             const q = quantizeRgb(bdC);
-            this.bucketsBd.set(key, mapBorderToDark(q[0], q[1], q[2]));
+            this.bucketsBd.set(key, applyDynamicThemeAdjust(mapBorderToDark(q[0], q[1], q[2]), state.bgTone, state.bgBrightness, state.bgContrast));
           }
           el.setAttribute('data-svi-bgr-bd', key);
         }
@@ -7287,7 +7352,9 @@
       globalPanel.appendChild(this.buildImageSection());
       globalPanel.appendChild(this.buildVideoSection());
       globalPanel.appendChild(this.buildReadabilitySection());
+      globalPanel.appendChild(this.buildDynamicThemeSection());
       globalPanel.appendChild(this.buildSiteListsSection());
+      globalPanel.appendChild(this.buildSchedulerSection());
       globalPanel.appendChild(this.buildShieldSection());
       globalPanel.appendChild(this.buildDataSection());
       globalPanel.appendChild(this.buildTipsBlock());
@@ -8755,13 +8822,19 @@
 
     refreshPowerUi() {
       let on = true;
-      try { on = getSiteProfile().enabled !== false; } catch (e) { /* ignore */ }
+      try { on = getSiteProfile().enabled !== false && scheduleActiveNow(); } catch (e) { /* ignore */ }
       if (this.powerSwitch) {
         this.powerSwitch.classList.toggle('on', on);
         this.powerSwitch.setAttribute('aria-checked', on ? 'true' : 'false');
       }
       if (this.powerStatus) {
-        this.powerStatus.textContent = on ? '反色运行中 · 关闭立即热生效' : '本站已停用 · 开启立即热生效';
+        let text = on ? '反色运行中 · 关闭立即热生效' : '本站已停用 · 开启立即热生效';
+        try {
+          if (getSiteProfile().enabled !== false && !scheduleActiveNow()) {
+            text = '定时模式: 当前时段已停用 · 可在全局页签调整';
+          }
+        } catch (e) { /* ignore */ }
+        this.powerStatus.textContent = text;
       }
     }
 
@@ -8949,6 +9022,114 @@
         }, 0, 1, 0.05, 'px');
       sec.appendChild(strokeRow.row);
       this.rowSyncs.push(strokeRow.sync);
+
+      return sec;
+    }
+
+    // v4.2 P1/P2: 全局页签的动态主题调节 (桶配色生成参数; 变更立即重扫热生效)
+    buildDynamicThemeSection() {
+      const sec = document.createElement('div');
+      sec.className = 'svi-modal-section';
+      sec.id = 'svi-sec-dynamic';
+
+      const secTitle = document.createElement('div');
+      secTitle.className = 'svi-sec-title';
+      secTitle.innerHTML = `<span>🌙 动态主题调节</span>`;
+      sec.appendChild(secTitle);
+
+      sec.appendChild(ui.infoLine('作用于背景替换引擎的生成配色 (非滤镜路径)；仅当本站卡片开启「背景替换」时可见效果，变更立即重扫生效。').row);
+
+      const rescanBgr = () => {
+        try {
+          const bgr = window.__svi && window.__svi.engines ? window.__svi.engines.bgReplace : null;
+          if (bgr && typeof bgr.rescan === 'function') bgr.rescan();
+        } catch (e) { /* ignore */ }
+      };
+
+      const toneRow = ui.selectRow('色调', '背景与边框的主题基调',
+        [
+          { v: 'pure-black', label: '纯黑', describe: '默认基调，纯黑背景，对比最强。' },
+          { v: 'dark-gray', label: '深灰', describe: '纯黑抬升为深灰底，长时间阅读更柔和。' },
+          { v: 'warm-black', label: '暖黑', describe: '低色温暖底，夜间护眼。' },
+        ],
+        () => state.bgTone || 'pure-black',
+        (v) => {
+          state.bgTone = v;
+          savePrefs();
+          rescanBgr();
+        });
+      sec.appendChild(toneRow.row);
+      this.rowSyncs.push(toneRow.sync);
+
+      const brightRow = ui.sliderRow('页面亮度', '动态主题生成配色的整体亮度倍率',
+        () => state.bgBrightness,
+        (n) => {
+          state.bgBrightness = n;
+          savePrefs();
+          rescanBgr();
+        }, 0.6, 1.4, 0.05, '倍');
+      sec.appendChild(brightRow.row);
+      this.rowSyncs.push(brightRow.sync);
+
+      const contrastRow = ui.sliderRow('页面对比度', '动态主题生成配色的整体对比度倍率',
+        () => state.bgContrast,
+        (n) => {
+          state.bgContrast = n;
+          savePrefs();
+          rescanBgr();
+        }, 0.7, 1.5, 0.05, '倍');
+      sec.appendChild(contrastRow.row);
+      this.rowSyncs.push(contrastRow.sync);
+
+      return sec;
+    }
+
+    // v4.2 P5: 全局页签的定时模式 (接入站点电源主闸, 跨零点热切换)
+    buildSchedulerSection() {
+      const sec = document.createElement('div');
+      sec.className = 'svi-modal-section';
+      sec.id = 'svi-sec-scheduler';
+
+      const secTitle = document.createElement('div');
+      secTitle.className = 'svi-sec-title';
+      secTitle.innerHTML = `<span>⏰ 定时模式</span>`;
+      sec.appendChild(secTitle);
+
+      const hours = [];
+      for (let h = 0; h < 24; h++) hours.push({ v: String(h), label: h + ' 时', describe: '' });
+
+      const schedRow = ui.toggleRow('定时启停', '仅在设定时段自动启用反色，时段外自动停用 (每分钟热切换)',
+        () => state.scheduleEnabled === true,
+        (v) => {
+          state.scheduleEnabled = v;
+          savePrefs();
+          evaluateSitePower();
+          this.refreshPowerUi();
+        });
+      sec.appendChild(schedRow.row);
+      this.rowSyncs.push(schedRow.sync);
+
+      const startRow = ui.selectRow('开始时刻', '进入启用时段的小时',
+        hours, () => String(Math.round(Number(state.scheduleStart) || 0)),
+        (v) => {
+          state.scheduleStart = Math.round(Number(v)) || 0;
+          savePrefs();
+          evaluateSitePower();
+          this.refreshPowerUi();
+        });
+      sec.appendChild(startRow.row);
+      this.rowSyncs.push(startRow.sync);
+
+      const endRow = ui.selectRow('结束时刻', '退出启用时段的小时 (可跨零点)',
+        hours, () => String(Math.round(Number(state.scheduleEnd) || 0)),
+        (v) => {
+          state.scheduleEnd = Math.round(Number(v)) || 0;
+          savePrefs();
+          evaluateSitePower();
+          this.refreshPowerUi();
+        });
+      sec.appendChild(endRow.row);
+      this.rowSyncs.push(endRow.sync);
 
       return sec;
     }
@@ -9201,6 +9382,9 @@
     ImageInvertEngine,
     // v3.2 纯函数导出 (单测契约): 视频画面调节滤镜链构建
     buildVideoTuneFilter,
+    // v4.2 纯函数导出 (单测契约): 动态深色主题调节 / 定时档位判定
+    applyDynamicThemeAdjust,
+    scheduleActiveNow,
     // 调试句柄: 站点档案按 (host, 偏好版本) 缓存 —— 运行时注入/变更内置规则后需显式失效
     invalidateProfileCache: () => { try { profileCache.clear(); } catch (e) { /* ignore */ } },
     // v3.3 调试句柄: 偏好写入入口 (基准/调试注入规则后同步偏好版本号)
@@ -9365,6 +9549,12 @@
   setInterval(() => {
     try { StatsManager.flush(); } catch (e) { /* ignore */ }
   }, 30000);
+
+  // v4.2 P5: 定时模式跨档热切换 (60s 轮询; evaluateSitePower 幂等, 状态不变时零动作)
+  setInterval(() => {
+    try { evaluateSitePower(); } catch (e) { /* ignore */ }
+    try { window.__svi.ui && window.__svi.ui.refreshPowerUi(); } catch (e) { /* ignore */ }
+  }, 60000);
 
   // 全量落盘 (统计 + 偏好 + Store 命名空间)
   function flushEverything() {

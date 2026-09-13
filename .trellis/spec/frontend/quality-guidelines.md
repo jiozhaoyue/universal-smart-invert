@@ -170,6 +170,26 @@ rules below are battle-tested conventions from v1.4.0 → v2.0.0; follow them fo
   subtrees; the stroke rule intentionally does NOT include `body` — assert stroke on a text
   element, not on body.
 
+
+## v4.2 Additions (dynamic theme, scheduler, machine-generated rules/)
+
+- **Dynamic dark theme (P1/P2) is a bucket-generation parameter, not a filter**:
+  `applyDynamicThemeAdjust` wraps the three `map*` functions at bucket creation; default args
+  are identity (the bench login-box baseline depends on it). Tone must NOT tint text — pass
+  `'pure-black'` for fg buckets. Preference changes hot-apply through `bgr.rescan()` (rescan
+  strips tags first, so computed styles revert to page originals before re-tagging).
+- **The scheduler is a master gate on `evaluateSitePower` — and every powered-off path must
+  know it**: `scheduleActiveNow()` gates `evaluateSitePower()`, but `updateImageFilterCss()`
+  recomputes from the site profile ONLY; it must ALSO check `runtime.siteActive`, otherwise a
+  schedule/power suspension gets its gate class re-lit on the next applier call (v4.2 lesson,
+  caught by Scenario 22). Same for HIL `tick`/`onFrame` (`runtime.siteActive` early-return).
+  The 60s poll is safe because `applySitePower` early-returns on unchanged state.
+- **`rules/` artifacts are machine-generated and wholesale-regenerated — never hand-edited**;
+  that is the one-click-merge-no-conflicts contract. `*.import.json` uses the `svi-rules`
+  envelope consumed by 导入并合并 (array dedup = idempotent). `sync-darkreader.js` shells out
+  to curl (proxy-aware, CI-safe); Dark Reader config files are SINGULAR (`.config`, not
+  `.configs`) and are newline-separated host lists.
+
 ## Testing Requirements
 
 - **The bench's fixed Chrome profile (`.chrome-test-profile/`) persists localStorage across

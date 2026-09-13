@@ -1216,6 +1216,40 @@ const sameParentSibs = (self, n, w, h) => {
   console.log('✓ v3.2 unit tests passed: buildVideoTuneFilter (disabled/neutral/partial/clamp)');
 })();
 
+
+// ===== v4.2 P1/P2/P5 纯函数单测 =====
+(() => {
+  const adj = svi.applyDynamicThemeAdjust;
+  assert.ok(adj, 'applyDynamicThemeAdjust must be exported');
+  assert.deepStrictEqual(adj([255, 240, 3], 'pure-black', 1, 1), [255, 240, 3], 'default params must be identity (bench login-box baseline)');
+  const lifted = adj([4, 4, 4], 'dark-gray', 1, 1);
+  assert.ok(lifted[0] >= 26 && lifted[2] >= lifted[0], 'dark-gray must lift the floor with cool bias');
+  const warm = adj([30, 30, 30], 'warm-black', 1, 1);
+  assert.ok(warm[2] < warm[0], 'warm-black must reduce blue relative to red');
+  assert.strictEqual(adj([100, 100, 100], 'pure-black', 1.2, 1)[0], Math.round((100 - 128) + 128 + 0.2 * 96), 'brightness offset formula');
+  assert.strictEqual(adj([100, 100, 100], 'pure-black', 1, 1.5)[0], Math.round((100 - 128) * 1.5 + 128), 'contrast around midpoint 128');
+  assert.deepStrictEqual(adj([10, 10, 10], 'pure-black', 1, 1.5), [0, 0, 0], 'contrast pushes near-black below zero → clamped to 0');
+  console.log('✓ v4.2 unit tests passed: applyDynamicThemeAdjust (identity/tone/brightness/contrast/clamp)');
+
+  const sched = svi.scheduleActiveNow;
+  assert.ok(sched, 'scheduleActiveNow must be exported');
+  const prev = { e: svi.prefs.scheduleEnabled, s: svi.prefs.scheduleStart, n: svi.prefs.scheduleEnd };
+  svi.prefs.scheduleEnabled = false;
+  assert.strictEqual(sched(), true, 'disabled schedule is always active');
+  const h = new Date().getHours();
+  svi.prefs.scheduleEnabled = true;
+  svi.prefs.scheduleStart = h;
+  svi.prefs.scheduleEnd = (h + 1) % 24;
+  assert.strictEqual(sched(), true, 'current hour must be inside [h, h+1)');
+  svi.prefs.scheduleStart = (h + 1) % 24;
+  svi.prefs.scheduleEnd = h;
+  assert.strictEqual(sched(), false, 'current hour must be outside the wrapped window');
+  svi.prefs.scheduleEnabled = prev.e;
+  svi.prefs.scheduleStart = prev.s;
+  svi.prefs.scheduleEnd = prev.n;
+  console.log('✓ v4.2 unit tests passed: scheduleActiveNow (off/inside/wrapped-outside)');
+})();
+
 console.log('✓ v3.0 core unit tests passed: transformPixel / mergeSegments / lookupSegment / selectorStem / RuleLearner / Store / mediaDominantViewport / rect / hash32');
 
 // 显式退出: 脚本启动桩中的常驻定时器 (统计落盘 interval、3s 后的引擎初始化循环) 会阻止进程自然退出

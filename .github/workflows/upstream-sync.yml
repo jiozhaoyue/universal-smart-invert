@@ -1,0 +1,50 @@
+# Nightly upstream compatibility sync: regenerates the machine-generated
+# rules/ artifacts from darkreader/darkreader upstream configs. Every artifact
+# is regenerated WHOLESALE each run (never hand-edited), so the auto-PR this
+# workflow opens can NEVER conflict — reviewers just click merge.
+name: Upstream sync (Dark Reader compat)
+
+on:
+  schedule:
+    - cron: "23 2 * * *" # daily, random-ish minute to be a good CI citizen
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync:
+    name: Regenerate rules/ + open one-click merge PR
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Regenerate rule library
+        run: node scripts/export-rule-library.js
+
+      - name: Regenerate Dark Reader compat files (network required)
+        run: node scripts/sync-darkreader.js
+
+      - name: Open auto-PR when upstream changed
+        uses: peter-evans/create-pull-request@v6
+        with:
+          commit-message: "chore(sync): refresh rule library + Dark Reader compat (machine-generated)"
+          title: "chore(sync): Dark Reader upstream compatibility refresh"
+          body: |
+            Fully machine-generated refresh of `rules/` from darkreader/darkreader upstream configs.
+
+            - Files are regenerated wholesale each run → **this PR can never conflict; one-click merge is always safe.**
+            - Consumption: 设置 → 数据与备份 → 导入并合并 (array merge dedups, idempotent).
+            - License: upstream data is AGPL-3.0; this project is AGPL-3.0-or-later (compatible). Attribution embedded in each artifact.
+          branch: chore/upstream-sync
+          delete-branch: true
+          labels: |
+            automated
+            upstream-sync

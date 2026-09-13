@@ -2158,6 +2158,122 @@ async function main() {
     const fontClean = await waitForExpr(`!document.documentElement.classList.contains('svi-font-on') && !document.documentElement.classList.contains('svi-stroke-on')`, 3000);
     assert.ok(fontClean, 'disabling font override and stroke must clear the gate classes');
 
+    // ============================================================
+    // Scenario 21 (v4.2 P1/P2): dynamic dark theme tuning — tone +
+    // brightness sliders re-map bucket colors on /login-page (real clicks).
+    // ============================================================
+    console.log('[Test] Scenario 21: dynamic dark theme tone/brightness (bgReplace) ...');
+    await sendCdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/login-page` });
+    await new Promise((r) => setTimeout(r, 4000));
+    const baseBg = (await sendCdp('Runtime.evaluate', {
+      expression: `(() => ({
+        bgrOn: document.documentElement.hasAttribute('data-svi-bgr-on'),
+        bodyBg: getComputedStyle(document.body).backgroundColor
+      }))()`,
+      returnByValue: true
+    })).result.value;
+    assert.strictEqual(baseBg.bgrOn, true, 'login page must have bgReplace active');
+    await sendCdp('Runtime.evaluate', {
+      expression: `(() => { window.__svi.ui.openSettingsModal(); const t = [...document.querySelectorAll('.svi4-tab')].find(b => b.textContent === '全局'); t.click(); return !!document.getElementById('svi-sec-dynamic'); })()`,
+      returnByValue: true
+    });
+    await new Promise((r) => setTimeout(r, 200));
+    const setSelect = (rowText, value) => `(() => {
+      const row = [...document.querySelectorAll('#svi-sec-dynamic .svi-modal-row')].find(r => r.textContent.includes('${rowText}'));
+      const sel = row.querySelector('select');
+      const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set;
+      setter.call(sel, '${value}');
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+      return true;
+    })()`;
+    await sendCdp('Runtime.evaluate', {
+      expression: setSelect('色调', 'dark-gray'),
+      returnByValue: true
+    });
+    await new Promise((r) => setTimeout(r, 1500));
+    const grayBg = (await sendCdp('Runtime.evaluate', {
+      expression: `getComputedStyle(document.body).backgroundColor`,
+      returnByValue: true
+    })).result.value;
+    assert.notStrictEqual(grayBg, baseBg.bodyBg, 'dark-gray tone must re-map the body bucket color, got: ' + grayBg);
+    await sendCdp('Runtime.evaluate', {
+      expression: setSelect('色调', 'warm-black'),
+      returnByValue: true
+    });
+    await new Promise((r) => setTimeout(r, 1500));
+    const warmBg = (await sendCdp('Runtime.evaluate', {
+      expression: `getComputedStyle(document.body).backgroundColor`,
+      returnByValue: true
+    })).result.value;
+    assert.notStrictEqual(warmBg, grayBg, 'warm-black tone must differ from dark-gray');
+    await sendCdp('Runtime.evaluate', {
+      expression: setSelect('色调', 'pure-black'),
+      returnByValue: true
+    });
+    await new Promise((r) => setTimeout(r, 1500));
+    const backBg = (await sendCdp('Runtime.evaluate', {
+      expression: `getComputedStyle(document.body).backgroundColor`,
+      returnByValue: true
+    })).result.value;
+    assert.strictEqual(backBg, baseBg.bodyBg, 'pure-black must restore the baseline bucket color');
+    await sendCdp('Runtime.evaluate', {
+      expression: `(() => { const b = document.querySelector('.svi-modal-close'); if (b) b.click(); return true; })()`,
+      returnByValue: true
+    });
+
+    // ============================================================
+    // Scenario 22 (v4.2 P5): scheduler — a window excluding the current
+    // hour strips the page; widening to include it restores (real clicks).
+    // ============================================================
+    console.log('[Test] Scenario 22: time-window scheduler hot switching ...');
+    await sendCdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/` });
+    await new Promise((r) => setTimeout(r, 5000));
+    await waitForExpr(`document.querySelectorAll('[data-svi-inverted="true"]').length > 0`, 10000);
+    const nowHour = (await sendCdp('Runtime.evaluate', { expression: `new Date().getHours()`, returnByValue: true })).result.value;
+    const offStart = (nowHour + 1) % 24;
+    await sendCdp('Runtime.evaluate', {
+      expression: `(() => { window.__svi.ui.openSettingsModal(); const t = [...document.querySelectorAll('.svi4-tab')].find(b => b.textContent === '全局'); t.click(); return !!document.getElementById('svi-sec-scheduler'); })()`,
+      returnByValue: true
+    });
+    await new Promise((r) => setTimeout(r, 200));
+    await sendCdp('Runtime.evaluate', {
+      expression: `(() => {
+        const row = [...document.querySelectorAll('#svi-sec-scheduler .svi-site-check-row')].find(r => r.textContent.includes('定时启停'));
+        row.querySelector('input.svi-check').click();
+        return true;
+      })()`,
+      returnByValue: true
+    });
+    const setHour = (rowText, value) => `(() => {
+      const row = [...document.querySelectorAll('#svi-sec-scheduler .svi-modal-row')].find(r => r.textContent.includes('${rowText}'));
+      const sel = row.querySelector('select');
+      const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set;
+      setter.call(sel, String(${value}));
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+      return true;
+    })()`;
+    // 窗口排除当前小时 → 页面应热停用
+    await sendCdp('Runtime.evaluate', { expression: setHour('开始时刻', offStart), returnByValue: true });
+    await sendCdp('Runtime.evaluate', { expression: setHour('结束时刻', nowHour), returnByValue: true });
+    const schedOff = await waitForExpr(`document.querySelectorAll('[data-svi-inverted]').length === 0 && !document.documentElement.classList.contains('svi-img-invert-on')`, 5000);
+    assert.ok(schedOff, 'outside the schedule window the page must be hot-suspended');
+    // 窗口包含当前小时 → 热恢复
+    await sendCdp('Runtime.evaluate', { expression: setHour('开始时刻', nowHour), returnByValue: true });
+    await sendCdp('Runtime.evaluate', { expression: setHour('结束时刻', (nowHour + 1) % 24), returnByValue: true });
+    const schedOn = await waitForExpr(`document.querySelectorAll('[data-svi-inverted="true"]').length > 0`, 10000);
+    assert.ok(schedOn, 'inside the schedule window inversion must hot-restore');
+    // 还原: 关闭定时模式
+    await sendCdp('Runtime.evaluate', {
+      expression: `(() => {
+        const row = [...document.querySelectorAll('#svi-sec-scheduler .svi-site-check-row')].find(r => r.textContent.includes('定时启停'));
+        row.querySelector('input.svi-check').click();
+        const b = document.querySelector('.svi-modal-close');
+        if (b) b.click();
+        return true;
+      })()`,
+      returnByValue: true
+    });
+
     console.log('\n🎉 ALL BROWSER AUTOMATION TESTS PASSED 100% SUCCESFULLY!\n');
 
     ws.close();
