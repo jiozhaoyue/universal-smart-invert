@@ -51,7 +51,7 @@ jobs:
             if (m.version !== headerVersion) throw new Error("manifest.version " + m.version + " != userscript @version " + headerVersion);
             if (JSON.stringify(m.permissions) !== JSON.stringify(["storage"])) throw new Error("manifest permissions must be [\"storage\"]");
             const cs = m.content_scripts && m.content_scripts[0];
-            if (!cs || cs.run_at !== "document_end" || cs.all_frames !== true) throw new Error("content_scripts shape mismatch");
+            if (!cs || cs.run_at !== "document_start" || cs.all_frames !== true) throw new Error("content_scripts shape mismatch");
             for (const size of ["16", "32", "48", "128"]) {
               if (!fs.existsSync("extension/icons/icon" + size + ".png")) throw new Error("icons/icon" + size + ".png missing");
             }

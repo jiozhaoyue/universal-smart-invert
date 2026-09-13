@@ -184,7 +184,8 @@ function main() {
       {
         matches: ['<all_urls>', 'file://*/*'],
         js: ['content.js'],
-        run_at: 'document_end',
+        // v4.3: document_start —— 内容脚本随 HTML 起步即执行, 防闪光黑底守卫先于首次绘制
+        run_at: 'document_start',
         all_frames: true,
       },
     ],

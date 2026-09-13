@@ -3,7 +3,7 @@
  * universal-smart-invert — browser extension content script
  * GENERATED FILE — DO NOT EDIT.
  * Built by scripts/build-extension.js from universal-smart-invert.user.js
- * Source version: 4.2.0
+ * Source version: 4.3.0
  *
  * Prelude contract (see scripts/build-extension.js header):
  *   - EXT_MODE (wrapper scope)   → core claims coexistence kind 'ext'
@@ -222,6 +222,9 @@
     scheduleEnabled: false,    // 定时模式: 仅设定时段自动启用反色
     scheduleStart: 21,         // 起始小时 (0 ~ 23)
     scheduleEnd: 7,            // 结束小时 (0 ~ 23, 支持跨零点)
+
+    // ===== v4.3 新增偏好: 防闪光守卫 =====
+    flashGuard: true,          // 防闪光黑底: 深色站点加载前先铺黑底消除白闪 (仅动态主题站生效)
 
     // ===== v3.2 新增偏好: 独立视频画面调节 (与反色可组合) =====
     videoTune: {
@@ -933,6 +936,8 @@
     merged.scheduleEnabled = merged.scheduleEnabled === true;
     merged.scheduleStart = Math.round(clampNumber(merged.scheduleStart, 0, 23, 21));
     merged.scheduleEnd = Math.round(clampNumber(merged.scheduleEnd, 0, 23, 7));
+    // v4.3 字段规范化: 防闪光守卫 (默认开)
+    merged.flashGuard = merged.flashGuard !== false;
     // 标签页隔离: 运行时状态绝不入库
     delete merged.invertActive;
 
@@ -965,7 +970,7 @@
       if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
       const pattern = String(raw.pattern || '').trim();
       const selector = String(raw.selector || '').trim();
-      const action = raw.action === 'protect' ? 'protect' : (raw.action === 'invert' ? 'invert' : '');
+      const action = raw.action === 'protect' ? 'protect' : (raw.action === 'invert' ? 'invert' : (raw.action === 'recolor' ? 'recolor' : ''));
       if (!pattern || !selector || !action) continue;
       out.push({
         id: String(raw.id || hash32(pattern + '|' + selector + '|' + action)),
@@ -1100,6 +1105,7 @@
       });
       try {
         document.documentElement.classList.remove('svi-font-on', 'svi-stroke-on'); // v4.1 字体/描边一并拆除
+        document.documentElement.removeAttribute('data-svi-bgr-partial'); // v4.3 局部改色门一并拆除
       } catch (e) { /* ignore */ }
       document.querySelectorAll('video[data-svi-poster]').forEach((v) => {
         if (v.dataset) delete v.dataset.sviPoster;
@@ -4054,6 +4060,18 @@
     return { data: d, opaqueCount };
   }
 
+  // v4.3: 不透明像素平均亮度 (0~255, -1=无不透明像素) —— 反色决策的证据强度 (sanity 门用)
+  function meanLuminance(data) {
+    let sum = 0;
+    let n = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      if (data[i + 3] <= 128) continue;
+      sum += 0.2126 * data[i] + 0.7152 * data[i + 1] + 0.0722 * data[i + 2];
+      n++;
+    }
+    return n ? sum / n : -1;
+  }
+
   // 统一解码链: 本地采样 → 跨域污染或空白采样 (SVG/alpha 嫌疑) → blob 回退 (GM/fetch → 嵌套解码)
   async function analyzeSrc(src, drawable, prefsState = state) {
     let sample = null;
@@ -4066,7 +4084,7 @@
     }
 
     if (sample && sample.opaqueCount >= 8) {
-      return { ok: true, isLight: evaluateImagePixels(sample.data, prefsState), viaFallback: false };
+      return { ok: true, isLight: evaluateImagePixels(sample.data, prefsState), meanLum: meanLuminance(sample.data), opaqueRatio: sample.opaqueCount / 64, viaFallback: false };
     }
 
     StatsManager.count('taintFallbacks');
@@ -4074,7 +4092,7 @@
       const blob = await gmFetchBlob(src);
       const s16 = await decodeBlobSample(blob, 16);
       if (s16.opaqueCount < 8) return { ok: false };
-      return { ok: true, isLight: evaluateImagePixels(s16.data, prefsState), viaFallback: true };
+      return { ok: true, isLight: evaluateImagePixels(s16.data, prefsState), meanLum: meanLuminance(s16.data), opaqueRatio: s16.opaqueCount / 256, viaFallback: true };
     } catch (e) {
       // file:// 页面且本地文件访问被拦 → 记录一次性 UI 提示 (不崩溃, 优雅降级)
       try {
@@ -5162,7 +5180,68 @@
       this.cache.set(src, r.isLight);
       StatsManager.count('imagesAnalyzed');
 
+      // v4.3 智能纠错 (sanity 门): 分类为"浅色"但整体平均亮度证据不足 —— 典型如大面积深色
+      // 主体混白色底被白占比阈值误判 —— 绝不自动反色, 从源头消灭"反成错误白"
+      if (r.isLight && typeof r.meanLum === 'number' && r.meanLum >= 0 && r.meanLum < 96) {
+        this.cache.set(src, false);
+        this.applyDecision(img, src, this.recordDecision(src, 'keep', 'sanity-dark'));
+        return;
+      }
+
       this.applyDecision(img, src, this.recordDecision(src, r.isLight ? 'invert' : 'keep', 'pixel'));
+
+      // v4.3 智能纠错 (复检网): 像素反色决策限时复检 —— 分类翻转则改写缓存/作废旧快照并重扫,
+      // "反错的白色"不再永远错下去 (有界: 每源至多一次, 队列上限 12)
+      if (r.isLight) this.queueRecheck(src);
+    }
+
+    // v4.3: 像素反色决策的限时复检 (有界自愈; 每源至多一次)
+    queueRecheck(src) {
+      if (!this._recheckQueue) {
+        this._recheckQueue = [];
+        this._rechecked = new Set();
+      }
+      if (this._rechecked.has(src) || this._recheckQueue.length >= 12) return;
+      this._rechecked.add(src);
+      this._recheckQueue.push(src);
+      if (this._recheckTimer) return;
+      this._recheckTimer = setTimeout(() => {
+        this._recheckTimer = null;
+        const batch = this._recheckQueue.splice(0, this._recheckQueue.length);
+        requestIdle(() => { this.runRecheck(batch); }, 2000);
+      }, 6000);
+    }
+
+    async runRecheck(srcs) {
+      for (const src of srcs) {
+        if (runtime.siteActive === false) return;
+        const old = this.decisionBySrc.get(src);
+        if (!old || old.reason !== 'pixel' || old.verdict !== 'invert') continue; // 只复检仍为像素反色的
+        let r = null;
+        try { r = await analyzeSrc(src, null, getEvalPrefs()); } catch (e) { continue; }
+        if (!r || !r.ok) continue;
+        // 证据可信门: 透明占比过高的样本 (典型: SVG 透明底只剩深色线条) 亮度均值不可信, 不改判
+        if (!(typeof r.opaqueRatio === 'number' && r.opaqueRatio >= 0.5)) continue;
+        const stillLight = r.isLight && !(typeof r.meanLum === 'number' && r.meanLum >= 0 && r.meanLum < 96);
+        if (stillLight) continue;
+        // 判定翻转: 改写缓存, 作废旧快照 (下次进入管线重判), 摘标记让引擎重扫该元素
+        this.cache.set(src, false);
+        this.decisionBySrc.delete(src);
+        let n = 0;
+        try {
+          document.querySelectorAll('[data-svi-checked-src]').forEach((el) => {
+            if (getMediaSrc(el) !== src) return;
+            el.removeAttribute('data-svi-checked-src');
+            el.removeAttribute('data-svi-inverted');
+            el.removeAttribute('data-svi-fx');
+            if (n < 20) {
+              this.observe(el);
+              n++;
+            }
+          });
+        } catch (e) { /* ignore */ }
+        StatsManager.count('verdictRechecks');
+      }
     }
 
     // 处理入口 (IO / eager / 变更 flush 共用): 就绪判定 + 晚加载 load 事件驱动 (有界, 无悬挂状态)
@@ -6100,6 +6179,10 @@
       const now = Date.now();
       if (now - this.lastSweep < 4500) return;
       this.lastSweep = now;
+      try {
+        const bgr = window.__svi && window.__svi.engines ? window.__svi.engines.bgReplace : null;
+        if (bgr && typeof bgr.applyPartialRules === 'function') bgr.applyPartialRules(); // v4.3 局部改色随扫同步
+      } catch (e) { /* ignore */ }
       let sel = '';
       try { sel = this.candidateSelector(); } catch (e) { return; }
       if (!sel) return;
@@ -6138,10 +6221,16 @@
       if (!bg || bg.indexOf('url(') === -1) return;
 
       // v3.3 用户元素规则: 显式保护/强制反色优先于尺寸门槛与亮度判定
+      // v4.3: 'recolor' 局部改色 —— 不走滤镜, 交给背景替换桶引擎只改该元素的浅色部分
       const erule = firstMatchingElementRule(el, profile.elementRules);
       if (erule) {
         if (erule.action === 'protect') {
           el.removeAttribute('data-svi-bginv');
+        } else if (erule.action === 'recolor') {
+          try {
+            const bgr = window.__svi && window.__svi.engines ? window.__svi.engines.bgReplace : null;
+            if (bgr && typeof bgr.partialTag === 'function') bgr.partialTag(el);
+          } catch (e) { /* ignore */ }
         } else {
           el.setAttribute('data-svi-bginv', 'true');
         }
@@ -6250,6 +6339,7 @@
       this.pendingRoots = new Set();
       this.rescanTimer = null;
       this.styleNode = null;
+      this.partialEls = new Set(); // v4.3: 局部改色元素集 (元素规则 action='recolor')
       this.initObserver();
     }
 
@@ -6305,6 +6395,50 @@
       if (processed) this.applyCss();
     }
 
+    // v4.3: 局部改色 —— 元素规则命中元素的浅色部分进桶重着色 (黑白同存只动白部, 非 filter)
+    partialTag(el) {
+      if (!el || el.nodeType !== 1) return;
+      if (this.partialEls.has(el)) return;
+      try {
+        if (this.isExcluded(el)) return;
+      } catch (e) { /* ignore */ }
+      this.partialEls.add(el);
+      this.tagElement(el); // 仅浅色背景/浅色边框/深色文字命中 —— 深色部分天然不动
+      try {
+        document.documentElement.setAttribute('data-svi-bgr-partial', '');
+      } catch (e) { /* ignore */ }
+      this.applyCss();
+    }
+
+    // v4.3: 按当前元素规则同步局部改色集 (规则删除 → 自动摘除对应元素的桶标记)
+    applyPartialRules() {
+      let rules = [];
+      try { rules = (getSiteProfile().elementRules || []).filter((r) => r && r.action === 'recolor'); } catch (e) { /* ignore */ }
+      // 新命中 → 入集
+      if (rules.length) {
+        for (const rule of rules.slice(0, 25)) {
+          let els = [];
+          try { els = Array.from(document.querySelectorAll(rule.selector)).slice(0, 25); } catch (e) { continue; }
+          for (const el of els) this.partialTag(el);
+        }
+      }
+      // 失配 → 摘除
+      for (const el of Array.from(this.partialEls)) {
+        let still = false;
+        try { still = rules.some((r) => { try { return el.matches(r.selector); } catch (e) { return false; } }); } catch (e) { still = false; }
+        if (!still || !el.isConnected) {
+          el.removeAttribute('data-svi-bgr-bg');
+          el.removeAttribute('data-svi-bgr-fg');
+          el.removeAttribute('data-svi-bgr-bd');
+          this.partialEls.delete(el);
+        }
+      }
+      if (!this.partialEls.size) {
+        try { document.documentElement.removeAttribute('data-svi-bgr-partial'); } catch (e) { /* ignore */ }
+      }
+      this.applyCss();
+    }
+
     buildExclusionSelector(profile) {
       const parts = LOGIN_SELECTORS.slice();
       if (profile && Array.isArray(profile.excludeSelectors)) parts.push(...profile.excludeSelectors);
@@ -6348,6 +6482,7 @@
       this.scanGen++;
       try {
         document.documentElement.removeAttribute('data-svi-bgr-on');
+        document.documentElement.removeAttribute('data-svi-bgr-partial'); // v4.3
         if (this.styleNode && this.styleNode.parentNode) {
           this.styleNode.parentNode.removeChild(this.styleNode);
         }
@@ -6513,14 +6648,16 @@
           }
         }
         let css = '';
+        // v4.3: 门控行同时接受整页激活 (bgr-on) 与局部改色 (bgr-partial)
+        const gate = 'html:is([data-svi-bgr-on],[data-svi-bgr-partial])';
         for (const [key, rgb] of this.bucketsBg) {
-          css += `html[data-svi-bgr-on] [data-svi-bgr-bg="${key}"]{background-color:${rgbToHex(rgb)}!important;}`;
+          css += `${gate} [data-svi-bgr-bg="${key}"]{background-color:${rgbToHex(rgb)}!important;}`;
         }
         for (const [key, rgb] of this.bucketsFg) {
-          css += `html[data-svi-bgr-on] [data-svi-bgr-fg="${key}"]{color:${rgbToHex(rgb)}!important;}`;
+          css += `${gate} [data-svi-bgr-fg="${key}"]{color:${rgbToHex(rgb)}!important;}`;
         }
         for (const [key, rgb] of this.bucketsBd) {
-          css += `html[data-svi-bgr-on] [data-svi-bgr-bd="${key}"]{border-color:${rgbToHex(rgb)}!important;}`;
+          css += `${gate} [data-svi-bgr-bd="${key}"]{border-color:${rgbToHex(rgb)}!important;}`;
         }
         this.styleNode.textContent = css;
       } catch (e) { /* ignore */ }
@@ -8291,6 +8428,7 @@
       erActionSel.className = 'svi-modal-select';
       erActionSel.appendChild(mkOpt('invert', '强制反色'));
       erActionSel.appendChild(mkOpt('protect', '保持原色'));
+      erActionSel.appendChild(mkOpt('recolor', '局部改色'));
       const erInput = document.createElement('input');
       erInput.type = 'text';
       erInput.className = 'svi-modal-text';
@@ -8305,7 +8443,7 @@
           return;
         }
         const pattern = erScopeSel.value === 'all' ? '*' : host;
-        const action = erActionSel.value === 'protect' ? 'protect' : 'invert';
+        const action = erActionSel.value === 'protect' ? 'protect' : (erActionSel.value === 'recolor' ? 'recolor' : 'invert');
         const list = Array.isArray(state.elementRules) ? state.elementRules : (state.elementRules = []);
         if (list.some((r) => r && r.pattern === pattern && r.selector === selector && r.action === action)) {
           showToast('该元素规则已存在');
@@ -8404,8 +8542,8 @@
         stem.textContent = rule.selector; // 存储层字符串 → textContent (XSS 加固)
         stem.title = rule.selector;
         const action = document.createElement('span');
-        action.className = 'svi-learned-action' + (rule.action === 'protect' ? ' protect' : '');
-        action.textContent = rule.action === 'protect' ? '保护' : '反色';
+        action.className = 'svi-learned-action' + (rule.action === 'protect' ? ' protect' : (rule.action === 'recolor' ? ' recolor' : ''));
+        action.textContent = rule.action === 'protect' ? '保护' : (rule.action === 'recolor' ? '改色' : '反色');
         const del = document.createElement('button');
         del.className = 'svi-mini-btn danger';
         del.textContent = '删除';
@@ -9077,6 +9215,18 @@
 
       sec.appendChild(ui.infoLine('作用于背景替换引擎的生成配色 (非滤镜路径)；仅当本站卡片开启「背景替换」时可见效果，变更立即重扫生效。').row);
 
+      const fgRow = ui.toggleRow('防闪光黑底', '深色站点加载前先铺黑底消除白闪 (仅本站开启动态主题时生效)；关闭立即拆除，重新开启自下次页面加载生效',
+        () => state.flashGuard !== false,
+        (v) => {
+          state.flashGuard = v;
+          savePrefs();
+          if (!v) {
+            try { window.__svi && window.__svi.flashGuardOff && window.__svi.flashGuardOff(); } catch (e) { /* ignore */ }
+          }
+        });
+      sec.appendChild(fgRow.row);
+      this.rowSyncs.push(fgRow.sync);
+
       const rescanBgr = () => {
         try {
           const bgr = window.__svi && window.__svi.engines ? window.__svi.engines.bgReplace : null;
@@ -9366,6 +9516,50 @@
   injectStyles();
   ShadowDomRegistry.install();
 
+  // ===== v4.3 防闪光 (flash-black): 文档起步即黑, 仅限本站将走"动态深色主题"路径时 =====
+  // 极简实现: 一个数据门 + 一条样式; bgReplace 激活即撤, load/5s 双兜底, 绝不黑屏卡死。
+  // 浅色站点不触发 (否则黑→白反而是闪光); 图片反色路径页面本就保持原色, 无需介入。
+  function setupFlashGuard() {
+    try {
+      if (state.flashGuard === false) return; // v4.3: 设置项可关
+      const de = document.documentElement;
+      if (!de || de.dataset.sviFlashguard) return;
+      const prof = getSiteProfile();
+      if (prof.enabled === false || prof.bgReplace !== true) return;
+      de.dataset.sviFlashguard = '1';
+      const st = document.createElement('style');
+      st.id = 'svi-flashguard';
+      st.textContent = 'html[data-svi-flashguard],html[data-svi-flashguard] body{background:#000!important}';
+      (document.head || de).appendChild(st);
+      let done = false;
+      const iv = setInterval(() => {
+        if (de.hasAttribute('data-svi-bgr-on')) off();
+      }, 100);
+      const off = () => {
+        if (done) return;
+        done = true;
+        clearInterval(iv);
+        try { st.remove(); } catch (e) { /* ignore */ }
+        delete de.dataset.sviFlashguard;
+      };
+      if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+        window.addEventListener('load', off, { once: true });
+      }
+      setTimeout(off, 5000);
+    } catch (e) { /* ignore */ }
+  }
+  setupFlashGuard();
+
+  // v4.3: 设置项即时拆除句柄 (关闭开关立即移除守卫样式; 重新开启自下次页面加载生效)。
+  // 注意: 此处 __svi 字面量尚未创建, 先存句柄, 字面量之后再挂载。
+  const sviFlashGuardOff = function () {
+    try {
+      const st = document.getElementById('svi-flashguard');
+      if (st && st.parentNode) st.parentNode.removeChild(st);
+      if (document.documentElement) delete document.documentElement.dataset.sviFlashguard;
+    } catch (e) { /* ignore */ }
+  };
+
   const IS_TOP_FRAME = (() => {
     try {
       return window.self === window.top;
@@ -9447,6 +9641,7 @@
     stats: StatsManager,
     engines: {},
   };
+  window.__svi.flashGuardOff = sviFlashGuardOff; // v4.3: 防闪光即时拆除句柄 (UI 开关用)
 
   // chrome.storage 后端 (插件形态): 异步装载远端命名空间后重载偏好
   try {

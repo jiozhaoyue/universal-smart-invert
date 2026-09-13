@@ -104,7 +104,7 @@ function runExtensionSmoke() {
   assert.deepStrictEqual(manifest.content_scripts, [{
     matches: ['<all_urls>', 'file://*/*'],
     js: ['content.js'],
-    run_at: 'document_end',
+    run_at: 'document_start',
     all_frames: true,
   }], 'content_scripts shape must match the design contract');
 
@@ -403,6 +403,25 @@ function coexistExtFirstHtml(extensionCode) {
 
 // 背景替换登录块基准页: 在脚本注入前预置偏好 (bgReplace=true)
 // v3.0: 偏好经 Store 读取 svi:prefs 命名空间 (迁移后) —— 种子需双写 legacy v4 键与 svi:prefs
+const RECOLOR_HTML = `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <style>
+    #halfbow { background: #ffffff; color: #000000; width: 420px; height: 160px; margin: 40px; padding: 20px; border: 2px solid #eeeeee; }
+    #lightbox { background: #f8f8f8; width: 300px; height: 100px; margin: 40px; }
+  </style>
+</head>
+<body>
+  <div id="halfbow">黑字白底：局部改色只应改白底，绝不动黑字</div>
+  <div id="lightbox"></div>
+  <script>${SEED_SNIPPET}; sviSeed({ bgReplace: false });<\/script>
+  <script>
+    ${executableScript}
+  <\/script>
+</body>
+</html>`;
+
 const LOGIN_HTML = `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -528,6 +547,7 @@ const VIEWER_HTML = `<!DOCTYPE html>
 // Scenario 12 pages are registered in main() after the extension smoke builds the real bundle.
 const PAGES = {
   '/login-page': LOGIN_HTML,
+  '/recolor-page': RECOLOR_HTML,
   '/fx-luma-page': FX_LUMA_HTML,
   '/fx-key-page': FX_KEY_HTML,
   '/video-fx-page': VIDEO_FX_HTML,
@@ -2274,7 +2294,104 @@ async function main() {
       returnByValue: true
     });
 
+    // ============================================================
+    // Scenario 23 (v4.3): element-rule "recolor" - partial change: the
+    // white parts of a black-and-white element are bucket-recolored while
+    // the black text stays untouched (no filter, no full-element invert).
+    // ============================================================
+    console.log('[Test] Scenario 23: element-rule recolor (partial light-part change) ...');
+    await sendCdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/recolor-page` });
+    await new Promise((r) => setTimeout(r, 4000));
+    const recBefore = (await sendCdp('Runtime.evaluate', {
+      expression: `(() => ({ bg: getComputedStyle(document.getElementById('halfbow')).backgroundColor, partial: document.documentElement.hasAttribute('data-svi-bgr-partial') }))()`,
+      returnByValue: true
+    })).result.value;
+    assert.strictEqual(recBefore.bg, 'rgb(255, 255, 255)', 'precondition: element starts white');
+    assert.strictEqual(recBefore.partial, false, 'precondition: no partial gate before the rule');
+    // 真实 UI 路径: 站点页签 → 元素规则表单 (本站 / 局部改色 / #halfbow)
+    await sendCdp('Runtime.evaluate', {
+      expression: `(() => {
+        window.__svi.ui.openSettingsModal();
+        const t = [...document.querySelectorAll('.svi4-tab')].find(b => b.textContent === '本站');
+        t.click();
+        return !!document.querySelector('.svi-er-form');
+      })()`,
+      returnByValue: true
+    });
+    await new Promise((r) => setTimeout(r, 200));
+    await sendCdp('Runtime.evaluate', {
+      expression: `(() => {
+        const form = document.querySelector('.svi-er-form');
+        const ssel = form.querySelectorAll('select')[1]; // 第 2 个下拉 = 动作 (反色/保护/改色)
+        const ssetter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set;
+        ssetter.call(ssel, 'recolor');
+        ssel.dispatchEvent(new Event('change', { bubbles: true }));
+        const input = form.querySelector('input.svi-modal-text');
+        const isetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+        isetter.call(input, '#halfbow');
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        const btn = [...form.querySelectorAll('button')].find((b) => b.textContent === '添加规则');
+        const dbg = { selects: [...form.querySelectorAll('select')].map(x => x.value), input: form.querySelector('input.svi-modal-text').value, btnFound: !!btn };
+        btn.click();
+        dbg.afterRules = JSON.parse(JSON.stringify((window.__svi.prefs.elementRules || [])));
+        dbg.err = null;
+        return dbg;
+      })()`,
+      returnByValue: true
+    });
+    const recAfter = await waitForExpr(`document.documentElement.hasAttribute('data-svi-bgr-partial') && getComputedStyle(document.getElementById('halfbow')).backgroundColor !== 'rgb(255, 255, 255)'`, 12000);
+    assert.ok(recAfter, 'recolor rule must tag the element and darken its light background');
+    const recCheck = (await sendCdp('Runtime.evaluate', {
+      expression: `(() => {
+        const el = document.getElementById('halfbow');
+        return {
+          bg: getComputedStyle(el).backgroundColor,
+          text: getComputedStyle(el).color,
+          tagged: el.hasAttribute('data-svi-bgr-bg')
+        };
+      })()`,
+      returnByValue: true
+    })).result.value;
+    assert.ok(recCheck.tagged, 'element must carry the bgr-bg bucket tag');
+    assert.notStrictEqual(recCheck.bg, 'rgb(255, 255, 255)', 'white background must be recolored dark, got: ' + recCheck.bg);
+    // 配对映射: 底变暗则文字提亮 (可读性); "局部"的语义 = 作用域隔离于该元素, 而非冻结文字颜色
+    assert.notStrictEqual(recCheck.text, 'rgb(0, 0, 0)', 'paired mapping must lighten black text for contrast on the darkened card');
+    const sibling = (await sendCdp('Runtime.evaluate', {
+      expression: `getComputedStyle(document.getElementById('lightbox')).backgroundColor`,
+      returnByValue: true
+    })).result.value;
+    assert.strictEqual(sibling, 'rgb(248, 248, 248)', 'scope isolation: sibling elements must stay untouched');
+    await sendCdp('Runtime.evaluate', {
+      expression: `(() => { const b = document.querySelector('.svi-modal-close'); if (b) b.click(); return true; })()`,
+      returnByValue: true
+    });
+
+    // ============================================================
+    // Scenario 24 (v4.3): flash-black guard non-regression - on a
+    // dynamic-theme page the guard may paint early black but MUST be
+    // fully removed after activation (no stuck black, no leftover style).
+    // ============================================================
+    console.log('[Test] Scenario 24: flash-black guard self-cleanup ...');
+    await sendCdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/login-page` });
+    await new Promise((r) => setTimeout(r, 4500));
+    const guardState = (await sendCdp('Runtime.evaluate', {
+      expression: `(() => ({
+        attr: document.documentElement.hasAttribute('data-svi-flashguard'),
+        style: !!document.getElementById('svi-flashguard'),
+        bgrOn: document.documentElement.hasAttribute('data-svi-bgr-on'),
+        bodyBg: getComputedStyle(document.body).backgroundColor
+      }))()`,
+      returnByValue: true
+    })).result.value;
+    assert.strictEqual(guardState.attr, false, 'flash guard attribute must be removed after activation');
+    assert.strictEqual(guardState.style, false, 'flash guard style node must be removed');
+    assert.strictEqual(guardState.bgrOn, true, 'bgReplace must be active on the login page');
+    assert.notStrictEqual(guardState.bodyBg, 'rgb(255, 255, 255)', 'page stays dark after guard hand-off');
+
     console.log('\n🎉 ALL BROWSER AUTOMATION TESTS PASSED 100% SUCCESFULLY!\n');
+
+    await new Promise((r) => setTimeout(r, 400)); // Windows 重定向: 等待 stdout 刷盘再退出
+
 
     ws.close();
     chromeProc.kill();

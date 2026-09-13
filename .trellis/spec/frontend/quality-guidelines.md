@@ -190,6 +190,33 @@ rules below are battle-tested conventions from v1.4.0 → v2.0.0; follow them fo
   to curl (proxy-aware, CI-safe); Dark Reader config files are SINGULAR (`.config`, not
   `.configs`) and are newline-separated host lists.
 
+
+## v4.3 Additions (flash guard, partial recolor, sanity net)
+
+- **Flash-black guard is opt-out and self-cleaning**: document-start black paint ONLY for
+  sites whose resolved profile has `bgReplace === true` (light pages would flash black→white,
+  which is worse); hand-off on `data-svi-bgr-on`, plus load/5s fallbacks. `state.flashGuard`
+  setting tears down instantly via `window.__svi.flashGuardOff` (attached AFTER the `__svi`
+  literal — assigning at the guard's definition site crashes boot; caught by Scenario 1).
+- **Extension runs at document_start** (manifest + CI smoke assert it); boot must tolerate
+  head-less early documents (injectStyles falls back to documentElement, engines wait on
+  whenBodyReady).
+- **Element-rule action "recolor" = scoped bucket recolor, not literal color freeze**: the
+  bucket engine's paired mapping (light bg→dark AND dark fg→light) is what keeps the darkened
+  card readable; "partial" means scope isolation (matched element only). Engine surfaces:
+  `bgr.partialTag(el)` / `bgr.applyPartialRules()` driven from the bg-image sweep, CSS gate
+  `html:is([data-svi-bgr-on],[data-svi-bgr-partial])`, torn down with site power.
+- **Inversion sanity net**: `analyzeSrc` now returns `meanLum`/`opaqueRatio`; decide-time gate
+  refuses auto-invert when `isLight && meanLum < 96` (reason 'sanity-dark'); pixel-invert
+  verdicts get ONE bounded re-validation (~6s, queue ≤12) that flips cache+snapshot+tags on a
+  genuine misjudge. Trust gate: flip only when `opaqueRatio >= 0.5` — transparent-heavy SVG
+  blob samples (dark lines on transparent) would otherwise flip white diagrams to keep
+  (caught by Scenario 1).
+- **Bench pages embed the script themselves** (`${executableScript}` + optional
+  `${SEED_SNIPPET}; sviSeed({...})` BEFORE it) — a route without the inline script has no
+  `window.__svi`; same-origin localStorage persists across scenarios, so a page needing
+  isolation must seed overrides explicitly (e.g. `sviSeed({ bgReplace: false })`).
+
 ## Testing Requirements
 
 - **The bench's fixed Chrome profile (`.chrome-test-profile/`) persists localStorage across

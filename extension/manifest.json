@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "全网通用智能视频与图片反色 (Universal Smart Video & Image Invert)",
-  "version": "4.2.0",
-  "description": "全网通用智能视频与图片反色脚本 (v4.2, AGPL-3.0 开源)。新增: 动态深色主题调节 (色调/亮度/对比度, 非滤镜路径) 与定时模式 (跨零点热切换); 保留 v4.1 字体可读性、v4.0 电源热生效/双页签/三态能力卡片与 v3.x",
+  "version": "4.3.0",
+  "description": "全网通用智能视频与图片反色脚本 (v4.3, AGPL-3.0 开源)。新增: 防闪光守卫 (深色站点文档起步即黑, 插件端 document_start), 元素规则「局部改色」(黑白同存只改浅色部分, 桶引擎路径), 反色纠错网 (深暗图绝不自动反色 +",
   "icons": {
     "16": "icons/icon16.png",
     "32": "icons/icon32.png",
@@ -21,7 +21,7 @@
       "js": [
         "content.js"
       ],
-      "run_at": "document_end",
+      "run_at": "document_start",
       "all_frames": true
     }
   ]
