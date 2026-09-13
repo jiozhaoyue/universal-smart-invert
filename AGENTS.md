@@ -30,9 +30,9 @@ Chrome extension DERIVED from it. Key paths:
   decision pipeline, background replace, WebGL video FX, Store, RuleLearner, TimelineLearner, UI)
 - `extension/` — GENERATED output (content.js + manifest.json + icons). **Never hand-edit**;
   rebuild after every header change with `node scripts/build-extension.js`
-- `scripts/` — zero-dependency build chain (build-extension, gen-icons, pack, zip lib), live
-  CDP probes (`probe-github.js`, proxy-aware via `HTTPS_PROXY`, target URL as argv) and the
-  ScriptCat dev server (`dev-server.js`)
+- `scripts/` — zero-dependency build chain (build-extension, gen-icons, pack, zip lib) and live
+  CDP probes (`probe-github.js`, proxy-aware via `HTTPS_PROXY`, target URL as argv)
+- `dev/` — local real-time testing assets (dev loader userscript; server is off-the-shelf)
 - `test.js` (Node unit tests, loads the real userscript via a DOM/localStorage shim and asserts
   `window.__svi` exports) · `test-browser.js` (CDP headless-Chrome end-to-end bench)
 - `dist/` — packed extension zip (gitignored). `.trellis/tasks/archive/` — per-version PRDs/design docs
@@ -50,19 +50,26 @@ Bench gotchas: uses a FIXED profile dir `.chrome-test-profile/` (gitignored) tha
 wipes at start; needs `--enable-unsafe-swiftshader` for WebGL scenarios; scenarios 2b/18 rely on
 in-run persistence, so never add global storage cleanup mid-run.
 
-## 本地实时调试 (脚本猫 ScriptCat)
+## 本地实时调试（全部现成开源做法，无自研服务器）
 
-ScriptCat has no built-in file watch/hot-reload (upstream issue #298), so real-time testing goes
-through `node scripts/dev-server.js` (port 8124, localhost only, zero-dep):
+Three complementary paths; pick per need. Never hand-roll a server again (a custom one was
+removed after it bound loopback-only and was unreachable via LAN/proxied browsers).
 
-1. Run the server; open `http://127.0.0.1:8124/` and install the dev loader
-   (`svi-dev-loader.user.js`) into ScriptCat **once**.
-2. **Disable the production-installed 反色 script** in ScriptCat during debugging — the
-   `dataset.sviOwner` handshake would put the later booter dormant.
-3. The loader fetches the current `universal-smart-invert.user.js` from the local server on every
-   page load (GM channel bypasses page CSP; never switch it to `<script src>`) and runs it in the
-   sandbox like a normal install. **Edit → save → refresh any page = live code.**
-4. Server is per-request read (always fresh); `fs.watch` console notice is cosmetic only.
+1. **file:// 热跟踪（零服务器）** — Violentmonkey's built-in "track local file": install the
+   userscript from `file:///...` (grant the manager "允许访问文件网址"), **keep the installer tab
+   open**, save in the editor → VM auto-reinstalls; refresh pages to run the new code.
+2. **HTTP 网关（回环 + 局域网）** — off-the-shelf `http-server` (MIT), binds all interfaces and
+   prints every reachable URL:
+   `npx --yes http-server . -p 8124 -c-1 --cors`
+   `-c-1` (no cache) is mandatory so managers/GM fetches always see fresh source. Install from
+   the printed `http://<LAN-IP>:8124/universal-smart-invert.user.js`. Do NOT use the hostname
+   `localhost` (may resolve to ::1 while the server is IPv4).
+3. **开发加载器（任意管理器 / 严格 CSP 站点 / 脚本猫）** — `dev/svi-dev-loader.user.js`:
+   install once; on every page load it walks a `GATEWAYS` list (loopback → LAN IP → optional
+   `file:///` entry) and evals the fresh source through `GM_xmlhttpRequest` (bypasses page CSP —
+   never switch to `<script src>` injection). Edit the LAN IP + matching `@connect` line to your
+   own. Disable the production-installed 反色 script while debugging (sviOwner handshake makes
+   the later booter dormant).
 
 ## Hard rules (violating these has caused real bugs — see .trellis/spec/frontend/quality-guidelines.md)
 
