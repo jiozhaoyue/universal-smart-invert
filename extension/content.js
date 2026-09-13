@@ -2542,54 +2542,6 @@
         border: 1px solid rgba(0, 0, 0, 0.3);
       }
 
-      /* 高级折叠面板 Accordion */
-      .svi-accordion {
-        background: rgba(255, 255, 255, 0.02);
-        border: 1px solid rgba(255, 255, 255, 0.08);
-        border-radius: 10px;
-        overflow: hidden;
-      }
-      .svi-accordion-header {
-        padding: 10px 14px;
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        cursor: pointer;
-        background: rgba(255, 255, 255, 0.03);
-        user-select: none;
-        transition: background 0.15s ease;
-      }
-      .svi-accordion-header:hover {
-        background: rgba(255, 255, 255, 0.06);
-      }
-      .svi-accordion-title {
-        font-size: 12px;
-        font-weight: 600;
-        color: #94a3b8;
-        display: flex;
-        align-items: center;
-        gap: 6px;
-      }
-      .svi-accordion-icon {
-        font-size: 11px;
-        color: #64748b;
-        transition: transform 0.2s ease;
-      }
-      .svi-accordion.open .svi-accordion-icon {
-        transform: rotate(90deg);
-        color: #38bdf8;
-      }
-      .svi-accordion-content {
-        display: none;
-        padding: 12px;
-        flex-direction: column;
-        gap: 12px;
-        border-top: 1px solid rgba(255, 255, 255, 0.06);
-      }
-      .svi-accordion.open .svi-accordion-content {
-        display: flex;
-      }
-
       /* ==========================================
          v3.0 新增样式: 特效覆盖层 / 部分反色投递 / 画中画 / 新区块
          ========================================== */
@@ -6507,7 +6459,7 @@
 
     summaryText() {
       const c = this.counters || {};
-      return `图片分析 ${c.imagesAnalyzed || 0} · 已反色 ${c.imagesInverted || 0} · 背景图 ${c.bgImagesInverted || 0} · 跨域回退 ${c.taintFallbacks || 0} · 视频自动 ${c.videoAutoActivations || 0} · 背景替换页 ${c.bgReplacePages || 0} · 图片特效 ${c.imgFxTransforms || 0} · canvas ${c.canvasesAnalyzed || 0} · 海报 ${c.postersInverted || 0} · 画中画 ${c.pipActivations || 0} · 日志 ${this.log.length}/200`;
+      return `图片分析 ${c.imagesAnalyzed || 0} · 已反色 ${c.imagesInverted || 0} · 背景图 ${c.bgImagesInverted || 0} · 跨域回退 ${c.taintFallbacks || 0} · 视频自动 ${c.videoAutoActivations || 0} · 背景替换页 ${c.bgReplacePages || 0} · 图片特效 ${c.imgFxTransforms || 0} · 画布分析 ${c.canvasesAnalyzed || 0} · 海报 ${c.postersInverted || 0} · 画中画 ${c.pipActivations || 0} · 日志 ${this.log.length}/200`;
     },
   };
 
