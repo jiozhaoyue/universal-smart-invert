@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 8
-- **Last Active**: 2026-09-12
+- **Total Sessions**: 9
+- **Last Active**: 2026-09-13
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~178 | Active |
+| `journal-1.md` | ~201 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 9 | 2026-09-13 | v3.3 设置面板全面改版：可停靠布局/规则文件/元素规则/全中文化 | `e3892f9`, `a898891` | `main` |
 | 8 | 2026-09-12 | v3.2 video tune: independent picture adjustments | `adcd218` | `main` |
 | 7 | 2026-09-12 | v3.1 feedback hardening: GitHub pre-scroll fix, smart image policy, media inspector | `67b4cde` | `main` |
 | 6 | 2026-09-12 | v3.0: partial-effect pipeline, predictive video, self-learning rules, extension prep | `7db7bd4` | `main` |

@@ -176,3 +176,26 @@ Shipped v3.2.0: independent video picture tuning (brightness/contrast/saturate/w
 ### Status
 
 [OK] **Completed**
+
+
+## Session 9: v3.3 设置面板全面改版：可停靠布局/规则文件/元素规则/全中文化
+<!-- trellis-session: v=2 fp=04d581b785a73c38 -->
+
+**Date**: 2026-09-13
+**Task**: v3.3 设置面板全面改版：可停靠布局/规则文件/元素规则/全中文化
+**Branch**: `main`
+
+### Summary
+
+完成 v3.3 UI 全面改版并归档任务：设置页三种布局（居中/靠左停靠/靠右停靠，停靠无遮罩可拖宽记忆）；行布局纵向堆叠+min-width:0，任何视口无横向滚动与出界（CDP 布局探针 6 组合验证）；信息架构按使用频率重排 8 区块并解散折叠抽屉；下拉选项去括号+动态说明行，界面全中文化（存储后端/键名/色值/统计说明）；规则文件导出与合并/替换导入（downloadJsonFile/pickJsonFile 抽公共助手）；新增元素级规则：决策优先级插为 手动>元素规则>快照>学习>种子>门>像素，图片与背景图引擎同时生效，FIFO 200。测试：test.js 元素规则单测、基准 Scenario 1b 端到端、基准断言随区块调整；全量门禁绿。经验已录入 quality-guidelines v3.3 节（含 CDP document-start 注入丢样式的探针陷阱）。校验子代理逐条核对 8/8 验收标准，遗留 Low 项（统计摘要英文 canvas）已修补提交。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `e3892f9` | feat: v3.3 settings panel overhaul — dockable layouts, rule files, element rules, full zh-CN IA (v3.3.0) |
+| `a898891` | fix: translate stats summary canvas label to zh-CN, drop dead accordion css |
+
+### Status
+
+[OK] **Completed**
