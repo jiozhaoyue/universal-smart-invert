@@ -156,6 +156,20 @@ rules below are battle-tested conventions from v1.4.0 → v2.0.0; follow them fo
   `evaluateSitePower()` after every change. Bench anchor ids preserved: `svi-sec-site`,
   `svi-sec-media`, `svi-sec-video`, `svi-sec-stats`, `svi-sec-shield`.
 
+
+## v4.1 Additions (AGPL, readability absorption)
+
+- **License is AGPL-3.0-or-later** — never copy code from AGPL projects without honoring the
+  license (we now ARE one); MIT references remain only when describing third-party tools.
+- **Readability features (font override / text stroke) follow the same hot-apply contract as
+  the site power**: CSS vars + `html.svi-font-on` / `html.svi-stroke-on` gate classes (never
+  filters), applied by `updateFontCss()` which must be called from boot, `Store.onRemoteLoaded`,
+  the site-power resume path, and its classes stripped in `stripSviSideEffects()`.
+  `FONT_STACKS` is defined BEFORE `loadState()` (loadState validates `fontFamilyPreset`
+  against it). Selectors whitelist text-bearing elements and exclude svg/code/pre/kbd/samp
+  subtrees; the stroke rule intentionally does NOT include `body` — assert stroke on a text
+  element, not on body.
+
 ## Testing Requirements
 
 - **The bench's fixed Chrome profile (`.chrome-test-profile/`) persists localStorage across

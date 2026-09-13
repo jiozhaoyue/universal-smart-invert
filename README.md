@@ -1,8 +1,8 @@
 # 全网通用智能视频与图片反色 (Universal Smart Video & Image Invert)
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-4.0.0-blue.svg?style=flat-square" alt="Version">
-  <img src="https://img.shields.io/badge/license-MIT-green.svg?style=flat-square" alt="License">
+  <img src="https://img.shields.io/badge/version-4.1.0-blue.svg?style=flat-square" alt="Version">
+  <img src="https://img.shields.io/badge/license-AGPL--3.0-green.svg?style=flat-square" alt="License">
   <img src="https://img.shields.io/badge/Tampermonkey-Supported-orange.svg?style=flat-square" alt="Tampermonkey">
   <img src="https://img.shields.io/badge/ScriptCat-Supported-purple.svg?style=flat-square" alt="ScriptCat">
   <img src="https://img.shields.io/badge/PRs-Welcome-brightgreen.svg?style=flat-square" alt="PRs Welcome">
@@ -308,4 +308,4 @@ https://raw.githubusercontent.com/jiozhaoyue/universal-smart-invert/main/univers
 
 ## 📄 开源许可证
 
-本项目基于 [MIT License](./LICENSE) 开源。欢迎提交 Issue 与 Pull Request！
+本项目基于 [AGPL-3.0-or-later](./LICENSE) 开源。欢迎提交 Issue 与 Pull Request！

@@ -1,8 +1,8 @@
 # Universal Smart Video & Image Invert
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-4.0.0-blue.svg?style=flat-square" alt="Version">
-  <img src="https://img.shields.io/badge/license-MIT-green.svg?style=flat-square" alt="License">
+  <img src="https://img.shields.io/badge/version-4.1.0-blue.svg?style=flat-square" alt="Version">
+  <img src="https://img.shields.io/badge/license-AGPL--3.0-green.svg?style=flat-square" alt="License">
   <img src="https://img.shields.io/badge/Tampermonkey-Supported-orange.svg?style=flat-square" alt="Tampermonkey">
   <img src="https://img.shields.io/badge/ScriptCat-Supported-purple.svg?style=flat-square" alt="ScriptCat">
   <img src="https://img.shields.io/badge/PRs-Welcome-brightgreen.svg?style=flat-square" alt="PRs Welcome">
@@ -245,4 +245,4 @@ To iterate on the code locally and see updates immediately:
 
 ## 📄 License
 
-Licensed under the [MIT License](./LICENSE).
+Licensed under the [AGPL-3.0-or-later](./LICENSE).

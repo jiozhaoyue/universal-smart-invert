@@ -5,7 +5,7 @@
 // @version      2.0.0
 // @description  开发辅助（勿分发）：按网关列表依次尝试加载最新的全网通用智能反色脚本（回环 / 局域网 / file:// 均可），编辑保存后刷新页面即生效。服务端用现成开源的 http-server：npx --yes http-server . -p 8124 -c-1 --cors。调试期间请停用正式安装的反色脚本副本（共存握手会让后启动方休眠）。
 // @author       jiozhaoyue
-// @license      MIT
+// @license      AGPL-3.0-or-later
 // @match        *://*/*
 // @match        file:///*
 // @run-at       document-end

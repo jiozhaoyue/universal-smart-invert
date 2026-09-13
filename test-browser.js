@@ -2068,6 +2068,96 @@ async function main() {
       returnByValue: true
     });
 
+    // ============================================================
+    // Scenario 20 (v4.1): readability absorption — Dark Reader-style
+    // font override + text stroke via real clicks in the 全局 tab.
+    // ============================================================
+    console.log('[Test] Scenario 20: font override + text stroke (global tab) ...');
+    await sendCdp('Runtime.evaluate', {
+      expression: `(() => { window.__svi.ui.openSettingsModal(); return true; })()`,
+      returnByValue: true
+    });
+    await new Promise((r) => setTimeout(r, 200));
+    await sendCdp('Runtime.evaluate', {
+      expression: `(() => { const t = [...document.querySelectorAll('.svi4-tab')].find(b => b.textContent === '全局'); t.click(); return !!document.getElementById('svi-sec-readability'); })()`,
+      returnByValue: true
+    });
+    await new Promise((r) => setTimeout(r, 200));
+    const fontBefore = (await sendCdp('Runtime.evaluate', {
+      expression: `(() => ({
+        cls: document.documentElement.classList.contains('svi-font-on'),
+        bodyFont: getComputedStyle(document.body).fontFamily
+      }))()`,
+      returnByValue: true
+    })).result.value;
+    assert.strictEqual(fontBefore.cls, false, 'font override must default off');
+    await sendCdp('Runtime.evaluate', {
+      expression: `(() => {
+        const row = [...document.querySelectorAll('#svi-sec-readability .svi-site-check-row')].find(r => r.textContent.includes('字体覆盖'));
+        row.querySelector('input.svi-check').click();
+        return true;
+      })()`,
+      returnByValue: true
+    });
+    await new Promise((r) => setTimeout(r, 200));
+    const fontOn = (await sendCdp('Runtime.evaluate', {
+      expression: `(() => ({
+        cls: document.documentElement.classList.contains('svi-font-on'),
+        varSet: document.documentElement.style.getPropertyValue('--svi-font-family').length > 0,
+        bodyFont: getComputedStyle(document.body).fontFamily
+      }))()`,
+      returnByValue: true
+    })).result.value;
+    assert.strictEqual(fontOn.cls, true, 'font toggle must add the gate class');
+    assert.ok(fontOn.varSet, 'font family css var must be set');
+    assert.notStrictEqual(fontOn.bodyFont, fontBefore.bodyFont, 'body computed font-family must change, got: ' + fontOn.bodyFont);
+    await sendCdp('Runtime.evaluate', {
+      expression: `(() => {
+        const row = [...document.querySelectorAll('#svi-sec-readability .svi-modal-row')].find(r => r.textContent.includes('文字描边'));
+        const slider = row.querySelector('input[type="range"]');
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+        setter.call(slider, '0.5');
+        slider.dispatchEvent(new Event('input', { bubbles: true }));
+        return true;
+      })()`,
+      returnByValue: true
+    });
+    await new Promise((r) => setTimeout(r, 200));
+    const strokeOn = (await sendCdp('Runtime.evaluate', {
+      expression: `(() => {
+        const el = document.querySelector('h1, h2, p, a, span, button, label') || document.body;
+        return {
+          cls: document.documentElement.classList.contains('svi-stroke-on'),
+          varVal: document.documentElement.style.getPropertyValue('--svi-text-stroke'),
+          width: getComputedStyle(el).webkitTextStrokeWidth
+        };
+      })()`,
+      returnByValue: true
+    })).result.value;
+    assert.strictEqual(strokeOn.cls, true, 'stroke slider must add the stroke gate class');
+    assert.strictEqual(strokeOn.varVal, '0.50px', 'stroke css var must track the slider');
+    assert.ok(strokeOn.width && strokeOn.width !== '0px', 'text elements must receive the stroke, got: ' + strokeOn.width);
+    // 还原默认 (不残留到复跑)
+    await sendCdp('Runtime.evaluate', {
+      expression: `(() => {
+        const sec = document.getElementById('svi-sec-readability');
+        [...sec.querySelectorAll('.svi-site-check-row')].find(r => r.textContent.includes('字体覆盖')).querySelector('input.svi-check').click();
+        const srow = [...sec.querySelectorAll('.svi-modal-row')].find(r => r.textContent.includes('文字描边'));
+        const slider = srow.querySelector('input[type="range"]');
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+        setter.call(slider, '0');
+        slider.dispatchEvent(new Event('input', { bubbles: true }));
+        return true;
+      })()`,
+      returnByValue: true
+    });
+    await sendCdp('Runtime.evaluate', {
+      expression: `(() => { const b = document.querySelector('.svi-modal-close'); if (b) b.click(); return true; })()`,
+      returnByValue: true
+    });
+    const fontClean = await waitForExpr(`!document.documentElement.classList.contains('svi-font-on') && !document.documentElement.classList.contains('svi-stroke-on')`, 3000);
+    assert.ok(fontClean, 'disabling font override and stroke must clear the gate classes');
+
     console.log('\n🎉 ALL BROWSER AUTOMATION TESTS PASSED 100% SUCCESFULLY!\n');
 
     ws.close();

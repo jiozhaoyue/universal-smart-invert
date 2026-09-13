@@ -12,7 +12,7 @@
 | :--- | :--- |
 | **脚本名称 (中文)** | 全网通用智能视频与图片反色 |
 | **脚本名称 (英文)** | Universal Smart Video & Image Invert |
-| **开源协议** | MIT License |
+| **开源协议** | AGPL-3.0-or-later |
 | **当前版本** | 3.0.0 |
 | **主页 / 源码仓库** | `https://github.com/jiozhaoyue/universal-smart-invert` |
 | **Issue 反馈地址** | `https://github.com/jiozhaoyue/universal-smart-invert/issues` |

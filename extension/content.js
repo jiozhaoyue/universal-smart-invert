@@ -3,7 +3,7 @@
  * universal-smart-invert — browser extension content script
  * GENERATED FILE — DO NOT EDIT.
  * Built by scripts/build-extension.js from universal-smart-invert.user.js
- * Source version: 4.0.0
+ * Source version: 4.1.0
  *
  * Prelude contract (see scripts/build-extension.js header):
  *   - EXT_MODE (wrapper scope)   → core claims coexistence kind 'ext'
@@ -209,6 +209,11 @@
     imagePolicy: 'balanced',   // 图片反色策略 (R4): 'balanced'(默认) | 'conservative' | 'aggressive'(=v3.0 仅尺寸门)
     hoverRestore: true,        // 悬停显示原图 (R5): false 时悬停已反色图片保持反色视图
     eagerScanBudget: 80,       // eager 初始处理预算 (R1): 启动时已加载完成的图片不等待视口交叉, 最多处理 N 张
+
+    // ===== v4.1 新增偏好: 字体覆盖与文字描边 (Dark Reader 吸收项) =====
+    fontOverride: false,       // 字体覆盖总开关: 关闭时零开销
+    fontFamilyPreset: 'sans',  // 'sans' | 'serif' | 'mono' | 'rounded'
+    textStroke: 0,             // 文字描边粗细 px (0 = 关闭, 0 ~ 1)
 
     // ===== v3.2 新增偏好: 独立视频画面调节 (与反色可组合) =====
     videoTune: {
@@ -817,6 +822,14 @@
   // ==========================================
   // 3. 状态持久化与偏好读写 (v3 → v4 迁移 + svi: 命名空间迁移)
   // ==========================================
+  // v4.1: 字体预设栈 (中文优先; loadState 规范化白名单也依赖此表, 必须先于 loadState 定义)
+  const FONT_STACKS = {
+    sans: '-apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif',
+    serif: '"Noto Serif SC", "Source Han Serif SC", Georgia, "SimSun", serif',
+    mono: 'ui-monospace, "Cascadia Code", Consolas, "JetBrains Mono", "Microsoft YaHei", monospace',
+    rounded: '"HarmonyOS Sans SC", "MiSans", "PingFang SC", "YouYuan", "幼圆", "Microsoft YaHei", sans-serif',
+  };
+
   let state = loadState();
   try { Store.migrateLegacy(); } catch (e) { /* ignore */ }
   try { Store.applyBackendPref(); } catch (e) { /* ignore */ }
@@ -898,6 +911,13 @@
     if (['center', 'left', 'right'].indexOf(merged.settingsLayout) === -1) merged.settingsLayout = 'center';
     merged.settingsWidth = Math.round(clampNumber(merged.settingsWidth, 320, 600, 420));
     merged.elementRules = normalizeElementRules(merged.elementRules);
+    // v4.1 字段规范化: 字体覆盖与描边 (布尔 / 枚举白名单 / 数值钳制)
+    merged.fontOverride = merged.fontOverride === true;
+    if (!FONT_STACKS[merged.fontFamilyPreset]) merged.fontFamilyPreset = 'sans';
+    {
+      const strokeN = Number(merged.textStroke);
+      merged.textStroke = (isNaN(strokeN) ? 0 : Math.max(0, Math.min(1, strokeN)));
+    }
     // 标签页隔离: 运行时状态绝不入库
     delete merged.invertActive;
 
@@ -1062,6 +1082,9 @@
       document.querySelectorAll('.svi-playing, .svi-fx-hover').forEach((el) => {
         try { el.classList.remove('svi-playing', 'svi-fx-hover'); } catch (e) { /* ignore */ }
       });
+      try {
+        document.documentElement.classList.remove('svi-font-on', 'svi-stroke-on'); // v4.1 字体/描边一并拆除
+      } catch (e) { /* ignore */ }
       document.querySelectorAll('video[data-svi-poster]').forEach((v) => {
         if (v.dataset) delete v.dataset.sviPoster;
       });
@@ -1113,6 +1136,7 @@
       }
       try { updateImageFilterCss(); } catch (e) { /* ignore */ } // 恢复门类 (enabled=true → 重新点亮)
       try { applyVideoTune(); } catch (e) { /* ignore */ }      // 恢复视频画面调节
+      try { updateFontCss(); } catch (e) { /* ignore */ }       // 恢复字体覆盖与描边
       try { window.__svi.ui && window.__svi.ui.setSiteOffState(false); } catch (e) { /* ignore */ }
       try { window.__svi.ui && window.__svi.ui.syncVisuals(); } catch (e) { /* ignore */ }
     }
@@ -1122,6 +1146,19 @@
     let on = true;
     try { on = getSiteProfile().enabled !== false; } catch (e) { /* ignore */ }
     applySitePower(on);
+  }
+
+  // ===== v4.1: 字体覆盖与文字描边 (Dark Reader 吸收项) =====
+  // CSS 变量 + html 门类 (非 filter, 不触碰"禁止 html/body 滤镜"硬规则); 站点挂起即灭。
+  function updateFontCss() {
+    if (!document.documentElement) return;
+    const on = state.fontOverride === true && runtime.siteActive !== false;
+    const strokePx = Number(state.textStroke) || 0;
+    const strokeOn = strokePx > 0.001 && runtime.siteActive !== false;
+    document.documentElement.style.setProperty('--svi-font-family', FONT_STACKS[state.fontFamilyPreset] || FONT_STACKS.sans);
+    document.documentElement.style.setProperty('--svi-text-stroke', strokePx.toFixed(2) + 'px');
+    document.documentElement.classList.toggle('svi-font-on', on);
+    document.documentElement.classList.toggle('svi-stroke-on', strokeOn);
   }
 
   // ==========================================
@@ -3007,6 +3044,17 @@
       }
       .svi-capsule-root.svi-site-off .svi-off-badge {
         display: inline-flex;
+      }
+
+      /* ==========================================
+         v4.1 字体覆盖与文字描边 (CSS 变量由 updateFontCss 注入;
+         白名单选择器避开 svg 与代码块, 不使用 filter)
+         ========================================== */
+      html.svi-font-on :is(body, button, input, select, label, h1, h2, h3, h4, h5, h6, p, span, a, li, td, th, dd, dt, figcaption, blockquote, section, article, header, footer, nav, aside):not(svg):not(svg *):not(code):not(pre):not(kbd):not(samp):not(code *):not(pre *):not(kbd *):not(samp *):not(monospace *):not(tt *) {
+        font-family: var(--svi-font-family) !important;
+      }
+      html.svi-stroke-on :is(h1, h2, h3, h4, h5, h6, p, span, a, li, td, th, dd, dt, figcaption, blockquote, label, button):not(svg):not(svg *):not(code):not(pre):not(kbd):not(samp):not(code *):not(pre *):not(kbd *):not(samp *) {
+        -webkit-text-stroke: var(--svi-text-stroke, 0px);
       }
     `;
 
@@ -7276,6 +7324,7 @@
       globalPanel.appendChild(this.buildAppearanceSection());
       globalPanel.appendChild(this.buildImageSection());
       globalPanel.appendChild(this.buildVideoSection());
+      globalPanel.appendChild(this.buildReadabilitySection());
       globalPanel.appendChild(this.buildSiteListsSection());
       globalPanel.appendChild(this.buildShieldSection());
       globalPanel.appendChild(this.buildDataSection());
@@ -8892,6 +8941,56 @@
       }
     }
 
+    // v4.1: 全局页签的字体与可读性 (Dark Reader 吸收项; 全部热生效)
+    buildReadabilitySection() {
+      const sec = document.createElement('div');
+      sec.className = 'svi-modal-section';
+      sec.id = 'svi-sec-readability';
+
+      const secTitle = document.createElement('div');
+      secTitle.className = 'svi-sec-title';
+      secTitle.innerHTML = `<span>🔤 字体与可读性</span>`;
+      sec.appendChild(secTitle);
+
+      const fontRow = ui.toggleRow('字体覆盖', '全站强制使用所选字体，代码块与图标不受影响',
+        () => state.fontOverride === true,
+        (v) => {
+          state.fontOverride = v;
+          savePrefs();
+          updateFontCss();
+        });
+      sec.appendChild(fontRow.row);
+      this.rowSyncs.push(fontRow.sync);
+
+      const famRow = ui.selectRow('字体风格', '字体覆盖开启时使用的字体族',
+        [
+          { v: 'sans', label: '无衬线', describe: '系统默认无衬线，界面最清晰。' },
+          { v: 'serif', label: '衬线', describe: '宋体质感，适合长文阅读。' },
+          { v: 'mono', label: '等宽', describe: '等宽字体，代码风格。' },
+          { v: 'rounded', label: '圆体', describe: '圆滑字形，柔和护眼。' },
+        ],
+        () => state.fontFamilyPreset || 'sans',
+        (v) => {
+          state.fontFamilyPreset = v;
+          savePrefs();
+          updateFontCss();
+        });
+      sec.appendChild(famRow.row);
+      this.rowSyncs.push(famRow.sync);
+
+      const strokeRow = ui.sliderRow('文字描边', '给正文文字加细描边提升对比，0 为关闭',
+        () => state.textStroke,
+        (n) => {
+          state.textStroke = n;
+          savePrefs();
+          updateFontCss();
+        }, 0, 1, 0.05, 'px');
+      sec.appendChild(strokeRow.row);
+      this.rowSyncs.push(strokeRow.sync);
+
+      return sec;
+    }
+
     // v4.0: 全局页签的站点名单 (自旧站点区块迁入; 变更热生效)
     buildSiteListsSection() {
       const sec = document.createElement('div');
@@ -9107,6 +9206,7 @@
   }
 
   updateImageFilterCss();
+  updateFontCss();
   StatsManager.load();
 
   // 调试与单测句柄 (始终暴露, 纯逻辑可直接在 Node 中通过环境桩单测)
@@ -9172,6 +9272,7 @@
         window.__svi.prefs = state;
         updateImageFilterCss();
         applyVideoTune();
+        updateFontCss();
       } catch (e) { /* ignore */ }
     };
     Store.init();
