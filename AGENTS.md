@@ -30,8 +30,9 @@ Chrome extension DERIVED from it. Key paths:
   decision pipeline, background replace, WebGL video FX, Store, RuleLearner, TimelineLearner, UI)
 - `extension/` — GENERATED output (content.js + manifest.json + icons). **Never hand-edit**;
   rebuild after every header change with `node scripts/build-extension.js`
-- `scripts/` — zero-dependency build chain (build-extension, gen-icons, pack, zip lib) and live
-  CDP probes (`probe-github.js`, proxy-aware via `HTTPS_PROXY`, target URL as argv)
+- `scripts/` — zero-dependency build chain (build-extension, gen-icons, pack, zip lib), live
+  CDP probes (`probe-github.js`, proxy-aware via `HTTPS_PROXY`, target URL as argv) and the
+  ScriptCat dev server (`dev-server.js`)
 - `test.js` (Node unit tests, loads the real userscript via a DOM/localStorage shim and asserts
   `window.__svi` exports) · `test-browser.js` (CDP headless-Chrome end-to-end bench)
 - `dist/` — packed extension zip (gitignored). `.trellis/tasks/archive/` — per-version PRDs/design docs
@@ -49,6 +50,20 @@ Bench gotchas: uses a FIXED profile dir `.chrome-test-profile/` (gitignored) tha
 wipes at start; needs `--enable-unsafe-swiftshader` for WebGL scenarios; scenarios 2b/18 rely on
 in-run persistence, so never add global storage cleanup mid-run.
 
+## 本地实时调试 (脚本猫 ScriptCat)
+
+ScriptCat has no built-in file watch/hot-reload (upstream issue #298), so real-time testing goes
+through `node scripts/dev-server.js` (port 8124, localhost only, zero-dep):
+
+1. Run the server; open `http://127.0.0.1:8124/` and install the dev loader
+   (`svi-dev-loader.user.js`) into ScriptCat **once**.
+2. **Disable the production-installed 反色 script** in ScriptCat during debugging — the
+   `dataset.sviOwner` handshake would put the later booter dormant.
+3. The loader fetches the current `universal-smart-invert.user.js` from the local server on every
+   page load (GM channel bypasses page CSP; never switch it to `<script src>`) and runs it in the
+   sandbox like a normal install. **Edit → save → refresh any page = live code.**
+4. Server is per-request read (always fresh); `fs.watch` console notice is cosmetic only.
+
 ## Hard rules (violating these has caused real bugs — see .trellis/spec/frontend/quality-guidelines.md)
 
 - **Runtime state (video-invert flag etc.) is per-tab in memory and NEVER persisted.** Only
@@ -65,6 +80,8 @@ in-run persistence, so never add global storage cleanup mid-run.
   UI built exclusively with the `ui.*` component builders.
 - Userscript and extension coexist via the `dataset.sviOwner` handshake — first booter claims the
   page, the other goes dormant. Bump `@version` and run `build-extension.js` in the same change.
+- **Committing without pushing is incomplete (不得只提交).** After every work commit, push to
+  `origin main` (`git push`) before the session ends — all four gate commands green first.
 - GitHub Actions: the `secrets` context is NOT allowed in `if:` — use a `$GITHUB_ENV` gate step.
 
 ## Before editing engines
