@@ -3,10 +3,10 @@
 // @name:zh-CN   全网通用智能视频与图片反色
 // @name:en      Universal Smart Video & Image Invert
 // @namespace    https://github.com/jiozhaoyue/universal-smart-invert
-// @version      3.3.1
-// @description  全网通用智能视频与图片反色脚本 (v3.3)。新增: 设置面板全面改版 (居中/靠左/靠右三种布局可停靠, 信息架构重排, 界面全中文化, 规则文件导出导入, 元素级规则); 保留 v3.2 视频画面调节与 v3.1/v3.0 全部能力。
-// @description:zh-CN 全网通用智能视频与图片反色脚本 (v3.3)。新增: 设置面板三种布局可停靠、信息架构重排、全中文化、规则文件上下传、元素级规则; 保留 v3.2 与更早全部能力。
-// @description:en Universal smart video and image invert userscript (v3.3). New: settings panel overhaul (dockable layouts, reordered IA, full zh-CN wording, rule file import/export, element-level rules); all v3.2 and earlier capabilities retained.
+// @version      4.0.0
+// @description  全网通用智能视频与图片反色脚本 (v4.0)。新增: 设置页推倒重做 (电源横幅热生效 + 本站/全局双页签 + 三态能力卡片, 零冗余), 本站电源/站点名单热切换 (立即拆除全部反色, 无需刷新); 保留 v3.x 全部引擎能力。
+// @description:zh-CN 全网通用智能视频与图片反色脚本 (v4.0)。新增: 设置页推倒重做 (电源横幅 + 双页签 + 三态能力卡片), 站点电源热生效 (关闭立即还原页面); 保留 v3.x 全部能力。
+// @description:en Universal smart video and image invert userscript (v4.0). New: ground-up settings redesign (power banner + site/global tabs + tri-state capability cards, zero redundancy) and hot site power (toggling off reverts the page instantly, no reload); all v3.x capabilities retained.
 // @author       jiozhaoyue
 // @license      MIT
 // @icon         data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><circle cx=%2250%22 cy=%2250%22 r=%2246%22 fill=%22%231e293b%22 stroke=%22%2338bdf8%22 stroke-width=%228%22/><path d=%22M50 4 A46 46 0 0 1 50 96 Z%22 fill=%22%2338bdf8%22/></svg>
@@ -1000,6 +1000,90 @@
     if (probe && probe.currentVideo) {
       probe.applyFilterToCurrent();
     }
+  }
+
+  // ===== v4.0: 站点电源热生效层 =====
+  // runtime 态 (绝不落盘): false 时页面必须呈现"脚本未运行"——引擎入口全闸, 副作用全拆。
+  // 挂起清单: html 门类 / data-svi-* 属性族 / 视频内联滤镜与特效覆盖层 / 背景替换 / 胶囊折叠。
+  function stripSviSideEffects() {
+    try {
+      document.querySelectorAll(
+        '[data-svi-inverted], [data-svi-bginv], [data-svi-checked-src], [data-svi-fx], [data-svi-fx-off], [data-svi-checked], [data-svi-bgr-bg], [data-svi-bgr-bd], [data-svi-bgr-fg]'
+      ).forEach((el) => {
+        el.removeAttribute('data-svi-inverted');
+        el.removeAttribute('data-svi-bginv');
+        el.removeAttribute('data-svi-checked-src');
+        el.removeAttribute('data-svi-fx');
+        el.removeAttribute('data-svi-fx-off');
+        el.removeAttribute('data-svi-checked');
+        el.removeAttribute('data-svi-bgr-bg');
+        el.removeAttribute('data-svi-bgr-bd');
+        el.removeAttribute('data-svi-bgr-fg');
+      });
+      document.querySelectorAll('.svi-fx-overlay').forEach((el) => { try { el.remove(); } catch (e) { /* ignore */ } });
+      document.querySelectorAll('.svi-playing, .svi-fx-hover').forEach((el) => {
+        try { el.classList.remove('svi-playing', 'svi-fx-hover'); } catch (e) { /* ignore */ }
+      });
+      document.querySelectorAll('video[data-svi-poster]').forEach((v) => {
+        if (v.dataset) delete v.dataset.sviPoster;
+      });
+    } catch (e) { /* ignore */ }
+  }
+
+  function applySitePower(on) {
+    const eng = (window.__svi && window.__svi.engines) || {};
+    if (!on) {
+      if (runtime.siteActive === false) return;
+      runtime.siteActive = false;
+      // 视频链: 退出反色态, 撤内联滤镜, 释放特效覆盖层 (检测循环经 profile 闸自行休眠)
+      const hil = eng.hil || null;
+      if (hil && runtime.invertActive) {
+        runtime.invertActive = false;
+        try {
+          const cv = hil.probe && hil.probe.currentVideo;
+          if (cv && hil.timeline) hil.timeline.recordEnd(cv);
+        } catch (e) { /* ignore */ }
+      }
+      try {
+        const cv = hil && hil.probe && hil.probe.currentVideo;
+        if (cv) {
+          cv.style.removeProperty('filter');
+          cv.style.removeProperty('transition');
+        }
+      } catch (e) { /* ignore */ }
+      try { eng.videoFx && eng.videoFx.teardown(); } catch (e) { /* ignore */ }
+      stripSviSideEffects();
+      try { updateImageFilterCss(); } catch (e) { /* ignore */ } // profile.enabled=false → 门类移除
+      try {
+        document.documentElement.classList.remove('svi-video-tune');
+        document.documentElement.style.setProperty('--svi-video-tune', 'none');
+      } catch (e) { /* ignore */ }
+      try { applyBackgroundReplace(false); } catch (e) { /* ignore */ }
+      try { window.__svi.ui && window.__svi.ui.setSiteOffState(true); } catch (e) { /* ignore */ }
+    } else {
+      if (runtime.siteActive === true) return;
+      runtime.siteActive = true;
+      if (!window.__svi.enginesBooted) {
+        bootEngines(); // 开机即禁用的页面: 电源热启用时首启引擎簇
+      } else {
+        try { window.__svi_image_engine && window.__svi_image_engine.clearCacheAndRescan(); } catch (e) { /* ignore */ }
+        try {
+          const bg = eng.bgImage;
+          if (bg && typeof bg.sweep === 'function') bg.sweep();
+        } catch (e) { /* ignore */ }
+        try { if (getSiteProfile().bgReplace) applyBackgroundReplace(true); } catch (e) { /* ignore */ }
+      }
+      try { updateImageFilterCss(); } catch (e) { /* ignore */ } // 恢复门类 (enabled=true → 重新点亮)
+      try { applyVideoTune(); } catch (e) { /* ignore */ }      // 恢复视频画面调节
+      try { window.__svi.ui && window.__svi.ui.setSiteOffState(false); } catch (e) { /* ignore */ }
+      try { window.__svi.ui && window.__svi.ui.syncVisuals(); } catch (e) { /* ignore */ }
+    }
+  }
+
+  function evaluateSitePower() {
+    let on = true;
+    try { on = getSiteProfile().enabled !== false; } catch (e) { /* ignore */ }
+    applySitePower(on);
   }
 
   // ==========================================
@@ -2729,6 +2813,163 @@
         outline-offset: 1px !important;
         box-shadow: 0 0 0 4px rgba(56, 189, 248, 0.35) !important;
       }
+
+      /* ==========================================
+         v4.0 设置页组件: 电源横幅 / 页签 / 能力卡片 / 停用态胶囊
+         (视觉语言与 v3.3 零相似; 并列数据一律网格, 禁止行内拼接)
+         ========================================== */
+      .svi4-power {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        flex-wrap: wrap;
+        padding: 12px 14px;
+        background: linear-gradient(135deg, rgba(56, 189, 248, 0.10), rgba(16, 185, 129, 0.06));
+        border: 1px solid rgba(56, 189, 248, 0.25);
+        border-radius: 14px;
+      }
+      .svi4-power-info {
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+        min-width: 0;
+        flex: 1;
+      }
+      .svi4-host {
+        font-size: 14px;
+        font-weight: 700;
+        color: #f8fafc;
+        font-family: monospace;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .svi4-power-status {
+        font-size: 11px;
+        color: #7dd3fc;
+      }
+      .svi4-switch {
+        position: relative;
+        width: 52px;
+        height: 28px;
+        border-radius: 999px;
+        border: 1px solid rgba(255, 255, 255, 0.22);
+        background: rgba(71, 85, 105, 0.9);
+        cursor: pointer;
+        flex-shrink: 0;
+        transition: background 0.18s ease, border-color 0.18s ease;
+      }
+      .svi4-switch::after {
+        content: '';
+        position: absolute;
+        top: 2px;
+        left: 2px;
+        width: 22px;
+        height: 22px;
+        border-radius: 50%;
+        background: #e2e8f0;
+        transition: transform 0.18s ease, background 0.18s ease;
+      }
+      .svi4-switch.on {
+        background: #059669;
+        border-color: #34d399;
+      }
+      .svi4-switch.on::after {
+        transform: translateX(24px);
+        background: #ecfdf5;
+      }
+      .svi4-tabs {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 4px;
+        background: rgba(15, 23, 42, 0.75);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 12px;
+        padding: 4px;
+      }
+      .svi4-tab {
+        border: none;
+        background: transparent;
+        color: #94a3b8;
+        font-size: 13px;
+        font-weight: 600;
+        padding: 8px 0;
+        border-radius: 9px;
+        cursor: pointer;
+        transition: all 0.15s ease;
+      }
+      .svi4-tab:hover { color: #e2e8f0; }
+      .svi4-tab.active {
+        background: #0ea5e9;
+        color: #fff;
+      }
+      .svi4-cards {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 8px;
+      }
+      .svi4-card {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 4px;
+        padding: 12px 6px 10px;
+        background: rgba(15, 23, 42, 0.55);
+        border: 1px solid rgba(255, 255, 255, 0.10);
+        border-radius: 12px;
+        cursor: pointer;
+        transition: all 0.15s ease;
+        min-width: 0;
+      }
+      .svi4-card:hover {
+        border-color: rgba(56, 189, 248, 0.5);
+      }
+      .svi4-card-icon {
+        font-size: 20px;
+        line-height: 1;
+      }
+      .svi4-card-name {
+        font-size: 12px;
+        font-weight: 600;
+        color: #e2e8f0;
+      }
+      .svi4-card-state {
+        font-size: 10px;
+        color: #64748b;
+        text-align: center;
+      }
+      .svi4-card.st-on {
+        border-color: rgba(52, 211, 153, 0.55);
+        background: rgba(16, 185, 129, 0.10);
+      }
+      .svi4-card.st-on .svi4-card-state { color: #34d399; }
+      .svi4-card.st-off {
+        border-color: rgba(251, 146, 60, 0.55);
+        background: rgba(249, 115, 22, 0.08);
+      }
+      .svi4-card.st-off .svi4-card-state { color: #fb923c; }
+      /* 停用态: 胶囊折叠为单枚电源徽标 */
+      .svi-off-badge {
+        display: none;
+        align-items: center;
+        gap: 5px;
+        padding: 5px 11px;
+        border-radius: 999px;
+        border: 1px solid rgba(251, 146, 60, 0.55);
+        background: rgba(249, 115, 22, 0.15);
+        color: #fdba74;
+        font-size: 11px;
+        cursor: pointer;
+        box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+      }
+      .svi-capsule-root.svi-site-off .svi-trigger-pill,
+      .svi-capsule-root.svi-site-off .svi-panel-card {
+        display: none !important;
+      }
+      .svi-capsule-root.svi-site-off .svi-off-badge {
+        display: inline-flex;
+      }
     `;
 
     if (typeof GM_addStyle === 'function') {
@@ -4282,6 +4523,7 @@
     // 预算 state.eagerScanBudget (默认 80) 内立即进入统一决策管线;
     // 首屏 README 无需滚动即反色 (F2 修复)。已决元素早退, 重复执行近零成本。
     runEagerPass() {
+      if (runtime.siteActive === false) return; // v4.0 站点挂起闸
       if (document.hidden) return;
       const root = document.body || document.documentElement;
       if (!root || !root.querySelectorAll) return;
@@ -4322,6 +4564,10 @@
     }
 
     flushMutations() {
+      if (runtime.siteActive === false) { // v4.0 站点挂起闸: 清队不处理
+        this.pendingMutNodes.clear();
+        return;
+      }
       if (document.hidden) {
         // 页面隐藏时挂起, 稍后重试
         this.mutTimer = setTimeout(() => this.flushMutations(), 1000);
@@ -4525,7 +4771,7 @@
 
     bindManualToggle() {
       document.addEventListener('click', (e) => {
-        if (e.altKey) {
+        if (e.altKey && runtime.siteActive !== false) { // v4.0 站点挂起闸
           const target = this.resolveMediaFromEvent(e);
           if (target) {
             e.preventDefault();
@@ -4537,6 +4783,7 @@
     }
 
     processSvg(svg) {
+      if (runtime.siteActive === false) return; // v4.0 站点挂起闸
       if (svg.hasAttribute('data-svi-checked')) return;
       svg.setAttribute('data-svi-checked', 'true');
 
@@ -4770,6 +5017,7 @@
 
     // 处理入口 (IO / eager / 变更 flush 共用): 就绪判定 + 晚加载 load 事件驱动 (有界, 无悬挂状态)
     async processImage(img) {
+      if (runtime.siteActive === false) return; // v4.0 站点挂起闸
       const src = getMediaSrc(img);
       if (!src) return;
 
@@ -6741,20 +6989,47 @@
       this.shieldColorInput = null;
       this.statsGrid = null;
       this.rowSyncs = [];           // 全部组件行的 sync 函数 (syncAll 统一刷新)
+      // v4.0: 站点电源 / 页签 / 能力卡片
+      this.bound = false;
+      this.siteOff = false;
+      this.activeTab = 'site';
+      this.tabBtns = {};
+      this.capCards = {};
+      this.powerSwitch = null;
+      this.powerStatus = null;
+      this.offBadge = null;
+      this.sitePanelEl = null;
+      this.globalPanelEl = null;
     }
 
     bindStateMachine(sm) {
       this.stateMachine = sm;
-      this.buildUI();
-      this.buildSettingsModal();
-      this.bindShortcuts();
-      this.bindFullscreen();
+      if (!this.bound) {
+        this.bound = true;
+        this.buildUI();
+        this.buildSettingsModal();
+        this.bindShortcuts();
+        this.bindFullscreen();
+      }
+      this.setSiteOffState(this.siteOff);
       this.syncVisuals();
     }
 
     buildUI() {
+      if (this.root) return; // v4.0 幂等: 停用态预构建后, 电源热启用不重建
+
       this.root = document.createElement('div');
       this.root.className = 'svi-capsule-root';
+
+      // v4.0: 停用态徽标 (站点电源关闭时胶囊折叠为此, 点击即热恢复)
+      this.offBadge = document.createElement('button');
+      this.offBadge.className = 'svi-off-badge';
+      this.offBadge.textContent = '⏻ 已停用 · 点击恢复';
+      this.offBadge.title = '本站反色已停用，点击立即恢复';
+      this.offBadge.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.setSitePower(true);
+      });
 
       // 贴边微型触发小药丸
       this.pill = document.createElement('div');
@@ -6863,7 +7138,7 @@
       footer.innerHTML = `<span>Alt+I 视频</span><span>Alt+A 智能</span><span>Alt+点击 图片</span>`;
 
       this.panel.append(header, btnRow, presetRow, modalBtn, footer);
-      this.root.append(this.pill, this.panel);
+      this.root.append(this.pill, this.panel, this.offBadge);
       document.body.appendChild(this.root);
 
       this.pill.addEventListener('click', (e) => {
@@ -6907,7 +7182,7 @@
       const header = document.createElement('div');
       header.className = 'svi-modal-header';
       header.innerHTML = `
-        <div class="svi-modal-title"><span>⚙️ 智能反色设置</span></div>
+        <div class="svi-modal-title"><span>⚡ 智能反色</span></div>
         <button class="svi-modal-close" title="关闭">✕</button>
       `;
       header.querySelector('.svi-modal-close').addEventListener('click', () => {
@@ -6935,24 +7210,43 @@
       const body = document.createElement('div');
       body.className = 'svi-modal-body';
 
-      // 模块 1: 🎨 外观与画面
-      const secAppearance = this.buildAppearanceSection();
-      // 模块 2: 🖼️ 图片反色
-      const secImage = this.buildImageSection();
-      // 模块 3: 🎬 视频
-      const secVideo = this.buildVideoSection();
-      // 模块 4: 🌐 站点与规则
-      const secSite = this.buildSiteSection();
-      // 模块 5: 🛡️ 颜色保护
-      const secShield = this.buildShieldSection();
-      // 模块 6: 🖥️ 当前页媒体
-      const secMedia = this.buildMediaSection();
-      // 模块 7: 💾 数据与备份
-      const secData = this.buildDataSection();
-      // 模块 8: 💡 操作技巧
-      const secTips = this.buildTipsBlock();
+      // v4.0 IA: 电源横幅 (热生效) + 本站/全局双页签 —— 取代 v3.3 八区块单列长滚动
+      body.appendChild(this.buildPowerBanner());
 
-      body.append(secAppearance, secImage, secVideo, secSite, secShield, secMedia, secData, secTips);
+      const tabsBar = document.createElement('div');
+      tabsBar.className = 'svi4-tabs';
+      const sitePanel = document.createElement('div');
+      sitePanel.className = 'svi4-panel';
+      const globalPanel = document.createElement('div');
+      globalPanel.className = 'svi4-panel';
+      const mkTab = (key, label) => {
+        const b = document.createElement('button');
+        b.className = 'svi4-tab';
+        b.textContent = label;
+        b.addEventListener('click', () => this.switchTab(key));
+        this.tabBtns[key] = b;
+        tabsBar.appendChild(b);
+      };
+      mkTab('site', '本站');
+      mkTab('global', '全局');
+
+      // 本站页签: 能力卡片(三态热生效) + 本站特效 + 元素级规则 + 学习规则 + 当前页媒体
+      sitePanel.appendChild(this.buildSiteSection());
+      sitePanel.appendChild(this.buildMediaSection());
+
+      // 全局页签: 外观 / 图片 / 视频 / 站点名单 / 颜色保护 / 数据与备份 / 技巧
+      globalPanel.appendChild(this.buildAppearanceSection());
+      globalPanel.appendChild(this.buildImageSection());
+      globalPanel.appendChild(this.buildVideoSection());
+      globalPanel.appendChild(this.buildSiteListsSection());
+      globalPanel.appendChild(this.buildShieldSection());
+      globalPanel.appendChild(this.buildDataSection());
+      globalPanel.appendChild(this.buildTipsBlock());
+
+      body.append(tabsBar, sitePanel, globalPanel);
+      this.sitePanelEl = sitePanel;
+      this.globalPanelEl = globalPanel;
+      this.switchTab(this.activeTab);
 
       // 模态弹窗 Footer
       const footer = document.createElement('div');
@@ -7789,52 +8083,15 @@
 
       const secTitle = document.createElement('div');
       secTitle.className = 'svi-sec-title';
-      secTitle.innerHTML = `<span>🌐 站点与规则</span><span id="svi-site-host" style="font-size:10px; color:#64748b;"></span>`;
+      secTitle.innerHTML = `<span>🌐 本站能力</span><span id="svi-site-host" style="font-size:10px; color:#64748b;"></span>`;
       sec.appendChild(secTitle);
 
       const host = profileKey();
       const getOv = () => (state.siteOverrides[host] || (state.siteOverrides[host] = {}));
       this.siteRowSyncs = [];
 
-      const mkToggle = (label, hint, getVal, onSet) => {
-        const row = ui.toggleRow(label, hint, getVal, onSet);
-        sec.appendChild(row.row);
-        this.siteRowSyncs.push(row.sync);
-        return row;
-      };
-
-      mkToggle('本站启用脚本', '关闭后本站全部引擎停用，等同把本站加入黑名单',
-        () => getSiteProfile().enabled !== false,
-        (v) => {
-          getOv().enabled = v;
-          // 立即生效: 关闭时同步停掉背景替换; 重新开启时按站点档案恢复
-          try { applyBackgroundReplace(v && getSiteProfile().bgReplace === true); } catch (e) { /* ignore */ }
-          savePrefs();
-          this.syncVisuals();
-        });
-      mkToggle('本站图片反色', '覆盖全局图片反色开关',
-        () => getSiteProfile().imageInvert !== false,
-        (v) => {
-          getOv().imageInvert = v;
-          savePrefs();
-          updateImageFilterCss();
-          this.syncVisuals();
-        });
-      mkToggle('本站视频反色', '覆盖全局视频反色能力',
-        () => getSiteProfile().videoInvert !== false,
-        (v) => {
-          getOv().videoInvert = v;
-          savePrefs();
-          this.syncVisuals();
-        });
-      mkToggle('本站背景替换', '浅色页面一键深色化，登录区域自动保护',
-        () => !!getSiteProfile().bgReplace,
-        (v) => {
-          getOv().bgReplace = v;
-          savePrefs();
-          applyBackgroundReplace(v);
-          this.syncVisuals();
-        });
+      // v4.0: 能力卡片取代旧四个本站开关 —— 三态循环 (跟随全局→强制开→强制关), 点击热生效
+      sec.appendChild(this.buildCapabilityCards());
 
       // 本站图片特效模式 (跟随全局或单独指定; 「跟随全局」删除覆盖键)
       const siteFxRow = ui.selectRow('本站图片特效', '仅作用于当前站点的图片特效模式',
@@ -7916,45 +8173,7 @@
       sec.appendChild(erForm);
       this.refreshElementRules();
 
-      // 站点管理模式 (v3.3 选项净化: 短名 + 动态说明)
-      const modeRow = ui.selectRow('站点管理模式', '控制脚本在哪些站点生效',
-        [
-          { v: 'all', label: '全部启用', describe: '所有站点默认启用。' },
-          { v: 'blacklist', label: '黑名单', describe: '名单内站点停用，其余站点启用。' },
-          { v: 'whitelist', label: '白名单', describe: '仅名单内站点启用，其余停用。' },
-        ],
-        () => state.siteMode || 'all',
-        (v) => {
-          state.siteMode = v;
-          savePrefs();
-          updateImageFilterCss();
-        });
-      sec.appendChild(modeRow.row);
-      this.modeSelect = modeRow.select;
-      this.siteRowSyncs.push(modeRow.sync);
-
-      // 黑名单 / 白名单域名列表
-      const blackRow = ui.textRow(null, null, () => (state.siteBlacklist || []).join('\n'), 3, (val) => {
-        const lines = val.split(/\n+/).map((s) => s.trim()).filter(Boolean);
-        state.siteBlacklist = lines;
-        savePrefs();
-        updateImageFilterCss();
-      }, '黑名单域名，每行一个，如 *.163.com');
-      sec.appendChild(blackRow.row);
-      this.blacklistTa = blackRow.ta;
-      this.siteRowSyncs.push(blackRow.sync);
-
-      const whiteRow = ui.textRow(null, null, () => (state.siteWhitelist || []).join('\n'), 3, (val) => {
-        const lines = val.split(/\n+/).map((s) => s.trim()).filter(Boolean);
-        state.siteWhitelist = lines;
-        savePrefs();
-        updateImageFilterCss();
-      }, '白名单域名，每行一个');
-      sec.appendChild(whiteRow.row);
-      this.whitelistTa = whiteRow.ta;
-      this.siteRowSyncs.push(whiteRow.sync);
-
-      // —— 学习规则 (v3.3 由独立「智能」区块并入) ——
+      // —— 学习规则 (v3.3 由独立「智能」区块并入; v4.0 站点名单移入全局页签) ——
       const learnTitle = document.createElement('div');
       learnTitle.className = 'svi-sub-title';
       learnTitle.textContent = '学习规则';
@@ -8467,6 +8686,227 @@
       }
     }
 
+    // ===== v4.0: 站点电源 / 页签 / 能力卡片 (全部热生效) =====
+    setSitePower(v) {
+      const host = profileKey();
+      const ov = state.siteOverrides[host] || (state.siteOverrides[host] = {});
+      ov.enabled = v;
+      savePrefs();
+      evaluateSitePower(); // 引擎层热切换 (含胶囊折叠/恢复与重启)
+      this.refreshPowerUi();
+      this.refreshCapCards();
+      this.syncVisuals();
+      showToast(v ? '本站反色已开启 (热生效)' : '本站反色已停用 (热生效)');
+    }
+
+    setSiteOffState(off) {
+      this.siteOff = off;
+      if (this.root) this.root.classList.toggle('svi-site-off', off);
+    }
+
+    refreshPowerUi() {
+      let on = true;
+      try { on = getSiteProfile().enabled !== false; } catch (e) { /* ignore */ }
+      if (this.powerSwitch) {
+        this.powerSwitch.classList.toggle('on', on);
+        this.powerSwitch.setAttribute('aria-checked', on ? 'true' : 'false');
+      }
+      if (this.powerStatus) {
+        this.powerStatus.textContent = on ? '反色运行中 · 关闭立即热生效' : '本站已停用 · 开启立即热生效';
+      }
+    }
+
+    buildPowerBanner() {
+      const banner = document.createElement('div');
+      banner.className = 'svi4-power';
+      const info = document.createElement('div');
+      info.className = 'svi4-power-info';
+      const hostEl = document.createElement('div');
+      hostEl.className = 'svi4-host';
+      let hostStr = '当前站点';
+      try { hostStr = profileKey() || '本地文件'; } catch (e) { /* ignore */ }
+      hostEl.textContent = hostStr;
+      const statusEl = document.createElement('div');
+      statusEl.className = 'svi4-power-status';
+      this.powerStatus = statusEl;
+      info.append(hostEl, statusEl);
+      const sw = document.createElement('button');
+      sw.className = 'svi4-switch';
+      sw.setAttribute('role', 'switch');
+      sw.title = '本站电源: 热生效';
+      sw.addEventListener('click', () => {
+        this.setSitePower(getSiteProfile().enabled === false);
+      });
+      this.powerSwitch = sw;
+      banner.append(info, sw);
+      this.refreshPowerUi();
+      return banner;
+    }
+
+    switchTab(key) {
+      this.activeTab = key === 'global' ? 'global' : 'site';
+      if (this.sitePanelEl && this.globalPanelEl) {
+        this.sitePanelEl.style.display = this.activeTab === 'site' ? '' : 'none';
+        this.globalPanelEl.style.display = this.activeTab === 'global' ? '' : 'none';
+      }
+      for (const k of Object.keys(this.tabBtns)) {
+        this.tabBtns[k].classList.toggle('active', k === this.activeTab);
+      }
+    }
+
+    triStateOf(key) {
+      let v;
+      try { v = (state.siteOverrides[profileKey()] || {})[key]; } catch (e) { /* ignore */ }
+      if (v === true) return 'on';
+      if (v === false) return 'off';
+      return 'inherit';
+    }
+
+    buildCapabilityCards() {
+      const defs = [
+        { key: 'imageInvert', icon: '🖼️', name: '图片反色' },
+        { key: 'videoInvert', icon: '🎬', name: '视频反色' },
+        { key: 'bgReplace', icon: '🌙', name: '背景替换' },
+      ];
+      const grid = document.createElement('div');
+      grid.className = 'svi4-cards';
+      this.capCards = {};
+      for (const d of defs) {
+        const card = document.createElement('button');
+        card.className = 'svi4-card';
+        card.title = '点击切换: 跟随全局 → 本站强制开 → 本站强制关 (热生效)';
+        const icon = document.createElement('span');
+        icon.className = 'svi4-card-icon';
+        icon.textContent = d.icon;
+        const name = document.createElement('span');
+        name.className = 'svi4-card-name';
+        name.textContent = d.name;
+        const stateEl = document.createElement('span');
+        stateEl.className = 'svi4-card-state';
+        card.append(icon, name, stateEl);
+        card.addEventListener('click', () => this.cycleTriState(d.key));
+        this.capCards[d.key] = stateEl;
+        grid.appendChild(card);
+      }
+      this.refreshCapCards();
+      return grid;
+    }
+
+    cycleTriState(key) {
+      const host = profileKey();
+      const ov = state.siteOverrides[host] || (state.siteOverrides[host] = {});
+      const cur = this.triStateOf(key);
+      if (cur === 'inherit') ov[key] = true;
+      else if (cur === 'on') ov[key] = false;
+      else delete ov[key];
+      if (!Object.keys(ov).length) delete state.siteOverrides[host];
+      savePrefs();
+      // 热应用对应引擎 (profile 已随 prefsRevision 重解析)
+      try {
+        if (key === 'imageInvert') {
+          updateImageFilterCss();
+          window.__svi_image_engine && window.__svi_image_engine.clearCacheAndRescan();
+        } else if (key === 'bgReplace') {
+          applyBackgroundReplace(getSiteProfile().bgReplace === true);
+        } else if (key === 'videoInvert' && getSiteProfile().videoInvert === false && runtime.invertActive) {
+          const hil = window.__svi && window.__svi.engines ? window.__svi.engines.hil : null;
+          if (hil) {
+            runtime.invertActive = false;
+            try {
+              const cv = hil.probe && hil.probe.currentVideo;
+              if (cv && hil.timeline) hil.timeline.recordEnd(cv);
+            } catch (e) { /* ignore */ }
+            try {
+              const cv2 = hil.probe && hil.probe.currentVideo;
+              if (cv2) {
+                cv2.style.removeProperty('filter');
+                cv2.style.removeProperty('transition');
+              }
+            } catch (e) { /* ignore */ }
+            this.syncVisuals();
+          }
+        }
+      } catch (e) { /* ignore */ }
+      this.refreshCapCards();
+    }
+
+    refreshCapCards() {
+      for (const [key, stateEl] of Object.entries(this.capCards)) {
+        const st = this.triStateOf(key);
+        const card = stateEl.parentElement;
+        card.classList.remove('st-on', 'st-off');
+        let eff = false;
+        try {
+          const p = getSiteProfile();
+          if (key === 'imageInvert') eff = p.imageInvert !== false;
+          else if (key === 'videoInvert') eff = p.videoInvert !== false;
+          else eff = p.bgReplace === true;
+        } catch (e) { /* ignore */ }
+        if (st === 'on') {
+          card.classList.add('st-on');
+          stateEl.textContent = '本站强制开';
+        } else if (st === 'off') {
+          card.classList.add('st-off');
+          stateEl.textContent = '本站强制关';
+        } else {
+          stateEl.textContent = eff ? '跟随全局 · 开' : '跟随全局 · 关';
+        }
+      }
+    }
+
+    // v4.0: 全局页签的站点名单 (自旧站点区块迁入; 变更热生效)
+    buildSiteListsSection() {
+      const sec = document.createElement('div');
+      sec.className = 'svi-modal-section';
+      sec.id = 'svi-sec-lists';
+
+      const secTitle = document.createElement('div');
+      secTitle.className = 'svi-sec-title';
+      secTitle.innerHTML = `<span>📜 站点名单</span>`;
+      sec.appendChild(secTitle);
+
+      const modeRow = ui.selectRow('站点管理模式', '控制脚本在哪些站点生效',
+        [
+          { v: 'all', label: '全部启用', describe: '所有站点默认启用。' },
+          { v: 'blacklist', label: '黑名单', describe: '名单内站点停用，其余站点启用。' },
+          { v: 'whitelist', label: '白名单', describe: '仅名单内站点启用，其余停用。' },
+        ],
+        () => state.siteMode || 'all',
+        (v) => {
+          state.siteMode = v;
+          savePrefs();
+          updateImageFilterCss();
+          evaluateSitePower();
+        });
+      sec.appendChild(modeRow.row);
+      this.modeSelect = modeRow.select;
+      this.siteRowSyncs.push(modeRow.sync);
+
+      const blackRow = ui.textRow(null, null, () => (state.siteBlacklist || []).join('\n'), 3, (val) => {
+        const lines = val.split(/\n+/).map((s) => s.trim()).filter(Boolean);
+        state.siteBlacklist = lines;
+        savePrefs();
+        updateImageFilterCss();
+        evaluateSitePower();
+      }, '黑名单域名，每行一个，如 *.163.com');
+      sec.appendChild(blackRow.row);
+      this.blacklistTa = blackRow.ta;
+      this.siteRowSyncs.push(blackRow.sync);
+
+      const whiteRow = ui.textRow(null, null, () => (state.siteWhitelist || []).join('\n'), 3, (val) => {
+        const lines = val.split(/\n+/).map((s) => s.trim()).filter(Boolean);
+        state.siteWhitelist = lines;
+        savePrefs();
+        updateImageFilterCss();
+        evaluateSitePower();
+      }, '白名单域名，每行一个');
+      sec.appendChild(whiteRow.row);
+      this.whitelistTa = whiteRow.ta;
+      this.siteRowSyncs.push(whiteRow.sync);
+
+      return sec;
+    }
+
     syncVisuals() {
       if (this.invertBtn) {
         this.invertBtn.textContent = runtime.invertActive ? '视频:开' : '视频:关';
@@ -8699,16 +9139,18 @@
     Store.init();
   } catch (e) { /* ignore */ }
 
-  // 站点被禁用 (黑名单/白名单/本站覆盖) 时: 仅暴露调试句柄, 不启动任何引擎与 UI
-  if (siteProfile.enabled === false) {
-    window.__svi.disabled = true;
-    console.info('[SmartInvert] 本站点已被用户设置禁用');
-    return;
-  }
+  // v4.0: 站点电源架构 —— 开机禁用时引擎不启动, 胶囊以"停用态"出现, 电源可热启用
+  const siteEnabledAtBoot = siteProfile.enabled !== false;
+  runtime.siteActive = siteEnabledAtBoot;
 
   const uiController = new UIController();
+  window.__svi.ui = uiController; // 调试句柄: UI 控制器实例
 
-  whenBodyReady(() => {
+  // v4.0: 引擎启动块 (开机启用 → 立即执行; 开机禁用 → 电源热启用时首启; 幂等)
+  function bootEngines() {
+    if (window.__svi.enginesBooted) return;
+    window.__svi.enginesBooted = true;
+    whenBodyReady(() => {
     // 补丁安装前已存在的开放 Shadow Root: 有界一次性收集 (先于引擎首扫)
     try { ShadowDomRegistry.collectExisting(1000); } catch (e) { /* ignore */ }
 
@@ -8752,8 +9194,6 @@
     } catch (e) {
       console.warn('[SmartInvert] HILStateMachine init failed:', e);
     }
-
-    window.__svi.ui = uiController; // 调试句柄: UI 控制器实例
 
     try {
       imageEngine = new ImageInvertEngine();
@@ -8805,7 +9245,20 @@
         applyBackgroundReplace(true);
       }
     } catch (e) { /* ignore */ }
-  });
+    });
+  }
+
+  if (siteEnabledAtBoot) {
+    bootEngines();
+  } else if (IS_TOP_FRAME) {
+    // 开机即禁用: 引擎不启动, 胶囊折叠为电源态, 可随时热启用
+    window.__svi.disabled = true;
+    console.info('[SmartInvert] 本站点已被用户设置禁用 (胶囊为电源态, 可热启用)');
+    whenBodyReady(() => {
+      try { uiController.buildUI(); } catch (e) { /* ignore */ }
+      try { uiController.setSiteOffState(true); } catch (e) { /* ignore */ }
+    });
+  }
 
   // 统计: 每 30s 落盘一次 + 页面隐藏时落盘 + 导出前强制落盘
   setInterval(() => {

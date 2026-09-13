@@ -2003,6 +2003,71 @@ async function main() {
     assert.strictEqual(tunePersist.cls, true, 'video tune must persist across reload');
     assert.ok(tunePersist.computed.includes('brightness(0.7)'), 'persisted tune must re-apply after reload, got: ' + tunePersist.computed);
 
+    // ============================================================
+    // Scenario 19 (v4.0): site power hot-apply — clicking the power
+    // switch off must revert the page in the same tick (no reload);
+    // re-enabling restores inversion without reload.
+    // ============================================================
+    console.log('[Test] Scenario 19: site power hot-apply (disable → instant teardown → re-enable) ...');
+    await sendCdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/` });
+    await new Promise((r) => setTimeout(r, 5000));
+    await waitForExpr(`document.querySelectorAll('[data-svi-inverted="true"]').length > 0`, 10000);
+    await sendCdp('Runtime.evaluate', {
+      expression: `(() => { window.__svi.ui.openSettingsModal(); return !!document.querySelector('.svi4-switch'); })()`,
+      returnByValue: true
+    });
+    // 规格契约: 只点击真实控件 (电源开关), 不直接改偏好
+    await sendCdp('Runtime.evaluate', {
+      expression: `(() => { document.querySelector('.svi4-switch').click(); return true; })()`,
+      returnByValue: true
+    });
+    await new Promise((r) => setTimeout(r, 300));
+    const offState = (await sendCdp('Runtime.evaluate', {
+      expression: `(() => ({
+        invertOn: document.documentElement.classList.contains('svi-img-invert-on'),
+        inverted: document.querySelectorAll('[data-svi-inverted]').length,
+        bginv: document.querySelectorAll('[data-svi-bginv]').length,
+        marks: document.querySelectorAll('[data-svi-checked], [data-svi-checked-src]').length,
+        overlay: document.querySelectorAll('.svi-fx-overlay').length,
+        tune: document.documentElement.classList.contains('svi-video-tune'),
+        capsuleOff: document.querySelector('.svi-capsule-root').classList.contains('svi-site-off'),
+        switchOn: document.querySelector('.svi4-switch').classList.contains('on'),
+        modalStill: !!document.querySelector('.svi-modal-mask.show')
+      }))()`,
+      returnByValue: true
+    })).result.value;
+    assert.strictEqual(offState.invertOn, false, 'power off must remove the img invert gate class instantly');
+    assert.strictEqual(offState.inverted, 0, 'power off must strip data-svi-inverted instantly');
+    assert.strictEqual(offState.bginv, 0, 'power off must strip data-svi-bginv instantly');
+    assert.strictEqual(offState.marks, 0, 'power off must strip decision marks instantly');
+    assert.strictEqual(offState.overlay, 0, 'power off must remove fx overlays instantly');
+    assert.strictEqual(offState.tune, false, 'power off must clear the video tune gate class');
+    assert.strictEqual(offState.capsuleOff, true, 'capsule must collapse to the power badge');
+    assert.strictEqual(offState.switchOn, false, 'power switch must reflect the off state');
+    assert.strictEqual(offState.modalStill, true, 'settings modal stays open after power off');
+    // 热恢复 (不刷新)
+    await sendCdp('Runtime.evaluate', {
+      expression: `(() => { document.querySelector('.svi4-switch').click(); return true; })()`,
+      returnByValue: true
+    });
+    const restored = await waitForExpr(`document.querySelectorAll('[data-svi-inverted="true"]').length > 0`, 10000);
+    assert.ok(restored, 're-enable must restore image inversion without reload');
+    const reOn = (await sendCdp('Runtime.evaluate', {
+      expression: `(() => ({
+        invertOn: document.documentElement.classList.contains('svi-img-invert-on'),
+        capsuleOff: document.querySelector('.svi-capsule-root').classList.contains('svi-site-off'),
+        switchOn: document.querySelector('.svi4-switch').classList.contains('on')
+      }))()`,
+      returnByValue: true
+    })).result.value;
+    assert.strictEqual(reOn.invertOn, true, 'img invert gate class must return after re-enable');
+    assert.strictEqual(reOn.capsuleOff, false, 'capsule must be restored after re-enable');
+    assert.strictEqual(reOn.switchOn, true, 'power switch must reflect the on state');
+    await sendCdp('Runtime.evaluate', {
+      expression: `(() => { const b = document.querySelector('.svi-modal-close'); if (b) b.click(); return true; })()`,
+      returnByValue: true
+    });
+
     console.log('\n🎉 ALL BROWSER AUTOMATION TESTS PASSED 100% SUCCESFULLY!\n');
 
     ws.close();

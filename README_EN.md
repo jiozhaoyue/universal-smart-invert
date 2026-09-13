@@ -1,7 +1,7 @@
 # Universal Smart Video & Image Invert
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-3.3.0-blue.svg?style=flat-square" alt="Version">
+  <img src="https://img.shields.io/badge/version-4.0.0-blue.svg?style=flat-square" alt="Version">
   <img src="https://img.shields.io/badge/license-MIT-green.svg?style=flat-square" alt="License">
   <img src="https://img.shields.io/badge/Tampermonkey-Supported-orange.svg?style=flat-square" alt="Tampermonkey">
   <img src="https://img.shields.io/badge/ScriptCat-Supported-purple.svg?style=flat-square" alt="ScriptCat">

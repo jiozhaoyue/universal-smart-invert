@@ -1,0 +1,1 @@
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "hard rules + v3.3 UI/layout contracts (settings layout modes, decide-once, DOM API only)"}

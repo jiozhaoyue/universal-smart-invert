@@ -130,6 +130,32 @@ rules below are battle-tested conventions from v1.4.0 → v2.0.0; follow them fo
   loss is invisible until you measure computed styles. Layout probes must inject via
   `Runtime.evaluate` after navigation (same as probe-github), not at document-start.
 
+## v4.0 Additions (settings redesign, site power hot-apply)
+
+- **Site power is a runtime gate, never storage**: `runtime.siteActive` (in-memory) gates every
+  engine entry (image process/flush/eager, Alt+click; video loops self-gate via
+  `profile.enabled`). Suspending must strip the FULL side-effect surface in the same tick:
+  html gate classes, `data-svi-*` attribute family (incl. `data-svi-checked`), video inline
+  filter/transition, `.svi-fx-overlay` canvases, `svi-playing/svi-fx-hover`, poster marks,
+  bgReplace off, video-tune class — then `updateImageFilterCss()` (profile disabled → classes
+  off). Resuming must re-run `updateImageFilterCss()` + `applyVideoTune()` + rescan/sweep, or
+  the gate classes stay dark (v4.0 lesson: resume without `updateImageFilterCss` left the page
+  stripped but dark).
+- **Boot-disabled pages must stay hot-enableable**: the engine boot block is extracted into
+  idempotent `bootEngines()` (`window.__svi.enginesBooted`); with the site disabled at boot,
+  engines never start but the capsule builds collapsed into a power badge
+  (`.svi-capsule-root.svi-site-off`), so clicking it boots engines at runtime.
+  `bindStateMachine`/`buildUI` are idempotent (guard flags) — the off-badge pre-build must not
+  duplicate the capsule when `bootEngines()` later binds.
+- **Tests toggle site power through the real control** (`.svi4-switch` click), never by poking
+  prefs; Scenario 19 asserts same-tick teardown and reload-free restore.
+- **v4 settings IA contract**: power banner (`.svi4-power`, hot switch) + 本站/全局 tabs
+  (`.svi4-tabs`) + tri-state capability cards (`.svi4-card`, cycle 跟随全局→强制开→强制关,
+  writes `siteOverrides[host]`, deletes the key to return to inherit). Site lists
+  (mode/blacklist/whitelist) live in the 全局 tab (`#svi-sec-lists`) and call
+  `evaluateSitePower()` after every change. Bench anchor ids preserved: `svi-sec-site`,
+  `svi-sec-media`, `svi-sec-video`, `svi-sec-stats`, `svi-sec-shield`.
+
 ## Testing Requirements
 
 - **The bench's fixed Chrome profile (`.chrome-test-profile/`) persists localStorage across
