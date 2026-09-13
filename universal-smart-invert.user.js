@@ -3,7 +3,7 @@
 // @name:zh-CN   全网通用智能视频与图片反色
 // @name:en      Universal Smart Video & Image Invert
 // @namespace    https://github.com/jiozhaoyue/universal-smart-invert
-// @version      3.3.0
+// @version      3.3.1
 // @description  全网通用智能视频与图片反色脚本 (v3.3)。新增: 设置面板全面改版 (居中/靠左/靠右三种布局可停靠, 信息架构重排, 界面全中文化, 规则文件导出导入, 元素级规则); 保留 v3.2 视频画面调节与 v3.1/v3.0 全部能力。
 // @description:zh-CN 全网通用智能视频与图片反色脚本 (v3.3)。新增: 设置面板三种布局可停靠、信息架构重排、全中文化、规则文件上下传、元素级规则; 保留 v3.2 与更早全部能力。
 // @description:en Universal smart video and image invert userscript (v3.3). New: settings panel overhaul (dockable layouts, reordered IA, full zh-CN wording, rule file import/export, element-level rules); all v3.2 and earlier capabilities retained.
@@ -2004,11 +2004,34 @@
         color: #64748b;
         line-height: 1.6;
       }
-      .svi-stats-summary {
-        font-size: 11px;
+      /* 本地统计: 表格化网格, 每项独立成格 (元素隔离, 严禁行内拼接) */
+      .svi-stats-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(88px, 1fr));
+        gap: 6px;
+      }
+      .svi-stats-cell {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        padding: 6px 8px;
+        background: rgba(15, 23, 42, 0.55);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+        border-radius: 8px;
+        min-width: 0;
+      }
+      .svi-stats-label {
+        font-size: 10px;
         color: #94a3b8;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .svi-stats-value {
+        font-size: 13px;
+        font-weight: 600;
+        color: #38bdf8;
         font-family: monospace;
-        line-height: 1.7;
       }
       .svi-mini-btn {
         padding: 5px 10px;
@@ -2176,6 +2199,9 @@
         display: flex;
         align-items: center;
         justify-content: space-between;
+        flex-wrap: wrap;
+        row-gap: 6px;
+        min-width: 0;
       }
       .svi-modal-title {
         font-size: 15px;
@@ -2361,6 +2387,8 @@
         display: flex;
         align-items: center;
         justify-content: space-between;
+        flex-wrap: wrap;
+        row-gap: 6px;
         background: rgba(15, 23, 42, 0.4);
       }
       .svi-modal-perf {
@@ -2579,15 +2607,16 @@
         color: #94a3b8;
       }
       .svi-store-key-name {
-        flex-shrink: 0;
-        color: #7dd3fc;
-      }
-      .svi-store-key-preview {
         flex: 1;
+        min-width: 0;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
-        opacity: 0.7;
+        color: #7dd3fc;
+      }
+      .svi-store-key-size {
+        flex-shrink: 0;
+        color: #64748b;
       }
 
       /* 自学习规则列表 */
@@ -6419,9 +6448,22 @@
       };
     },
 
-    summaryText() {
+    // 结构化统计条目 (UI 以表格网格逐项呈现, 禁止行内符号拼接)
+    statEntries() {
       const c = this.counters || {};
-      return `图片分析 ${c.imagesAnalyzed || 0} · 已反色 ${c.imagesInverted || 0} · 背景图 ${c.bgImagesInverted || 0} · 跨域回退 ${c.taintFallbacks || 0} · 视频自动 ${c.videoAutoActivations || 0} · 背景替换页 ${c.bgReplacePages || 0} · 图片特效 ${c.imgFxTransforms || 0} · 画布分析 ${c.canvasesAnalyzed || 0} · 海报 ${c.postersInverted || 0} · 画中画 ${c.pipActivations || 0} · 日志 ${this.log.length}/200`;
+      return [
+        { label: '图片分析', value: String(c.imagesAnalyzed || 0) },
+        { label: '已反色', value: String(c.imagesInverted || 0) },
+        { label: '背景图', value: String(c.bgImagesInverted || 0) },
+        { label: '跨域回退', value: String(c.taintFallbacks || 0) },
+        { label: '视频自动', value: String(c.videoAutoActivations || 0) },
+        { label: '背景替换页', value: String(c.bgReplacePages || 0) },
+        { label: '图片特效', value: String(c.imgFxTransforms || 0) },
+        { label: '画布分析', value: String(c.canvasesAnalyzed || 0) },
+        { label: '海报', value: String(c.postersInverted || 0) },
+        { label: '画中画', value: String(c.pipActivations || 0) },
+        { label: '日志', value: this.log.length + '/200' },
+      ];
     },
   };
 
@@ -6697,7 +6739,7 @@
       this.ruleSummary = null;
       this.shieldChipsBox = null;
       this.shieldColorInput = null;
-      this.statsSummary = null;
+      this.statsGrid = null;
       this.rowSyncs = [];           // 全部组件行的 sync 函数 (syncAll 统一刷新)
     }
 
@@ -7433,10 +7475,14 @@
       this.storageKeysBox = document.createElement('div');
       sec.appendChild(this.storageKeysBox);
 
-      // —— 本地统计 ——
-      this.statsSummary = document.createElement('div');
-      this.statsSummary.className = 'svi-stats-summary';
-      sec.appendChild(this.statsSummary);
+      // —— 本地统计 (表格化网格) ——
+      const statsSubTitle = document.createElement('div');
+      statsSubTitle.className = 'svi-sub-title';
+      statsSubTitle.textContent = '本地统计';
+      sec.appendChild(statsSubTitle);
+      this.statsGrid = document.createElement('div');
+      this.statsGrid.className = 'svi-stats-grid';
+      sec.appendChild(this.statsGrid);
 
       sec.appendChild(ui.btnRow([
         { label: '复制统计', onClick: () => this.copyStatsJson() },
@@ -7507,9 +7553,9 @@
           name.className = 'svi-store-key-name';
           name.textContent = KEY_ZH[item.key] || item.key;
           name.title = item.key;
-          const preview = document.createElement('span');
-          preview.className = 'svi-store-key-preview';
-          preview.textContent = item.bytes + 'B · ' + item.preview; // 存储内容预览 → textContent (XSS 加固)
+          const size = document.createElement('span');
+          size.className = 'svi-store-key-size';
+          size.textContent = item.bytes + 'B';
           const del = document.createElement('button');
           del.className = 'svi-mini-btn danger';
           del.textContent = '删除';
@@ -7521,13 +7567,25 @@
             this.refreshDataSection();
             showToast('已删除 ' + (KEY_ZH[item.key] || item.key));
           });
-          row.append(name, preview, del);
+          row.append(name, size, del);
           this.storageKeysBox.appendChild(row);
         }
       }
-      // 本地统计摘要
-      if (this.statsSummary) {
-        this.statsSummary.textContent = StatsManager.summaryText();
+      // 本地统计 (网格逐项渲染)
+      if (this.statsGrid) {
+        this.statsGrid.textContent = '';
+        for (const entry of StatsManager.statEntries()) {
+          const cell = document.createElement('div');
+          cell.className = 'svi-stats-cell';
+          const label = document.createElement('span');
+          label.className = 'svi-stats-label';
+          label.textContent = entry.label;
+          const value = document.createElement('span');
+          value.className = 'svi-stats-value';
+          value.textContent = entry.value;
+          cell.append(label, value);
+          this.statsGrid.appendChild(cell);
+        }
       }
       // file:// 提示
       if (this.fileHintLine) {
