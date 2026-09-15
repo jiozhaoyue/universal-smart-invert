@@ -1,9 +1,9 @@
 {
   "schema": 1,
   "kind": "svi-darkreader-compat",
-  "generatedAt": "2026-09-13T10:33:50.300Z",
+  "generatedAt": "2026-09-15T07:50:19.480Z",
   "generator": "scripts/sync-darkreader.js",
-  "projectVersion": "4.2.0",
+  "projectVersion": "4.3.0",
   "source": {
     "repo": "darkreader/darkreader",
     "ref": "main",
