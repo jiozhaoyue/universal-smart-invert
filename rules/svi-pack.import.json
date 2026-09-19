@@ -2,7 +2,7 @@
   "kind": "svi-rules",
   "schema": 1,
   "version": "4.5.0",
-  "generatedAt": "2026-09-19T05:24:11.488Z",
+  "generatedAt": "2026-09-19T07:23:13.791Z",
   "generator": "scripts/export-rules-pack.js",
   "note": "一体化分发规则包: Dark Reader 上游暗色名单 + 内置站点适配的可翻译子集 (元素级规则/本站覆盖)。",
   "rules": {
@@ -1229,32 +1229,32 @@
     "elementRules": [
       {
         "pattern": "bilibili.com",
-        "action": "keep",
+        "action": "protect",
         "selector": ".bpx-player-control-wrap"
       },
       {
         "pattern": "bilibili.com",
-        "action": "keep",
+        "action": "protect",
         "selector": ".bili-danmaku"
       },
       {
         "pattern": "bilibili.com",
-        "action": "keep",
+        "action": "protect",
         "selector": ".squirtle-video-page"
       },
       {
         "pattern": "bilibili.com",
-        "action": "keep",
+        "action": "protect",
         "selector": ".bilibili-player-video-danmaku"
       },
       {
         "pattern": "live.bilibili.com",
-        "action": "keep",
+        "action": "protect",
         "selector": ".bilibili-live-player-video-danmaku"
       },
       {
         "pattern": "live.bilibili.com",
-        "action": "keep",
+        "action": "protect",
         "selector": ".bpx-player-control-wrap"
       },
       {
@@ -1269,17 +1269,17 @@
       },
       {
         "pattern": "github.com",
-        "action": "keep",
+        "action": "protect",
         "selector": ".Avatar"
       },
       {
         "pattern": "github.com",
-        "action": "keep",
+        "action": "protect",
         "selector": ".avatar"
       },
       {
         "pattern": "github.com",
-        "action": "keep",
+        "action": "protect",
         "selector": "img[src*=\"identicons\"]"
       },
       {
@@ -1299,82 +1299,82 @@
       },
       {
         "pattern": "zhihu.com",
-        "action": "keep",
+        "action": "protect",
         "selector": ".Avatar"
       },
       {
         "pattern": "zhihu.com",
-        "action": "keep",
+        "action": "protect",
         "selector": ".avatar"
       },
       {
         "pattern": "weibo.com",
-        "action": "keep",
+        "action": "protect",
         "selector": ".avatar"
       },
       {
         "pattern": "youtube.com",
-        "action": "keep",
+        "action": "protect",
         "selector": ".ytp-chrome-bottom"
       },
       {
         "pattern": "youtube.com",
-        "action": "keep",
+        "action": "protect",
         "selector": ".ytp-chrome-controls"
       },
       {
         "pattern": "youtube.com",
-        "action": "keep",
+        "action": "protect",
         "selector": ".ytp-cued-thumbnail-overlay"
       },
       {
         "pattern": "douyin.com",
-        "action": "keep",
+        "action": "protect",
         "selector": ".xg-controls"
       },
       {
         "pattern": "douyin.com",
-        "action": "keep",
+        "action": "protect",
         "selector": ".xgplayer"
       },
       {
         "pattern": "iqiyi.com",
-        "action": "keep",
+        "action": "protect",
         "selector": ".iqp-player-interface"
       },
       {
         "pattern": "youku.com",
-        "action": "keep",
+        "action": "protect",
         "selector": ".kui-control-bar"
       },
       {
         "pattern": "v.qq.com",
-        "action": "keep",
+        "action": "protect",
         "selector": ".txp_player_controls"
       },
       {
         "pattern": "v.qq.com",
-        "action": "keep",
+        "action": "protect",
         "selector": ".txp-popup"
       },
       {
         "pattern": "qq.com",
-        "action": "keep",
+        "action": "protect",
         "selector": ".avatar"
       },
       {
         "pattern": "taobao.com",
-        "action": "keep",
+        "action": "protect",
         "selector": "[class*=\"avatar\"]"
       },
       {
         "pattern": "jd.com",
-        "action": "keep",
+        "action": "protect",
         "selector": "#ttbar-login"
       },
       {
         "pattern": "jd.com",
-        "action": "keep",
+        "action": "protect",
         "selector": ".avatar"
       },
       {
@@ -1384,7 +1384,7 @@
       },
       {
         "pattern": "stackoverflow.com",
-        "action": "keep",
+        "action": "protect",
         "selector": ".s-avatar"
       },
       {
@@ -1394,7 +1394,7 @@
       },
       {
         "pattern": "juejin.cn",
-        "action": "keep",
+        "action": "protect",
         "selector": ".avatar"
       },
       {
@@ -1409,12 +1409,12 @@
       },
       {
         "pattern": "csdn.net",
-        "action": "keep",
+        "action": "protect",
         "selector": ".avatar"
       },
       {
         "pattern": "csdn.net",
-        "action": "keep",
+        "action": "protect",
         "selector": ".profile-img"
       }
     ]

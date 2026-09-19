@@ -61,6 +61,7 @@ if (fs.existsSync(compatPath)) {
 }
 
 // —— BUILTIN_RULES → 可分发表示 (元素级规则 + 本站覆盖) ——
+// 动作词表与 normalizeElementRules 一致: invert / protect / recolor。
 // 注意: bgImageSelectors 是 BgImageEngine 专属字段, 元素级规则/覆盖键无法等价表达 → 不翻译,
 // 内置规则随脚本本体分发, 规则包只补齐「旧脚本版本/其它反色扩展用户」可消费的部分。
 const elementRules = [];
@@ -70,7 +71,7 @@ for (const rule of svi.BUILTIN_RULES) {
   if (!rule || typeof rule.pattern !== 'string' || !rule.pattern) continue;
   const selectors = [];
   for (const sel of (rule.forceInvert || [])) selectors.push({ sel, action: 'invert' });
-  for (const sel of (rule.protect || [])) selectors.push({ sel, action: 'keep' });
+  for (const sel of (rule.protect || [])) selectors.push({ sel, action: 'protect' });
   for (const { sel, action } of selectors) {
     if (!sel || typeof sel !== 'string') continue;
     if (elementRules.some((er) => er.pattern === rule.pattern && er.selector === sel)) { dupRules++; continue; }

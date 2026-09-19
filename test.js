@@ -1356,6 +1356,35 @@ const sameParentSibs = (self, n, w, h) => {
   console.log('✓ v4.5 unit tests passed: closestContextHit ignores document-root framework classes');
 })();
 
+// —— v4.5 单测: normalizeElementRules 合并幂等 (同 id 去重) + 规则包动作词表 ——
+(() => {
+  const norm = svi.normalizeElementRules;
+  const r1 = { pattern: 'github.com', selector: '.md img', action: 'invert' };
+  const r2 = { pattern: 'github.com', selector: '.md img', action: 'invert' }; // 同条 (无 id → hash 同 id)
+  const r3 = { pattern: 'github.com', selector: '.md img', action: 'protect' }; // 动作不同 → 不同条
+  const once = norm([r1]);
+  assert.strictEqual(once.length, 1, 'single rule normalizes to one entry');
+  const merged = norm([r1, r2]);
+  assert.strictEqual(merged.length, 1, 'duplicate (pattern|selector|action) must dedup by id (v4.5 merge-idempotency regression)');
+  const diff = norm([r1, r3]);
+  assert.strictEqual(diff.length, 2, 'different action is a different rule');
+  // 合并模拟: 已有 + 再导入同包 → 长度不变
+  const existing = norm([r1, r3]);
+  const reimport = norm(existing.concat([r1, r3]));
+  assert.strictEqual(reimport.length, existing.length, 're-importing the same pack must not grow the rule list');
+
+  // 分发包产物 (若存在) 动作词表校验
+  try {
+    const pack = JSON.parse(require('fs').readFileSync(path.join(__dirname, 'rules', 'svi-pack.import.json'), 'utf8'));
+    assert.strictEqual(pack.kind, 'svi-rules', 'pack envelope kind');
+    const badActions = (pack.rules.elementRules || []).filter(e => !['invert', 'protect', 'recolor'].includes(e.action));
+    assert.strictEqual(badActions.length, 0, 'pack elementRule actions must be invert/protect/recolor (v4.5 regression: keep was silently dropped)');
+    assert.ok((pack.rules.siteBlacklist || []).length > 1000, 'pack must carry the darkreader blacklist');
+  } catch (e) { if (e.code !== 'ENOENT') throw e; }
+  console.log('✓ v4.5 unit tests passed: elementRules merge idempotency + pack action vocabulary');
+})();
+
+
 console.log('✓ v3.0 core unit tests passed: transformPixel / mergeSegments / lookupSegment / selectorStem / RuleLearner / Store / mediaDominantViewport / rect / hash32');
 
 

@@ -942,14 +942,18 @@
   function normalizeElementRules(list) {
     const src = Array.isArray(list) ? list.slice(-200) : [];
     const out = [];
+    const seen = new Set(); // v4.5: 按 (pattern|selector|action) 去重 —— 合并导入必须幂等
     for (const raw of src) {
       if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
       const pattern = String(raw.pattern || '').trim();
       const selector = String(raw.selector || '').trim();
       const action = raw.action === 'protect' ? 'protect' : (raw.action === 'invert' ? 'invert' : (raw.action === 'recolor' ? 'recolor' : ''));
       if (!pattern || !selector || !action) continue;
+      const id = String(raw.id || hash32(pattern + '|' + selector + '|' + action));
+      if (seen.has(id)) continue;
+      seen.add(id);
       out.push({
-        id: String(raw.id || hash32(pattern + '|' + selector + '|' + action)),
+        id,
         pattern,
         selector,
         action,
