@@ -1384,6 +1384,21 @@ const sameParentSibs = (self, n, w, h) => {
   console.log('✓ v4.5 unit tests passed: elementRules merge idempotency + pack action vocabulary');
 })();
 
+// —— v4.5 单测: 头像 URL 路径段计入元数据 → meta-icon 跳过 ——
+(() => {
+  const cse = svi.classifySmallElement;
+  const av = cse({ meta: 'cdn.example.com/uploads/avatars/abc.png', w: 150, h: 150, srcOccurrences: 0, isContentContext: false, isChromeContext: false, minImgSize: 48 });
+  assert.strictEqual(av.skip, true, 'avatar URL path must classify as meta-icon (v4.5 regression)');
+  assert.strictEqual(av.reason, 'meta-icon');
+  const plain = cse({ meta: 'just a diagram image', w: 150, h: 150, srcOccurrences: 0, isContentContext: false, isChromeContext: false, minImgSize: 48 });
+  assert.strictEqual(plain.skip, false, 'non-avatar image must not be skipped by the meta gate');
+  // 正文上下文 ≥48px 豁免保持
+  const content = cse({ meta: 'cdn.example.com/uploads/avatars/abc.png', w: 150, h: 150, srcOccurrences: 0, isContentContext: true, isChromeContext: false, minImgSize: 48 });
+  assert.strictEqual(content.skip, false, 'content-context avatar at >=48px keeps the exemption');
+  console.log('✓ v4.5 unit tests passed: avatar URL-path meta-icon classification');
+})();
+
+
 
 console.log('✓ v3.0 core unit tests passed: transformPixel / mergeSegments / lookupSegment / selectorStem / RuleLearner / Store / mediaDominantViewport / rect / hash32');
 

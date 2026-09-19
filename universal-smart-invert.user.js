@@ -217,7 +217,7 @@
   // 智能小元素屏蔽上下文选择器 (p0)
   const CONTENT_CONTEXT_SELECTOR = '.markdown-body, [class*="article"], [class*="content"], .post-content, .rich-text, .comment-content';
   const CHROME_CONTEXT_SELECTOR = 'nav, header, footer, aside, [role="banner"], [class*="logo"], [class*="icon"], [aria-hidden="true"]';
-  const META_ICON_RE = /(avatar|user-pic|profile-pic|emoji|emoticon|captcha)/;
+  const META_ICON_RE = /(avatar|user-pic|profile-pic|emoji|emoticon|captcha|\/avatars?\/)/;
 
   // v4.5: 上下文命中必须排除 html/body —— 子串选择器 ([class*="content"]) 会命中文档根上的
   // 框架类 (实测: Wikipedia 在 <html> 上挂 vector-feature-limited-width-CONTENT-enabled,
@@ -4254,6 +4254,11 @@
         ? img.className
         : (img.className && img.className.baseVal !== undefined ? img.className.baseVal : '');
       meta = (cls + ' ' + (img.id || '') + ' ' + (img.alt || '') + ' ' + (img.getAttribute('role') || '')).toLowerCase();
+    } catch (e) { /* ignore */ }
+    // v4.5: URL 路径段并入元数据 (如 /avatars/xxx) —— 头像目录是比 class 更可靠的特征
+    try {
+      const u = new URL(src, location.href);
+      meta += ' ' + u.pathname.toLowerCase();
     } catch (e) { /* ignore */ }
 
     const size = mediaClientSize(img);
