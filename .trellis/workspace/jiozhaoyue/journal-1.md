@@ -230,3 +230,15 @@ Shipped v3.2.0: independent video picture tuning (brightness/contrast/saturate/w
 - 纠错网: analyzeSrc 返回 meanLum/opaqueRatio; sanity 门(浅类但均值<96 → keep sanity-dark); 像素反色决策 6s 限时复检(队列≤12, 每源一次), opaqueRatio≥0.5 可信门防 SVG 透明样本误翻(场景1 抓获)。
 - 事故与修复: flashGuardOff 挂载早于 __svi 字面量导致启动全灭(场景1 UI 全 Missing); bench 测试页必须内联脚本 + 显式 sviSeed 隔离同源持久化。
 - 门禁: 单测全绿 + bench 24/24 + 探针 PASS + 打包 v4.3.0。
+
+### 2026-09-19 · v4.5.0 弹窗面板 + 反色正确性 + 规则分发 (进行中)
+
+- 悬停开关失效根因: 内联 sec.add(ui.xxxRow) 只进 ui.section() 区块本地 syncs, 全量刷新只遍历全局 rowSyncs → 复选框永不回显真实状态(悬停显示"关"而实际开), 首次点击写反值。修复: 6 个静态行逐一 push; 回归=bench 场景 20b。
+- 错误反色两根因: (1) flash guard 黑底污染 bgr 首扫采样 → body 底色桶缺失白底泄漏 → startScan 守卫期延迟 + off() 补打 html/body + 零白交接(等桶就绪才撤黑, 2.5s 兜底); (2) requestIdle 无头/CDP 下可 4s+ 不触发 → rIC+setTimeout 双通道竞速。
+- 重大策略门修复: closestContextHit 忽略 html/body —— [class*="content"] 命中 Wikipedia <html> 上的 vector-feature-limited-width-CONTENT-enabled, 全页图片被判正文上下文, 站标被反色。单测 + 真站探针验证 logo skip:policy。
+- 透明守护: opaqueRatio<0.4 的浅类改 keep(transparent-light)。教训: enwiki-25.svg 实测 opaqueRatio 0.707 是"彩色徽标"而非透明图, 真正修的是上下文而非像素 —— 先量数据再定阈值。
+- 弹窗: popup.html/js (scripts/extension-src 生成到 extension/), onMessage 通道复用设置面板处理器; Chrome 137+ 品牌版忽略 --load-extension → CDP Extensions.loadUnpacked (需 --enable-unsafe-extension-debugging + --remote-debugging-pipe, fd3/4 \0 分隔 JSON); 端到端: 快照/电源热切/预设/悬停/白名单拒绝 全过。
+- 规则分发: 从链接导入(gmFetchText 绕 CSP) + 导出学习成果(仅特征/命中数) + rules/svi-pack.import.json 一体化包 (export-rules-pack.js)。
+- 视觉循环: visual-probe.js (前/后截图+决策报告), 已覆盖 GitHub/Wikipedia/BBC/SO/B站/MDN/掘金(404)/cnblogs —— 截图判定均通过; 探针并行冲突教训: CDP 端口与输出目录需按 PID 派生。
+- 移动端: 375px 模态全宽、把手隐藏、select 16px/40px; num-input 被 ~2500 行处基础规则覆盖 → 媒体查询内提升特异性。
+- 版本同步: SCRIPT_VERSION 3.3.0→4.5.0 (此前与 @version 脱节), test.js 断言改锚 svi.version。
