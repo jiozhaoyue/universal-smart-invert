@@ -43,7 +43,7 @@ const SRC = fs.readFileSync(path.join(__dirname, '..', 'universal-smart-invert.u
   let base = null;
   let stable = true;
   for (let i = 1; i <= N; i++) {
-    await send('Page.navigate', { url: 'https://en.wikipedia.org/wiki/UML_state_machine' });
+    await send('Page.navigate', { url: process.env.SOAK_URL || 'https://en.wikipedia.org/wiki/UML_state_machine' });
     await sleep(9000);
     await send('Runtime.evaluate', { expression: SRC });
     await sleep(9000);
