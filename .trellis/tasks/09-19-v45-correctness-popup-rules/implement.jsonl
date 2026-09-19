@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "v3.x-v4.5 全部契约: 设置行回显/站点电源热生效/规则文件合并幂等/flash guard/decide-once —— 本轮全部修复均对照此文件"}
+{"file": ".trellis/tasks/09-19-v45-correctness-popup-rules/prd.md", "reason": "本任务 PRD: 根因分析与验收清单"}
