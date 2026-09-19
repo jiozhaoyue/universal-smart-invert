@@ -88,6 +88,43 @@ const SRC = fs.readFileSync(path.join(__dirname, '..', 'universal-smart-invert.u
   })()`, true);
   console.log('PACK-IMPORT:', JSON.stringify(r, null, 1));
 
+  // full UI click path: fill input → click 从链接导入 → gmFetchText(fetch) → merge
+  const clickPath = await evalJs(`(async () => {
+    window.__svi.ui.openSettingsModal();
+    const tabs = [...document.querySelectorAll('.svi4-tab')];
+    const g = tabs.find(b => b.textContent === '全局'); if (g) g.click();
+    const sec = document.getElementById('svi-sec-stats');
+    const input = sec.querySelector('input.svi-modal-text[placeholder*="规则包链接"]');
+    if (!input) return { fail: 'input row not found' };
+    input.value = 'http://127.0.0.1:${PORT}/pack.json';
+    const btn = input.parentElement.querySelector('button');
+    btn.click();
+    await new Promise(r2 => setTimeout(r2, 2500));
+    const prefs = window.__svi.prefs;
+    return { blacklist: (prefs.siteBlacklist || []).length, elementRules: (prefs.elementRules || []).length,
+      toast: (document.querySelector('#svi-toast') || {}).textContent || null };
+  })()`, true);
+  console.log('CLICK-PATH:', JSON.stringify(clickPath));
+
+  // visual: the new inline pack-import row in the data section
+  const outDir2 = path.join(__dirname, 'shots', 'pack-import');
+  fs.mkdirSync(outDir2, { recursive: true });
+  await evalJs(`(() => {
+    window.__svi.ui.openSettingsModal();
+    const tabs = [...document.querySelectorAll('.svi4-tab')];
+    const g = tabs.find(b => b.textContent === '全局'); if (g) g.click();
+    const sec = document.getElementById('svi-sec-stats');
+    if (!sec) return { sec: false };
+    sec.scrollIntoView({ block: 'center' });
+    const input = sec.querySelector('input.svi-modal-text[placeholder*="规则包链接"]');
+    const res = { sec: true, rowFound: !!input, btnText: input ? input.parentElement.querySelector('button').textContent : null }; console.log('PACK-ROW:', JSON.stringify(res)); return res;
+  })()`);
+  await sleep(600);
+  const shot2 = await send('Page.captureScreenshot', { format: 'png' });
+  fs.writeFileSync(path.join(outDir2, 'pack-row-modal.png'), Buffer.from(shot2.result.data, 'base64'));
+  await evalJs(`(() => { const b = document.querySelector('.svi-modal-close'); if (b) b.click(); return true; })()`);
+  console.log('pack-row shot:', outDir2);
+
   ws.close(); chrome.kill(); server.close();
   try { fs.rmSync(userDataDir, { recursive: true, force: true }); } catch (e) {}
   process.exit(0);

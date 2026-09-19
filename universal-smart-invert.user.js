@@ -8122,10 +8122,28 @@
         { label: '导入并合并', onClick: () => this.importRulesFile(false) },
         { label: '导入并替换', onClick: () => this.importRulesFile(true) },
       ]).row);
-      // v4.5: 分发通道 —— 订阅链接导入 + 仅学习成果的可分享小包 (只含特征/命中数, 不含浏览记录)
-      sec.appendChild(ui.infoLine('规则分发：从链接拉取 svi-rules 规则包；学习成果包只含修正特征与命中数，可安全分享。').row);
+      // v4.5: 分发通道 —— 链接拉取合并 (内联输入行; 内容脚本环境的 prompt/confirm 对话框
+      // 不可依赖, 且合并本身幂等去重, 直接执行) + 仅学习成果的可分享小包
+      sec.appendChild(ui.infoLine('规则分发：填入 svi-rules 规则包链接拉取合并（重复条目自动去重，可重复导入）；学习成果包只含修正特征与命中数，可安全分享。').row);
+      const packRow = document.createElement('div');
+      packRow.className = 'svi-er-form';
+      const packInput = document.createElement('input');
+      packInput.type = 'text';
+      packInput.className = 'svi-modal-text';
+      packInput.placeholder = '规则包链接，如 https://example.com/svi-pack.import.json';
+      const packBtn = document.createElement('button');
+      packBtn.type = 'button';
+      packBtn.className = 'svi-mini-btn';
+      packBtn.textContent = '从链接导入';
+      packBtn.addEventListener('click', () => {
+        const url = packInput.value.trim();
+        if (!url) { showToast('请先填入规则包链接'); return; }
+        this.importRulesFromUrl(url);
+      });
+      packRow.appendChild(packInput);
+      packRow.appendChild(packBtn);
+      sec.appendChild(packRow);
       sec.appendChild(ui.btnRow([
-        { label: '从链接导入', onClick: () => this.importRulesFromUrl() },
         { label: '导出学习成果', onClick: () => this.exportLearnedPack() },
       ]).row);
 
@@ -8310,20 +8328,20 @@
       }
     }
 
-    // v4.5: 从链接拉取 svi-rules 规则包并合并 (分发订阅通道; GM 通道绕开页面 CSP)
-    async importRulesFromUrl() {
-      const raw = prompt('规则包链接 (指向 svi-rules 格式 JSON):', 'https://');
-      if (raw === null) return;
-      const url = String(raw).trim();
-      if (!/^https?:\/\/\S+/i.test(url)) { showToast('链接无效'); return; }
+    // v4.5: 从链接拉取 svi-rules 规则包并合并 (分发订阅通道; GM 通道绕开页面 CSP)。
+    // 合并幂等去重 → 直接执行, 不经 confirm (内容脚本对话框不可依赖)。
+    // 允许 https 或环回 http (本地 http-server 网关工作流)。
+    async importRulesFromUrl(url) {
+      const target = String(url || '').trim();
+      const okUrl = /^(https:\/\/\S+|http:\/\/(127\.0\.0\.1|localhost)(:\d+)?\/\S+)/i.test(target);
+      if (!okUrl) { showToast('请填入 https:// 规则包链接（本地调试允许 127.0.0.1/localhost）'); return; }
       showToast('正在拉取规则包…');
       try {
-        const text = await gmFetchText(url);
+        const text = await gmFetchText(target);
         let parsed;
         try { parsed = JSON.parse(text); } catch (e) { showToast('导入失败: 不是有效 JSON'); return; }
         const rules = (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) ? (parsed.rules || parsed) : null;
         if (!rules || typeof rules !== 'object' || Array.isArray(rules)) { showToast('导入失败: 不是有效的规则包'); return; }
-        if (!confirm('确认将链接规则包合并进当前规则吗？\n(重复条目自动去重, 站点设置以包为准, 学习规则保留命中更高者)')) return;
         this.applyRulesPayload(rules, false);
         showToast('规则包已合并导入');
       } catch (e) {
