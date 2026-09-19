@@ -1,8 +1,8 @@
 {
   "schema": 1,
   "kind": "svi-rule-library",
-  "generatedAt": "2026-09-13T10:32:26.456Z",
-  "version": "4.2.0",
+  "generatedAt": "2026-09-19T07:23:16.516Z",
+  "version": "4.5.0",
   "count": 19,
   "builtinRules": [
     {
