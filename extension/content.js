@@ -2413,8 +2413,10 @@
         }
         .svi-modal-body { padding: 12px 12px 20px; gap: 12px; }
         .svi-modal-row, .svi-site-check-row { min-height: 40px; }
-        /* iOS: 聚焦字号 <16px 的输入框会触发页面缩放, 16px 起步 */
-        .svi-modal-select, .svi-modal-num-input { min-height: 40px; font-size: 16px; }
+        /* iOS: 聚焦字号 <16px 的输入框会触发页面缩放, 16px 起步
+           (提升特异性: 基础规则在样式表更后处, 同特异性会被覆盖) */
+        .svi-modal-body .svi-modal-select,
+        .svi-modal-body .svi-modal-num-input { min-height: 40px; font-size: 16px; }
         .svi-check { width: 20px; height: 20px; }
         .svi4-tab { padding: 11px 12px; }
         .svi-drag-handle { display: none; }
