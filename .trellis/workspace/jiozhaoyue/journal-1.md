@@ -242,3 +242,11 @@ Shipped v3.2.0: independent video picture tuning (brightness/contrast/saturate/w
 - 视觉循环: visual-probe.js (前/后截图+决策报告), 已覆盖 GitHub/Wikipedia/BBC/SO/B站/MDN/掘金(404)/cnblogs —— 截图判定均通过; 探针并行冲突教训: CDP 端口与输出目录需按 PID 派生。
 - 移动端: 375px 模态全宽、把手隐藏、select 16px/40px; num-input 被 ~2500 行处基础规则覆盖 → 媒体查询内提升特异性。
 - 版本同步: SCRIPT_VERSION 3.3.0→4.5.0 (此前与 @version 脱节), test.js 断言改锚 svi.version。
+
+### 2026-09-19 · v4.5 视觉循环第 8-19 轮 (追加)
+
+- 新增真站覆盖: npm/W3Schools/python-docs/runoob/arXiv/状态图维基/Twitch/Reddit/B站首页/V2EX/docs.rs/dev.to/hashnode/B站搜索(高等数学课件)/mail.163/en.m.wikipedia/知乎/PhysicsSE —— 全部截图判定通过。
+- 关键真站验证: Alt+点击闭环 (覆盖→持久→重载保持→再点恢复, overrideKeys=1, reason=manual); 5 次重载 soak (稳态决策一致; 动态页需按共有 URL 比较); 播放中 B站视频 HIL (深色真人场景保持); mail.163 动态主题 (bodyTag #ffffff→rgb(20,20,20), 5 桶, 零白交接; 渐变背景营销页为已知 bg-image 限制)。
+- 追加修复: 头像 URL 路径段 (/avatars/) 计入 META_ICON_RE (hashnode 类头像误反); 规则包导入改内联输入行 (内容脚本对话框不可依赖) + 允许环回 http; elementRules 合并按 id 幂等去重 (二次导入曾翻倍); 包动作词表 'keep'→'protect' (曾致 38→9)。
+- 教训: (1) 并行探针需按 PID 派生 CDP 端口与输出目录; (2) 动态新闻页 soak 必须按共有 URL 比较; (3) Chrome 137+ 品牌版忽略 --load-extension, 用 CDP Extensions.loadUnpacked + remote-debugging-pipe (fd3/4, \0 分隔); (4) 先量化像素数据再定阈值 (enwiki 徽标 opaqueRatio 0.707 推翻了透明假设)。
+- 门禁全程保持四绿; 每轮证据 (前后截图+决策报告) 落 dev/shots (gitignored)。
