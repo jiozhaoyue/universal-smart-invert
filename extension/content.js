@@ -3,7 +3,7 @@
  * universal-smart-invert — browser extension content script
  * GENERATED FILE — DO NOT EDIT.
  * Built by scripts/build-extension.js from universal-smart-invert.user.js
- * Source version: 4.3.0
+ * Source version: 4.5.0
  *
  * Prelude contract (see scripts/build-extension.js header):
  *   - EXT_MODE (wrapper scope)   → core claims coexistence kind 'ext'
@@ -75,7 +75,7 @@
   // ==========================================
   // 1. 配置与常量定义
   // ==========================================
-  const SCRIPT_VERSION = '3.3.0';
+  const SCRIPT_VERSION = '4.5.0';
   const PREFS_KEY = 'universal_smart_invert_v4';   // v2.0 遗留偏好键 (迁移源, 迁移后原样保留以便回滚)
   const LEGACY_KEY = 'universal_smart_invert_v3';  // v1.x 旧键 (仅读取迁移, 保留不删以便回滚)
   const STATS_KEY = 'universal_smart_invert_stats_v1'; // v2.0 遗留统计键 (保留写入以兼容回滚)
@@ -256,6 +256,20 @@
   const CONTENT_CONTEXT_SELECTOR = '.markdown-body, [class*="article"], [class*="content"], .post-content, .rich-text, .comment-content';
   const CHROME_CONTEXT_SELECTOR = 'nav, header, footer, aside, [role="banner"], [class*="logo"], [class*="icon"], [aria-hidden="true"]';
   const META_ICON_RE = /(avatar|user-pic|profile-pic|emoji|emoticon|captcha)/;
+
+  // v4.5: 上下文命中必须排除 html/body —— 子串选择器 ([class*="content"]) 会命中文档根上的
+  // 框架类 (实测: Wikipedia 在 <html> 上挂 vector-feature-limited-width-CONTENT-enabled,
+  // 全页图片因此全部误判"正文上下文", 策略门/页头保护整体失效)。
+  function closestContextHit(el, selector) {
+    let node = el;
+    while (node && node !== document.body && node !== document.documentElement) {
+      try {
+        if (node.matches && node.matches(selector)) return node;
+      } catch (e) { /* 非法选择器按未命中处理 */ }
+      node = node.parentElement;
+    }
+    return null;
+  }
 
   // 背景替换内置登录块保护选择器 (绝不覆盖登录区域)
   const LOGIN_SELECTORS = [
@@ -1437,8 +1451,13 @@
 
   function requestIdle(fn, timeoutMs) {
     const timeout = timeoutMs || 1500;
+    // 硬兜底: 无头/CDP/重载环境下 rIC 可能被无限推迟 (实测 4s+ 不触发),
+    // rIC 与 setTimeout 双通道竞速, 无论哪条先到都保证执行且只执行一次。
+    let done = false;
+    const run = () => { if (done) return; done = true; fn(); };
     if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') {
-      window.requestIdleCallback(fn, { timeout });
+      window.requestIdleCallback(run, { timeout });
+      setTimeout(run, timeout + 100);
     } else {
       setTimeout(fn, timeout);
     }
@@ -2378,6 +2397,36 @@
       @keyframes sviSlideIn {
         from { opacity: 0; transform: translateX(var(--svi-slide-from, 24px)); }
         to { opacity: 1; transform: none; }
+      }
+      /* ===== v4.5 响应式 / 移动端: 窄屏全宽面板 + 触控大目标 + 粗指针禁用拖拽把手 ===== */
+      @media (max-width: 520px) {
+        .svi-modal-window,
+        .svi-modal-window.layout-left,
+        .svi-modal-window.layout-right {
+          width: 100vw !important;
+          max-width: 100vw !important;
+          max-height: 100vh;
+          max-height: 100dvh;
+          border-radius: 0;
+          border-left: none;
+          border-right: none;
+        }
+        .svi-modal-body { padding: 12px 12px 20px; gap: 12px; }
+        .svi-modal-row, .svi-site-check-row { min-height: 40px; }
+        /* iOS: 聚焦字号 <16px 的输入框会触发页面缩放, 16px 起步 */
+        .svi-modal-select, .svi-modal-num-input { min-height: 40px; font-size: 16px; }
+        .svi-check { width: 20px; height: 20px; }
+        .svi4-tab { padding: 11px 12px; }
+        .svi-drag-handle { display: none; }
+        .svi-panel-card { right: 8px; width: min(250px, 88vw); }
+      }
+      @media (pointer: coarse) {
+        .svi-drag-handle { display: none; }
+        .svi-modal-slider { min-height: 32px; }
+        .svi-action-btn, .svi-mini-btn { min-height: 40px; }
+      }
+      @media (max-height: 460px) {
+        .svi-modal-window { max-height: 96vh; max-height: 96dvh; }
       }
       .svi-drag-handle {
         position: absolute;
@@ -3871,6 +3920,35 @@
   // ==========================================
   // 12. 图片像素分析与解码链 (star-history/camo 跨域修复核心)
   // ==========================================
+  // v4.5: GM 文本拉取 (规则包订阅/分发通道) —— 用户脚本走 GM_xmlhttpRequest 绕开页面 CSP,
+  // 插件形态经预置 fetch shim (text 响应), 失败时调用方降级提示。
+  function gmFetchText(url) {
+    return new Promise((resolve, reject) => {
+      const gmXhr = (typeof GM_xmlhttpRequest === 'function')
+        ? GM_xmlhttpRequest
+        : (typeof GM !== 'undefined' && GM && typeof GM.xmlHttpRequest === 'function' ? GM.xmlHttpRequest : null);
+      if (!gmXhr) {
+        fetch(url).then((res) => {
+          if (!res.ok) { reject(new Error('HTTP ' + res.status)); return; }
+          return res.text().then(resolve);
+        }).catch(() => reject(new Error('network error')));
+        return;
+      }
+      gmXhr({
+        method: 'GET',
+        url,
+        responseType: 'text',
+        timeout: 20000,
+        onload: (r) => {
+          if (r && r.status === 200 && typeof r.response === 'string') resolve(r.response);
+          else reject(new Error('HTTP ' + (r && r.status)));
+        },
+        onerror: () => reject(new Error('network error')),
+        ontimeout: () => reject(new Error('timeout')),
+      });
+    });
+  }
+
   function gmFetchBlob(url) {
     return new Promise((resolve, reject) => {
       const gmXhr = (typeof GM_xmlhttpRequest === 'function')
@@ -3918,7 +3996,7 @@
     });
   }
 
-  function evaluateImagePixels(data, s = state) {
+  function evaluateImagePixelStats(data, s = state) {
     const lumCutoff = s.imgLumCutoff || 180;
     const areaThreshold = (s.imgAreaThreshold || 48) / 100;
     const toleranceSq = ((s.imgTolerance || 35) * 2.55) ** 2;
@@ -3992,8 +4070,15 @@
       if (isLight) lightCount++;
     }
 
-    if (opaqueCount < 8) return false;
-    return (lightCount / opaqueCount) >= areaThreshold;
+    // v4.5: 返回统计 (lightRatio = 亮像素/不透明像素) —— 自动反色的"白底主导"证据
+    if (opaqueCount < 8) return { isLight: false, lightRatio: 0 };
+    const lightRatio = lightCount / opaqueCount;
+    return { isLight: lightRatio >= areaThreshold, lightRatio };
+  }
+
+  // 兼容导出契约 (window.__svi.evaluateImagePixels): 只返回布尔判定
+  function evaluateImagePixels(data, s = state) {
+    return evaluateImagePixelStats(data, s).isLight;
   }
 
   // 将任意可绘制对象 (img/video/bitmap) 采样为像素数据; 跨域污染时抛错
@@ -4084,7 +4169,8 @@
     }
 
     if (sample && sample.opaqueCount >= 8) {
-      return { ok: true, isLight: evaluateImagePixels(sample.data, prefsState), meanLum: meanLuminance(sample.data), opaqueRatio: sample.opaqueCount / 64, viaFallback: false };
+      const st = evaluateImagePixelStats(sample.data, prefsState);
+      return { ok: true, isLight: st.isLight, lightRatio: st.lightRatio, meanLum: meanLuminance(sample.data), opaqueRatio: sample.opaqueCount / 64, viaFallback: false };
     }
 
     StatsManager.count('taintFallbacks');
@@ -4092,7 +4178,8 @@
       const blob = await gmFetchBlob(src);
       const s16 = await decodeBlobSample(blob, 16);
       if (s16.opaqueCount < 8) return { ok: false };
-      return { ok: true, isLight: evaluateImagePixels(s16.data, prefsState), meanLum: meanLuminance(s16.data), opaqueRatio: s16.opaqueCount / 256, viaFallback: true };
+      const st = evaluateImagePixelStats(s16.data, prefsState);
+      return { ok: true, isLight: st.isLight, lightRatio: st.lightRatio, meanLum: meanLuminance(s16.data), opaqueRatio: s16.opaqueCount / 256, viaFallback: true };
     } catch (e) {
       // file:// 页面且本地文件访问被拦 → 记录一次性 UI 提示 (不崩溃, 优雅降级)
       try {
@@ -4207,8 +4294,8 @@
 
     let isContent = false;
     let isChrome = false;
-    try { isContent = !!(img.closest && img.closest(CONTENT_CONTEXT_SELECTOR)); } catch (e) { /* ignore */ }
-    try { isChrome = !!(img.closest && img.closest(CHROME_CONTEXT_SELECTOR)); } catch (e) { /* ignore */ }
+    try { isContent = !!closestContextHit(img, CONTENT_CONTEXT_SELECTOR); } catch (e) { /* ignore */ }
+    try { isChrome = !!closestContextHit(img, CHROME_CONTEXT_SELECTOR); } catch (e) { /* ignore */ }
 
     // v3.1 R4: 策略门所需的扩展上下文 (每次决策对当前 DOM 快照计算一次, 与决策一同缓存,
     // 后续 DOM 变化绝不翻转已定决策 —— F3 修复的核心约束)
@@ -4292,7 +4379,7 @@
   // 追加 卡片/封面类名提示 ([class*="card"]/["cover"]) 与 单图链接锚 (a 仅包裹一张媒体图) 模式;
   // 仅作用于策略门 (classifySmallElement 的 chrome-small 判定维持 v3.0 基础选择器语义, 零回归)
   function detectChromeContext(el) {
-    try { if (el.closest && el.closest(CHROME_CONTEXT_SELECTOR)) return true; } catch (e) { /* ignore */ }
+    try { if (closestContextHit(el, CHROME_CONTEXT_SELECTOR)) return true; } catch (e) { /* ignore */ }
     try {
       let node = el.parentElement;
       let hops = 0;
@@ -5185,6 +5272,15 @@
       if (r.isLight && typeof r.meanLum === 'number' && r.meanLum >= 0 && r.meanLum < 96) {
         this.cache.set(src, false);
         this.applyDecision(img, src, this.recordDecision(src, 'keep', 'sanity-dark'));
+        return;
+      }
+
+      // v4.5 透明底守护: 大量透明像素的"浅色"判定 —— 透明底图形 (站点 logo/徽标/图标) 是为
+      // 其所在背景设计的, 反色后必然破坏 (黑字变白字隐身 / 品牌色相翻转)。真实白底文档图是
+      // 不透明的。透明占比 ≥60% 一律保持原样 (Alt+点击仍可手动反色)。
+      if (r.isLight && typeof r.opaqueRatio === 'number' && r.opaqueRatio < 0.4) {
+        this.cache.set(src, false);
+        this.applyDecision(img, src, this.recordDecision(src, 'keep', 'transparent-light'));
         return;
       }
 
@@ -6516,6 +6612,12 @@
     // 空闲分片全量扫描: 每片 400 元素, 整页预算 4000, 隐藏时暂停
     startScan() {
       if (!document.body) return;
+      // v4.5: 防闪光守卫 (html/body 黑底 !important) 尚在时采样会误判 body 为深色,
+      // 推迟到守卫交接后再扫, 否则页面底色桶永久缺失 (白底泄漏)
+      if (document.documentElement && document.documentElement.dataset && document.documentElement.dataset.sviFlashguard) {
+        setTimeout(() => { if (this.active) this.startScan(); }, 300);
+        return;
+      }
       if (mediaDominanceActive()) {
         // 媒体主导时推迟整页扫描
         setTimeout(() => { if (this.active) this.startScan(); }, 3000);
@@ -7669,13 +7771,15 @@
       sec.add(presetChipRow);
       this.rowSyncs.push(() => presetChipRow.sync());
 
-      sec.add(ui.toggleRow('悬停显示原图', '悬停已反色图片时临时显示原图，移出后恢复反色视图',
+      const hoverRow = ui.toggleRow('悬停显示原图', '悬停已反色图片时临时显示原图，移出后恢复反色视图',
         () => state.hoverRestore !== false,
         (v) => {
           state.hoverRestore = v;
           savePrefs();
           updateImageFilterCss();
-        }));
+        });
+      sec.add(hoverRow);
+      this.rowSyncs.push(() => hoverRow.sync());
 
       // 画面滤镜微调 (原折叠抽屉并入, 反色预设选「自定义」时逐项生效)
       const bRow = ui.sliderRow('画面亮度', '反色后的暗化微调', () => state.brightness, (n) => {
@@ -7712,7 +7816,7 @@
       const sec = ui.section('🖼️ 图片反色', '决定哪些图片反色以及反色方式', 'svi-sec-image');
 
       // 智能图片策略 (v3.3 选项净化: 短名 + 动态说明)
-      sec.add(ui.selectRow('智能图片策略', '手动 Alt+点击 与学习规则始终优先',
+      const policyRow = ui.selectRow('智能图片策略', '手动 Alt+点击 与学习规则始终优先',
         [
           { v: 'balanced', label: '平衡', describe: '默认。正文与大图反色，封面网格与页面骨架跳过。' },
           { v: 'conservative', label: '保守', describe: '仅正文上下文与不小于 200 像素的大图参与。' },
@@ -7723,15 +7827,19 @@
           state.imagePolicy = v;
           savePrefs();
           window.__svi_image_engine?.clearCacheAndRescan();
-        }));
+        });
+      sec.add(policyRow);
+      this.rowSyncs.push(() => policyRow.sync());
 
-      sec.add(ui.toggleRow('全浅色通用自适应检测', '任何高明度浅底图表均自动识别反色',
+      const generalLightRow = ui.toggleRow('全浅色通用自适应检测', '任何高明度浅底图表均自动识别反色',
         () => state.imgGeneralLight !== false,
         (v) => {
           state.imgGeneralLight = v;
           savePrefs();
           window.__svi_image_engine?.clearCacheAndRescan();
-        }));
+        });
+      sec.add(generalLightRow);
+      this.rowSyncs.push(() => generalLightRow.sync());
 
       sec.add(ui.infoLine('预设浅色色卡，点击启用或禁用对应浅色系：'));
       const colorChipRow = ui.chipRow(
@@ -7784,14 +7892,16 @@
       });
 
       // 图片特效模式与参数 (v3.3 选项净化: 短名 + 动态说明)
-      sec.add(ui.selectRow('图片特效模式', '部分反色与特效的呈现方式',
+      const imgFxModeRow = ui.selectRow('图片特效模式', '部分反色与特效的呈现方式',
         IMG_FX_MODES,
         () => state.imgFxMode,
         (v) => {
           state.imgFxMode = v;
           savePrefs();
           window.__svi_image_engine?.clearCacheAndRescan();
-        }));
+        });
+      sec.add(imgFxModeRow);
+      this.rowSyncs.push(() => imgFxModeRow.sync());
 
       const lumRow = ui.sliderRow('亮度反色 · 明度线', '仅反色高于该明度的像素', () => state.imgFxParams.lumCutoff, (n) => {
         state.imgFxParams.lumCutoff = n;
@@ -7841,7 +7951,7 @@
       const vfx = (window.__svi && window.__svi.engines) ? window.__svi.engines.videoFx : null;
       const gpuOk = !vfx || vfx.available;
       if (gpuOk) {
-        sec.add(ui.selectRow('视频特效引擎', '决定视频反色的呈现路径',
+        const vfxModeRow = ui.selectRow('视频特效引擎', '决定视频反色的呈现路径',
           [
             { v: 'off', label: '关闭', describe: '走标准滤镜路径，兼容性最好。' },
             { v: 'full', label: '完整反色', describe: '显卡加速逐帧呈现完整反色。' },
@@ -7856,7 +7966,9 @@
               const hil = window.__svi && window.__svi.engines ? window.__svi.engines.hil : null;
               if (hil) hil.probe && hil.probe.applyFilterToCurrent();
             } catch (e) { /* ignore */ }
-          }));
+          });
+        sec.add(vfxModeRow);
+        this.rowSyncs.push(() => vfxModeRow.sync());
       } else {
         sec.add(ui.infoLine('当前环境不支持显卡加速，视频特效引擎已停用，将走标准滤镜路径。'));
       }
@@ -7915,7 +8027,7 @@
       for (const r of tuneRows) this.rowSyncs.push(() => r.sync());
 
       // 时间线记忆 (v3.3 选项净化: 短名 + 动态说明)
-      sec.add(ui.selectRow('时间线记忆', '反色片段按视频指纹记忆，重放时提前布防',
+      const timelineRow = ui.selectRow('时间线记忆', '反色片段按视频指纹记忆，重放时提前布防',
         [
           { v: 'off', label: '关闭', describe: '不做时间线记忆。' },
           { v: 'reference', label: '参考', describe: '自动提前布防，手动操作始终优先。' },
@@ -7925,7 +8037,9 @@
         (v) => {
           state.timelineMode = v;
           savePrefs();
-        }));
+        });
+      sec.add(timelineRow);
+      this.rowSyncs.push(() => timelineRow.sync());
       return sec.el;
     }
 
@@ -8034,6 +8148,12 @@
         { label: '导出规则文件', onClick: () => this.exportRulesFile() },
         { label: '导入并合并', onClick: () => this.importRulesFile(false) },
         { label: '导入并替换', onClick: () => this.importRulesFile(true) },
+      ]).row);
+      // v4.5: 分发通道 —— 订阅链接导入 + 仅学习成果的可分享小包 (只含特征/命中数, 不含浏览记录)
+      sec.appendChild(ui.infoLine('规则分发：从链接拉取 svi-rules 规则包；学习成果包只含修正特征与命中数，可安全分享。').row);
+      sec.appendChild(ui.btnRow([
+        { label: '从链接导入', onClick: () => this.importRulesFromUrl() },
+        { label: '导出学习成果', onClick: () => this.exportLearnedPack() },
       ]).row);
 
       // —— 全量备份 ——
@@ -8209,6 +8329,49 @@
         };
         if (downloadJsonFile('svi-rules-' + new Date().toISOString().slice(0, 10) + '.json', payload)) {
           showToast('规则文件已开始下载');
+        } else {
+          showToast('导出失败');
+        }
+      } catch (e) {
+        showToast('导出失败: ' + e.message);
+      }
+    }
+
+    // v4.5: 从链接拉取 svi-rules 规则包并合并 (分发订阅通道; GM 通道绕开页面 CSP)
+    async importRulesFromUrl() {
+      const raw = prompt('规则包链接 (指向 svi-rules 格式 JSON):', 'https://');
+      if (raw === null) return;
+      const url = String(raw).trim();
+      if (!/^https?:\/\/\S+/i.test(url)) { showToast('链接无效'); return; }
+      showToast('正在拉取规则包…');
+      try {
+        const text = await gmFetchText(url);
+        let parsed;
+        try { parsed = JSON.parse(text); } catch (e) { showToast('导入失败: 不是有效 JSON'); return; }
+        const rules = (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) ? (parsed.rules || parsed) : null;
+        if (!rules || typeof rules !== 'object' || Array.isArray(rules)) { showToast('导入失败: 不是有效的规则包'); return; }
+        if (!confirm('确认将链接规则包合并进当前规则吗？\n(重复条目自动去重, 站点设置以包为准, 学习规则保留命中更高者)')) return;
+        this.applyRulesPayload(rules, false);
+        showToast('规则包已合并导入');
+      } catch (e) {
+        showToast('导入失败: ' + e.message);
+      }
+    }
+
+    // v4.5: 仅导出学习成果 (Alt+点击修正积累) —— 隐私安全小包, 只含 host/特征/动作/命中数
+    exportLearnedPack() {
+      try {
+        const learned = JSON.parse(JSON.stringify(ruleLearner.data || {}));
+        if (!Object.keys(learned).length) { showToast('暂无学习成果 (Alt+点击修正积累后可导出)'); return; }
+        const payload = {
+          kind: 'svi-rules',
+          schema: 1,
+          version: SCRIPT_VERSION,
+          exportedAt: new Date().toISOString(),
+          rules: { learned },
+        };
+        if (downloadJsonFile('svi-learned-pack-' + new Date().toISOString().slice(0, 10) + '.json', payload)) {
+          showToast('学习成果包已开始下载');
         } else {
           showToast('导出失败');
         }
@@ -9532,8 +9695,12 @@
       st.textContent = 'html[data-svi-flashguard],html[data-svi-flashguard] body{background:#000!important}';
       (document.head || de).appendChild(st);
       let done = false;
+      const t0 = Date.now();
       const iv = setInterval(() => {
-        if (de.hasAttribute('data-svi-bgr-on')) off();
+        // v4.5: 零白交接 —— bgr-on 且 body 底色桶已就绪才撤黑 (2.5s 兜底防卡黑);
+        // 过早撤黑会在延迟扫描打标前露出原始白底
+        if (!de.hasAttribute('data-svi-bgr-on')) return;
+        if ((document.body && document.body.hasAttribute('data-svi-bgr-bg')) || Date.now() - t0 > 2500) off();
       }, 100);
       const off = () => {
         if (done) return;
@@ -9541,9 +9708,20 @@
         clearInterval(iv);
         try { st.remove(); } catch (e) { /* ignore */ }
         delete de.dataset.sviFlashguard;
+        // v4.5: 守卫若在扫描进行中撤除, html/body 可能已被黑底误采样 → 补打两个关键桶
+        try {
+          const bgr = window.__svi && window.__svi.engines ? window.__svi.engines.bgReplace : null;
+          if (bgr && bgr.active && document.body) {
+            bgr.processSubtree(document.documentElement, 8);
+            bgr.applyCss();
+          }
+        } catch (e) { /* ignore */ }
       };
+      // load 兜底: 本站不会走深色 (bgr-on 缺席) → 立即撤; 走深色 → 仍等底色桶就绪
       if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
-        window.addEventListener('load', off, { once: true });
+        window.addEventListener('load', () => {
+          if (!de.hasAttribute('data-svi-bgr-on') || (document.body && document.body.hasAttribute('data-svi-bgr-bg')) || Date.now() - t0 > 2500) off();
+        }, { once: true });
       }
       setTimeout(off, 5000);
     } catch (e) { /* ignore */ }
@@ -9611,6 +9789,8 @@
     // v3.1 纯函数与引擎导出 (单测契约): 图片策略门 / 网格分组计数 / 统一决策管线引擎
     passesImagePolicy,
     countGridGroup,
+    // v4.5 纯函数导出 (单测契约): 上下文命中忽略文档根
+    closestContextHit,
     ImageInvertEngine,
     // v3.2 纯函数导出 (单测契约): 视频画面调节滤镜链构建
     buildVideoTuneFilter,
@@ -9663,6 +9843,82 @@
 
   const uiController = new UIController();
   window.__svi.ui = uiController; // 调试句柄: UI 控制器实例
+
+  // ===== v4.5: 工具栏弹出面板消息通道 (仅插件形态; 用户脚本环境无 chrome.runtime.onMessage) =====
+  // 快照给弹窗渲染当前站状态; 命令复用设置面板同一批入口 (setSitePower / 行处理器), 语义零分歧。
+  if (IS_TOP_FRAME && typeof chrome !== 'undefined' && chrome && chrome.runtime && chrome.runtime.onMessage) {
+    try {
+      chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+        try {
+          if (!msg || typeof msg.type !== 'string' || msg.type.indexOf('svi-') !== 0) return undefined;
+          if (msg.type === 'svi-get-snapshot') {
+            const profile = getSiteProfile();
+            sendResponse({
+              ok: true,
+              dormant: !!window.__svi.dormant,
+              version: SCRIPT_VERSION,
+              host: profileKey(),
+              siteActive: runtime.siteActive !== false && getSiteProfile().enabled !== false,
+              imageOn: state.imageInvert !== false && getSiteProfile().imageInvert !== false,
+              videoOn: getSiteProfile().videoInvert !== false,
+              bgReplace: getSiteProfile().bgReplace === true,
+              imagePolicy: state.imagePolicy || 'balanced',
+              imgFxMode: state.imgFxMode || 'full',
+              presetId: state.presetId || 'soft-gray',
+              hoverRestore: state.hoverRestore !== false,
+              counts: {
+                img: document.images ? document.images.length : 0,
+                inverted: document.querySelectorAll('[data-svi-inverted="true"]').length,
+                fx: document.querySelectorAll('[data-svi-fx]').length,
+                bginv: document.querySelectorAll('[data-svi-bginv="true"]').length,
+                video: document.querySelectorAll('video').length,
+              },
+            });
+          } else if (msg.type === 'svi-site-power') {
+            uiController.setSitePower(msg.on !== false);
+            sendResponse({ ok: true, siteActive: runtime.siteActive !== false });
+          } else if (msg.type === 'svi-set-pref') {
+            const key = String(msg.key || '');
+            const v = msg.value;
+            if (key === 'imagePolicy' && ['balanced', 'conservative', 'aggressive'].indexOf(v) !== -1) {
+              state.imagePolicy = v;
+              savePrefs();
+              try { window.__svi_image_engine && window.__svi_image_engine.clearCacheAndRescan(); } catch (e) { /* ignore */ }
+            } else if (key === 'imgFxMode' && ['full', 'luma', 'key', 'rect', 'grayscale', 'sepia', 'brightness', 'custom'].indexOf(v) !== -1) {
+              state.imgFxMode = v;
+              savePrefs();
+              try { window.__svi_image_engine && window.__svi_image_engine.clearCacheAndRescan(); } catch (e) { /* ignore */ }
+            } else if (key === 'presetId' && (v === 'soft-gray' || v === 'amoled')) {
+              try {
+                uiController.stateMachine && uiController.stateMachine.onUserSelectPreset(v);
+              } catch (e) { state.presetId = v; savePrefs(); updateImageFilterCss(); }
+            } else if (key === 'hoverRestore') {
+              state.hoverRestore = v !== false;
+              savePrefs();
+              updateImageFilterCss();
+            } else if (key === 'imageInvert') {
+              state.imageInvert = v !== false;
+              savePrefs();
+              updateImageFilterCss();
+              try { window.__svi_image_engine && window.__svi_image_engine.clearCacheAndRescan(); } catch (e) { /* ignore */ }
+            } else {
+              sendResponse({ ok: false, error: 'unknown key: ' + key });
+              return undefined;
+            }
+            sendResponse({ ok: true });
+          } else if (msg.type === 'svi-open-settings') {
+            uiController.openSettingsModal();
+            sendResponse({ ok: true });
+          } else {
+            sendResponse({ ok: false, error: 'unknown type' });
+          }
+        } catch (e) {
+          try { sendResponse({ ok: false, error: String(e) }); } catch (e2) { /* ignore */ }
+        }
+        return undefined;
+      });
+    } catch (e) { /* ignore: 弹窗不可用时页面功能不受影响 */ }
+  }
 
   // v4.0: 引擎启动块 (开机启用 → 立即执行; 开机禁用 → 电源热启用时首启; 幂等)
   function bootEngines() {

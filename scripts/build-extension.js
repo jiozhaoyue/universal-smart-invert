@@ -173,12 +173,19 @@ function main() {
   fs.mkdirSync(OUT_DIR, { recursive: true });
   fs.writeFileSync(CONTENT_OUT, content, 'utf8');
 
+  const extName = clip(meta.name, MAX_NAME);
   const manifest = {
     manifest_version: 3,
-    name: clip(meta.name, MAX_NAME),
+    name: extName,
     version: version,
     description: clip(meta.description, MAX_DESCRIPTION),
     icons: {},
+    // v4.5: Dark Reader 式工具栏弹出面板 (与页面内设置面板语义一致的消息通道)
+    action: {
+      default_popup: 'popup.html',
+      default_title: extName,
+      default_icon: {},
+    },
     permissions: ['storage'],
     content_scripts: [
       {
@@ -190,8 +197,21 @@ function main() {
       },
     ],
   };
-  for (const size of ICON_SIZES) manifest.icons[String(size)] = `icons/icon${size}.png`;
+  for (const size of ICON_SIZES) {
+    manifest.icons[String(size)] = `icons/icon${size}.png`;
+    manifest.action.default_icon[String(size)] = `icons/icon${size}.png`;
+  }
   fs.writeFileSync(MANIFEST_OUT, JSON.stringify(manifest, null, 2) + '\n', 'utf8');
+
+  // v4.5: popup sources live in scripts/extension-src/ and are copied verbatim —
+  // the extension/ directory stays fully generated (no hand-edited artifacts).
+  const POPUP_FILES = ['popup.html', 'popup.js'];
+  const popupSrcDir = path.join(__dirname, 'extension-src');
+  for (const f of POPUP_FILES) {
+    const from = path.join(popupSrcDir, f);
+    if (!fs.existsSync(from)) fail('popup source missing: ' + path.relative(ROOT, from));
+    fs.writeFileSync(path.join(OUT_DIR, f), fs.readFileSync(from, 'utf8'), 'utf8');
+  }
 
   // Icons are produced by scripts/gen-icons.js; verify presence so the
   // manifest never references missing files in an unpacked load.
@@ -209,6 +229,7 @@ function main() {
   console.log('[build-extension] description: ' + manifest.description + (manifest.description.length < meta.description.length ? ' ... [clipped to ' + MAX_DESCRIPTION + ' chars]' : ''));
   console.log('[build-extension] wrote      : ' + path.relative(ROOT, CONTENT_OUT) + ' (' + content.length + ' bytes, ' + content.split('\n').length + ' lines)');
   console.log('[build-extension] wrote      : ' + path.relative(ROOT, MANIFEST_OUT));
+  console.log('[build-extension] wrote      : ' + POPUP_FILES.map((f) => path.relative(ROOT, path.join(OUT_DIR, f))).join(', '));
   console.log('[build-extension] icons OK   : ' + ICON_SIZES.map((s) => `icon${s}.png`).join(', '));
   console.log('[build-extension] prelude    : EXT_MODE=true (wrapper scope) + GM_xmlhttpRequest/GM.xmlHttpRequest/GM_addStyle shims; Store uses chrome.storage natively');
 }

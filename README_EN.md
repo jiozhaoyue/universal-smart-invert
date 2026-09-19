@@ -1,7 +1,7 @@
 # Universal Smart Video & Image Invert
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-4.3.0-blue.svg?style=flat-square" alt="Version">
+  <img src="https://img.shields.io/badge/version-4.5.0-blue.svg?style=flat-square" alt="Version">
   <img src="https://img.shields.io/badge/license-AGPL--3.0-green.svg?style=flat-square" alt="License">
   <img src="https://img.shields.io/badge/Tampermonkey-Supported-orange.svg?style=flat-square" alt="Tampermonkey">
   <img src="https://img.shields.io/badge/ScriptCat-Supported-purple.svg?style=flat-square" alt="ScriptCat">
@@ -51,6 +51,30 @@ Specifically designed to tame **blinding white PowerPoint/PDF lecture slides in 
   - `Alt + I`: Toggle video inversion (with manual override lock);
   - `Alt + A`: Toggle smart auto mode;
   - `Alt + Left Click`: Force toggle inversion on any specific image or SVG.
+
+---
+
+## 🆕 What's New in v4.5 (Toolbar Popup · Inversion Correctness · Rule Distribution)
+
+### 1. 🧯 Inversion Correctness Fixes (found via real-site visual testing)
+- **Settings-row display sync fixed**: inline-built rows (hover-restore, image policy, general light detection, image fx mode, video fx engine, timeline memory) never reflected the live pref — the "hover to show original" toggle looked OFF while the feature was ON, so the first click wrote the OPPOSITE value. All rows now sync on modal open;
+- **Document-root context pollution fixed**: substring selectors like `[class*="content"]` matched framework classes on `<html>` (observed: Wikipedia's `vector-feature-limited-width-content-enabled`), making every image "content context" and disabling header/logo protection. Context hits now ignore html/body;
+- **Transparent-artwork guard**: "light" verdicts on heavily transparent images always keep — transparent logos/badges are designed for their background and break when inverted;
+- **Zero-white flash-guard handoff**: dark sites now go black → dark, never black → white (the guard waits for the base-color bucket, 2.5s fallback); also fixes the guard's black paint poisoning the first bucket scan;
+- **Idle-scheduling hard fallback**: `requestIdleCallback` can be deferred indefinitely in some environments (measured 4s+); it now races a setTimeout fallback so scans/re-scans complete deterministically.
+
+### 2. 🪟 DarkReader-Style Toolbar Popup (extension)
+- Clicking the extension icon opens a popup: **site power switch, invert presets (soft-gray / AMOLED black), image policy, image fx mode, image-invert & hover toggles, per-page inversion stats**;
+- Popup commands reuse the settings panel's own handlers, so semantics cannot diverge;
+- Browser-internal pages without the content script show a graceful "unavailable" state.
+
+### 3. 📦 Rule Distribution (import / export / subscribe)
+- **Import from URL**: Settings → Data & Backup → import an `svi-rules` pack by link (GM channel bypasses page CSP);
+- **Export learned pack**: contains only your Alt+click corrections (selector stems + hit counts), no browsing history — safe to share; recipients merge it and the higher hit count wins;
+- **One-file pack** `rules/svi-pack.import.json`: Dark Reader dark-sites list + the translatable subset of built-in site adaptations — machine-generated, merge-idempotent, conflict-free.
+
+### 4. 📱 Mobile & Responsive
+- On narrow screens (≤520px) the settings panel goes full-width, inputs render at 16px+ (prevents iOS focus zoom), the dock drag-handle hides on coarse pointers, and touch targets grow.
 
 ---
 

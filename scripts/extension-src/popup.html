@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>智能反色</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      width: 320px;
+      background: #0b1220;
+      color: #e2e8f0;
+      font: 13px/1.5 system-ui, "Segoe UI", "Microsoft YaHei", sans-serif;
+    }
+    header {
+      display: flex; align-items: center; gap: 8px;
+      padding: 12px 14px 8px;
+    }
+    header .logo {
+      width: 14px; height: 14px; border-radius: 50%;
+      background: conic-gradient(from 180deg, #38bdf8 0 50%, #f8fafc 0);
+      box-shadow: 0 0 8px rgba(56, 189, 248, .55);
+    }
+    header h1 { font-size: 14px; font-weight: 600; }
+    header .ver {
+      margin-left: auto; font-size: 10px; color: #64748b;
+      border: 1px solid #1e293b; border-radius: 8px; padding: 1px 7px;
+    }
+    #host-row {
+      display: flex; align-items: center; gap: 6px;
+      padding: 0 14px 10px; color: #94a3b8; font-size: 12px;
+    }
+    #host { color: #38bdf8; font-weight: 600; max-width: 200px;
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .power-row {
+      display: flex; align-items: center; justify-content: space-between;
+      margin: 0 10px; padding: 10px 12px;
+      background: #101a2c; border: 1px solid #1e293b; border-radius: 12px;
+    }
+    .power-row.off { border-color: #7f1d1d55; }
+    .power-row .label b { display: block; font-size: 13px; }
+    .power-row .label span { display: block; font-size: 10px; color: #64748b; }
+    .switch { position: relative; width: 40px; height: 22px; flex: none; }
+    .switch input { opacity: 0; width: 100%; height: 100%; position: absolute; cursor: pointer; margin: 0; }
+    .switch .knob {
+      position: absolute; inset: 0; border-radius: 11px; background: #334155;
+      transition: background .15s; pointer-events: none;
+    }
+    .switch .knob::after {
+      content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px;
+      border-radius: 50%; background: #e2e8f0; transition: transform .15s;
+    }
+    .switch input:checked + .knob { background: #0284c7; }
+    .switch input:checked + .knob::after { transform: translateX(18px); }
+    section { padding: 10px 14px 4px; }
+    .sec-title { font-size: 10px; letter-spacing: 1px; color: #64748b; margin-bottom: 6px; }
+    .chips { display: flex; gap: 8px; }
+    .chip {
+      flex: 1; padding: 8px 0; text-align: center; font-size: 12px;
+      background: #101a2c; border: 1px solid #1e293b; border-radius: 10px;
+      cursor: pointer; color: #cbd5e1;
+    }
+    .chip.on { border-color: #38bdf8; color: #38bdf8; background: #38bdf81a; }
+    .row {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 7px 0; gap: 10px;
+    }
+    .row label { color: #cbd5e1; font-size: 12px; }
+    select {
+      background: #101a2c; color: #e2e8f0; border: 1px solid #1e293b;
+      border-radius: 8px; padding: 4px 8px; font-size: 12px; max-width: 150px;
+    }
+    .mini { display: flex; align-items: center; justify-content: space-between;
+            padding: 7px 0; }
+    .mini label { color: #cbd5e1; font-size: 12px; }
+    .mini input { accent-color: #0284c7; width: 15px; height: 15px; }
+    #counts {
+      padding: 6px 14px; font-size: 11px; color: #64748b;
+    }
+    footer { padding: 8px 14px 14px; }
+    button {
+      width: 100%; padding: 9px 0; font-size: 12px;
+      background: #101a2c; color: #93c5fd; border: 1px solid #1e293b;
+      border-radius: 10px; cursor: pointer;
+    }
+    button:hover { border-color: #38bdf8; }
+    #unavailable {
+      margin: 6px 14px 14px; padding: 14px; text-align: center;
+      color: #94a3b8; font-size: 12px; background: #101a2c;
+      border: 1px dashed #334155; border-radius: 12px;
+    }
+    body.unavailable #host-row, body.unavailable .power-row,
+    body.unavailable section, body.unavailable #counts, body.unavailable footer { display: none; }
+    body.available #unavailable { display: none; }
+  </style>
+</head>
+<body class="available">
+  <header>
+    <span class="logo"></span>
+    <h1>智能反色</h1>
+    <span class="ver" id="ver">—</span>
+  </header>
+  <div id="host-row">当前站点：<b id="host">—</b></div>
+  <div class="power-row" id="power-row">
+    <span class="label"><b>本站反色</b><span>停用后本页完全不受影响</span></span>
+    <span class="switch"><input type="checkbox" id="power" aria-label="本站反色开关"><span class="knob"></span></span>
+  </div>
+  <div id="unavailable">本页不可用（浏览器内部页面，或内容脚本尚未加载）</div>
+  <section>
+    <div class="sec-title">反色预设</div>
+    <div class="chips">
+      <span class="chip" id="chip-soft-gray">柔和灰</span>
+      <span class="chip" id="chip-amoled">夜间纯黑</span>
+    </div>
+    <div class="row"><label>智能图片策略</label>
+      <select id="policy">
+        <option value="balanced">平衡</option>
+        <option value="conservative">保守</option>
+        <option value="aggressive">激进</option>
+      </select>
+    </div>
+    <div class="row"><label>图片特效模式</label>
+      <select id="imgfx">
+        <option value="full">完整反色</option>
+        <option value="luma">亮度反色</option>
+        <option value="grayscale">灰度化</option>
+        <option value="sepia">怀旧泛黄</option>
+      </select>
+    </div>
+    <div class="mini"><label>图片反色</label><input type="checkbox" id="imginv"></div>
+    <div class="mini"><label>悬停显示原图</label><input type="checkbox" id="hover"></div>
+  </section>
+  <div id="counts">—</div>
+  <footer><button id="open-settings">打开完整设置面板（页面内）</button></footer>
+  <script src="popup.js"></script>
+</body>
+</html>

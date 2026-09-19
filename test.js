@@ -426,7 +426,7 @@ vm.runInThisContext(scriptSource, { filename: 'universal-smart-invert.user.js' }
 
 const svi = window.__svi;
 assert.ok(svi, 'window.__svi must be exported for tests');
-assert.strictEqual(svi.version, '3.3.0', 'script version must be 3.3.0');
+assert.strictEqual(svi.version, '4.5.0', 'script version must track the @version header');
 
 // —— 7a. v3 → v4 迁移: 剥离运行时键, 保留偏好, 旧键不动 (R7) ——
 const v4raw = storageData['universal_smart_invert_v4'];
@@ -633,7 +633,7 @@ assert.ok(ghRule.forceInvert.some((s) => s.includes('.markdown-body img')), 'git
 const export1 = svi.exportStats();
 assert.strictEqual(export1.schema, 1, 'export envelope schema');
 assert.ok(typeof export1.exportedAt === 'string' && export1.exportedAt.length > 0, 'exportedAt ISO string');
-assert.strictEqual(export1.version, '3.3.0', 'export version');
+assert.strictEqual(export1.version, svi.version, 'export version must track SCRIPT_VERSION');
 assert.ok(export1.counters && typeof export1.counters === 'object', 'export counters object');
 assert.ok(typeof export1.counters.imagesAnalyzed === 'number', 'counter imagesAnalyzed');
 assert.ok(typeof export1.counters.taintFallbacks === 'number', 'counter taintFallbacks');
@@ -1071,6 +1071,75 @@ assert.strictEqual(pip(pinfo({ maxDim: 2000, gridSiblings: 50, chromeContext: tr
 
 // —— 9d. decideImage 统一决策管线 (真实引擎实例, Node 桩环境) ——
 // 引擎构造在桩环境安全: IntersectionObserver 缺失 → init() 早退, 无 IO/扫描副作用
+// ============================================================
+// v4.5 单测: 工具栏弹出面板消息通道 (chrome.runtime.onMessage)
+// 带 chrome.runtime 桩二次加载脚本, 直呼监听器断言快照/命令语义与设置面板一致
+// ============================================================
+(() => {
+  let capturedListener = null;
+  // 合并而非替换: 其它单测可能已装入带 storage 的 chrome 桩 (异步断言仍在途)
+  const savedChrome = global.chrome;
+  global.chrome = Object.assign({}, savedChrome || {}, {
+    runtime: Object.assign({}, (savedChrome && savedChrome.runtime) || {}, {
+      lastError: null,
+      onMessage: { addListener(fn) { capturedListener = fn; } },
+    }),
+  });
+  const savedSelf = global.self, savedTop = global.top;
+  // 本文件 shim 用 self !== top 压掉顶层 UI; 通道注册在顶层判定之内 → 临时恢复顶层语义
+  global.top = global.self;
+  try {
+    try {
+      vm.runInThisContext(scriptSource, { filename: 'universal-smart-invert.user.js (popup channel test)' });
+    } catch (e) {
+      assert.fail('second boot (popup channel env) threw: ' + e.message);
+    }
+    const svi2 = window.__svi;
+    console.log('[ch-dbg] svi2 identity-changed:', svi2 !== svi, 'dormant:', !!svi2.dormant, 'listener:', !!capturedListener,
+      'top-frame-capable:', typeof window.self === 'undefined' || typeof window.top === 'undefined' ? 'degenerate' : (window.self === window.top));
+    assert.ok(!svi2.dormant, 'second boot must not go dormant (shim dataset cannot persist claims), dormant=' + !!svi2.dormant);
+    assert.ok(svi2 !== svi, 'second boot must replace window.__svi with a fresh instance');
+    assert.ok(capturedListener, 'top-frame boot must register the onMessage listener when chrome.runtime exists');
+
+    const call = (msg) => {
+      let res = null;
+      capturedListener(msg, {}, (r) => { res = r; });
+      return res;
+    };
+
+    const snap = call({ type: 'svi-get-snapshot' });
+    assert.strictEqual(snap.ok, true, 'snapshot must respond ok');
+    assert.strictEqual(snap.host, 'mail.163.com', 'snapshot host must come from the location shim');
+    assert.strictEqual(snap.siteActive, true, 'snapshot siteActive defaults to true');
+    assert.ok(snap.counts && typeof snap.counts.img === 'number', 'snapshot must include media counts');
+
+    const badKey = call({ type: 'svi-set-pref', key: 'nope', value: 1 });
+    assert.strictEqual(badKey.ok, false, 'unknown pref key must be rejected (whitelist)');
+
+    const pol = call({ type: 'svi-set-pref', key: 'imagePolicy', value: 'aggressive' });
+    assert.strictEqual(pol.ok, true, 'imagePolicy command must apply');
+    assert.strictEqual(svi2.prefs.imagePolicy, 'aggressive', 'imagePolicy pref must be persisted to state');
+
+    const hov = call({ type: 'svi-set-pref', key: 'hoverRestore', value: false });
+    assert.strictEqual(hov.ok, true, 'hoverRestore command must apply');
+    assert.strictEqual(svi2.prefs.hoverRestore, false, 'hoverRestore pref must be written (popup toggle parity)');
+    const snap2 = call({ type: 'svi-get-snapshot' });
+    assert.strictEqual(snap2.hoverRestore, false, 'snapshot must reflect hoverRestore=false');
+
+    const offRes = call({ type: 'svi-site-power', on: false });
+    assert.strictEqual(offRes.ok, true, 'site-power off must respond');
+    assert.strictEqual(svi2.prefs.siteOverrides['mail.163.com'].enabled, false, 'site-power off must write the override (same control as panel switch)');
+    assert.strictEqual(call({ type: 'svi-get-snapshot' }).siteActive, false, 'snapshot must report site suspended');
+    const onRes = call({ type: 'svi-site-power', on: true });
+    assert.strictEqual(onRes.siteActive, true, 'site-power on must hot-resume the page');
+  } finally {
+    if (savedChrome === undefined) { try { delete global.chrome; } catch (e) { global.chrome = undefined; } } else { global.chrome = savedChrome; }
+    global.self = savedSelf;
+    if (savedTop === undefined) { try { delete global.top; } catch (e) { global.top = undefined; } } else { global.top = savedTop; }
+  }
+  console.log('✓ v4.5 popup message channel tests passed (snapshot / pref whitelist / site power)');
+})();
+
 const engine = new svi.ImageInvertEngine();
 assert.strictEqual(typeof engine.decideImage, 'function', 'engine exposes unified decideImage');
 assert.strictEqual(typeof engine.decisionBySrc, 'object', 'engine exposes decide-once snapshot');
@@ -1250,7 +1319,46 @@ const sameParentSibs = (self, n, w, h) => {
   console.log('✓ v4.2 unit tests passed: scheduleActiveNow (off/inside/wrapped-outside)');
 })();
 
+// ============================================================
+// v4.5 单测: closestContextHit —— 上下文命中必须忽略文档根 (html/body) 上的框架类。
+// 实测回归: Wikipedia 在 <html> 上挂 vector-feature-limited-width-CONTENT-enabled,
+// 子串选择器 [class*="content"] 命中文档根 → 全页图片被判"正文上下文" → 页头 logo 误反色。
+// ============================================================
+(() => {
+  const hit = svi.closestContextHit;
+  assert.strictEqual(typeof hit, 'function', 'closestContextHit must be exported');
+
+  const savedBody = global.document.body;
+  const savedRoot = global.document.documentElement;
+  const rootStub = { matches: () => true, parentElement: null };   // 模拟 <html class="...content...">
+  const bodyStub = { matches: () => true, parentElement: rootStub };
+  global.document.body = bodyStub;
+  global.document.documentElement = rootStub;
+
+  try {
+    // 真实命中: 中间层确实匹配
+    const mid = { matches: (s) => s.indexOf('content') !== -1, parentElement: bodyStub };
+    const img = { matches: () => false, parentElement: mid };
+    assert.strictEqual(hit(img, '[class*="content"]'), mid, 'a genuine container hit must be returned');
+
+    // 根污染: 只有 <html> 匹配 → 必须返回 null (策略门不得据此判定正文上下文)
+    const plain = { matches: () => false, parentElement: bodyStub };
+    const img2 = { matches: () => false, parentElement: plain };
+    assert.strictEqual(hit(img2, '[class*="content"]'), null, 'html/body-level framework classes must be ignored (v4.5 regression)');
+
+    // 自身命中: 图片自己的类 (如 mw-logo-icon) 仍算 chrome 命中
+    const selfHit = { matches: (s) => s.indexOf('logo') !== -1, parentElement: bodyStub };
+    assert.strictEqual(hit(selfHit, '[class*="logo"]'), selfHit, 'self-class hit (mw-logo-icon style) must count');
+  } finally {
+    global.document.body = savedBody;
+    global.document.documentElement = savedRoot;
+  }
+  console.log('✓ v4.5 unit tests passed: closestContextHit ignores document-root framework classes');
+})();
+
 console.log('✓ v3.0 core unit tests passed: transformPixel / mergeSegments / lookupSegment / selectorStem / RuleLearner / Store / mediaDominantViewport / rect / hash32');
+
+
 
 // 显式退出: 脚本启动桩中的常驻定时器 (统计落盘 interval、3s 后的引擎初始化循环) 会阻止进程自然退出
 // v3.0: 延长至 1500ms —— 等待异步 Store (chrome.storage mock) 单测链完成

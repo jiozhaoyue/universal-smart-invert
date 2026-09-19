@@ -107,9 +107,19 @@ function runExtensionSmoke() {
     run_at: 'document_start',
     all_frames: true,
   }], 'content_scripts shape must match the design contract');
+  // v4.5: toolbar popup wired into the manifest and packed
+  assert.strictEqual(manifest.action && manifest.action.default_popup, 'popup.html', 'manifest.action.default_popup must point at popup.html');
+  for (const pf of ['popup.html', 'popup.js']) {
+    const p = path.join(__dirname, 'extension', pf);
+    assert.ok(fs.existsSync(p), `popup file must be emitted: ${pf}`);
+  }
+  const popupJs = fs.readFileSync(path.join(__dirname, 'extension', 'popup.js'), 'utf8');
+  assert.ok(popupJs.includes('svi-get-snapshot') && popupJs.includes('svi-site-power'), 'popup.js must speak the svi-* message protocol');
+  run(['--check', 'extension/popup.js']);
 
   const contentCode = fs.readFileSync(path.join(__dirname, 'extension', 'content.js'), 'utf8');
   assert.ok(contentCode.includes('var EXT_MODE = true'), 'content.js must carry the EXT_MODE prelude');
+  assert.ok(contentCode.includes('svi-get-snapshot'), 'content.js must register the svi-* popup message channel');
   run(['--check', 'extension/content.js']);
 
   const zipPath = path.join(__dirname, 'dist', `universal-smart-invert-extension-v${manifest.version}.zip`);
@@ -117,7 +127,7 @@ function runExtensionSmoke() {
   const zipBuf = fs.readFileSync(zipPath);
   const cd = readCentralDirectory(zipBuf);
   const names = cd.entries.map((e) => e.name);
-  for (const expected of ['manifest.json', 'content.js', 'icons/icon16.png', 'icons/icon32.png', 'icons/icon48.png', 'icons/icon128.png']) {
+  for (const expected of ['manifest.json', 'content.js', 'popup.html', 'popup.js', 'icons/icon16.png', 'icons/icon32.png', 'icons/icon48.png', 'icons/icon128.png']) {
     assert.ok(names.includes(expected), `zip central directory must include ${expected}`);
   }
   assert.ok(cd.entries.every((e) => e.method === 0), 'zip entries must be stored-mode');
@@ -1446,7 +1456,7 @@ async function main() {
     })).result.value;
     console.log('file:// result:', JSON.stringify(fileRes), 'pageErrors =', pageErrorCount);
     assert.strictEqual(fileRes.booted, true, 'script must boot on file:// pages');
-    assert.strictEqual(fileRes.version, '3.3.0', 'file:// page must report v3.3.0');
+    assert.strictEqual(fileRes.version, USERSRC_VERSION, 'file:// page must report the @version');
     assert.strictEqual(fileRes.hasPill, true, 'UI must be present on file:// pages');
     assert.strictEqual(fileRes.hasStorageSection, true, 'storage section (with file hint) must exist');
     assert.strictEqual(pageErrorCount, 0, 'file:// page must boot with zero uncaught page errors');
@@ -2179,6 +2189,87 @@ async function main() {
     assert.ok(fontClean, 'disabling font override and stroke must clear the gate classes');
 
     // ============================================================
+    // Scenario 20b (v4.5): settings row sync audit — every static row must
+    // display the live state value at modal open. v4.5 fix: inline
+    // `sec.add(ui.xxxRow(...))` rows were never registered into rowSyncs
+    // (ui.section().add registers into a section-local list nobody calls),
+    // so the 悬停显示原图 checkbox displayed "off" while the feature was on
+    // and the first user click wrote the OPPOSITE value (hover bug).
+    // ============================================================
+    console.log('[Test] Scenario 20b: settings row sync audit ...');
+    await sendCdp('Runtime.evaluate', {
+      expression: `(() => { window.__svi.ui.openSettingsModal(); return true; })()`,
+      returnByValue: true
+    });
+    await new Promise((r) => setTimeout(r, 300));
+    const rowAudit = (await sendCdp('Runtime.evaluate', {
+      expression: `(() => {
+        const prefs = window.__svi.prefs;
+        // v4.5: 按区块 id 圈定, 避免跨区文本误匹配 (如「本站图片特效」hint 含「图片特效模式」)
+        const findIn = (secId, text) => {
+          const sec = document.getElementById(secId);
+          if (!sec) return null;
+          return [...sec.querySelectorAll('.svi-site-check-row, .svi-modal-row')].find(r => r.textContent.includes(text)) || null;
+        };
+        const checkVal = (secId, text) => {
+          const row = findIn(secId, text);
+          if (!row) return null;
+          const cb = row.querySelector('input.svi-check');
+          return cb ? cb.checked : null;
+        };
+        const selectVal = (secId, text) => {
+          const row = findIn(secId, text);
+          if (!row) return null;
+          const sel = row.querySelector('select');
+          return sel ? sel.value : null;
+        };
+        return {
+          hoverRestore: { pref: prefs.hoverRestore !== false, shown: checkVal('svi-sec-appearance', '悬停显示原图') },
+          generalLight: { pref: prefs.imgGeneralLight !== false, shown: checkVal('svi-sec-image', '全浅色通用自适应检测') },
+          policy: { pref: prefs.imagePolicy, shown: selectVal('svi-sec-image', '智能图片策略') },
+          imgFxMode: { pref: prefs.imgFxMode, shown: selectVal('svi-sec-image', '图片特效模式') },
+          videoFxMode: { pref: prefs.videoFxMode, shown: selectVal('svi-sec-video', '视频特效引擎') },
+          timelineMode: { pref: prefs.timelineMode, shown: selectVal('svi-sec-video', '时间线记忆') },
+        };
+      })()`,
+      returnByValue: true
+    })).result.value;
+    console.log('Row sync audit:', JSON.stringify(rowAudit));
+    assert.strictEqual(rowAudit.hoverRestore.shown, rowAudit.hoverRestore.pref, 'hover-restore checkbox must display the live pref at modal open (v4.5 regression)');
+    assert.strictEqual(rowAudit.generalLight.shown, rowAudit.generalLight.pref, 'general-light checkbox must display the live pref at modal open (v4.5 regression)');
+    for (const key of ['policy', 'imgFxMode', 'timelineMode']) {
+      assert.strictEqual(rowAudit[key].shown, rowAudit[key].pref, key + ' select must display the live pref at modal open (v4.5 regression)');
+    }
+    if (rowAudit.videoFxMode.shown !== null) {
+      assert.strictEqual(rowAudit.videoFxMode.shown, rowAudit.videoFxMode.pref, 'videoFxMode select must display the live pref at modal open (v4.5 regression)');
+    }
+    // The toggle must be live-writable: flip hoverRestore off via the real row, class drops same-tick
+    const hoverFlip = (await sendCdp('Runtime.evaluate', {
+      expression: `(() => {
+        const row = [...document.querySelectorAll('.svi-site-check-row, .svi-modal-row')].find(r => r.textContent.includes('悬停显示原图'));
+        const cb = row.querySelector('input.svi-check');
+        cb.click();
+        return { checked: cb.checked, cls: document.documentElement.classList.contains('svi-hover-restore') };
+      })()`,
+      returnByValue: true
+    })).result.value;
+    assert.strictEqual(hoverFlip.checked, false, 'single click on the hover row must write pref=false');
+    assert.strictEqual(hoverFlip.cls, false, 'hover-restore gate class must drop same-tick on toggle-off');
+    // flip back for later scenarios
+    await sendCdp('Runtime.evaluate', {
+      expression: `(() => {
+        const row = [...document.querySelectorAll('.svi-site-check-row, .svi-modal-row')].find(r => r.textContent.includes('悬停显示原图'));
+        row.querySelector('input.svi-check').click();
+        return true;
+      })()`,
+      returnByValue: true
+    });
+    await sendCdp('Runtime.evaluate', {
+      expression: `(() => { const b = document.querySelector('.svi-modal-close'); if (b) b.click(); return true; })()`,
+      returnByValue: true
+    });
+
+    // ============================================================
     // Scenario 21 (v4.2 P1/P2): dynamic dark theme tuning — tone +
     // brightness sliders re-map bucket colors on /login-page (real clicks).
     // ============================================================
@@ -2188,11 +2279,16 @@ async function main() {
     const baseBg = (await sendCdp('Runtime.evaluate', {
       expression: `(() => ({
         bgrOn: document.documentElement.hasAttribute('data-svi-bgr-on'),
-        bodyBg: getComputedStyle(document.body).backgroundColor
+        bodyBg: getComputedStyle(document.body).backgroundColor,
+        bodyTag: document.body.getAttribute('data-svi-bgr-bg'),
+        flashguard: document.documentElement.hasAttribute('data-svi-flashguard')
       }))()`,
       returnByValue: true
     })).result.value;
     assert.strictEqual(baseBg.bgrOn, true, 'login page must have bgReplace active');
+    assert.strictEqual(baseBg.flashguard, false, 'flash guard must hand off after bgReplace activates');
+    assert.ok(baseBg.bodyTag, 'body must carry the base-color bucket on a fresh load (v4.5 flash-guard poisoning regression), got: ' + baseBg.bodyTag);
+    assert.notStrictEqual(baseBg.bodyBg, 'rgb(250, 250, 250)', 'body base color must be re-mapped dark on a fresh load (v4.5 regression)');
     await sendCdp('Runtime.evaluate', {
       expression: `(() => { window.__svi.ui.openSettingsModal(); const t = [...document.querySelectorAll('.svi4-tab')].find(b => b.textContent === '全局'); t.click(); return !!document.getElementById('svi-sec-dynamic'); })()`,
       returnByValue: true

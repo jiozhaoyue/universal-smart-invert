@@ -1,7 +1,7 @@
 # 全网通用智能视频与图片反色 (Universal Smart Video & Image Invert)
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-4.3.0-blue.svg?style=flat-square" alt="Version">
+  <img src="https://img.shields.io/badge/version-4.5.0-blue.svg?style=flat-square" alt="Version">
   <img src="https://img.shields.io/badge/license-AGPL--3.0-green.svg?style=flat-square" alt="License">
   <img src="https://img.shields.io/badge/Tampermonkey-Supported-orange.svg?style=flat-square" alt="Tampermonkey">
   <img src="https://img.shields.io/badge/ScriptCat-Supported-purple.svg?style=flat-square" alt="ScriptCat">
@@ -57,6 +57,30 @@
   - `Alt + I`：快速切换视频反色（带有人工覆盖意图保护）；
   - `Alt + A`：快速开启 / 关闭智能自适应感知模式；
   - `Alt + 鼠标左键`：强制切换网页任意单张图片或 SVG 反色 / 复原。
+
+---
+
+## 🆕 v4.5 重大升级 (弹窗面板 · 反色正确性 · 规则分发)
+
+### 1. 🧯 反色正确性修复 (真实站点视觉测试发现)
+- **设置行回显系统性修复**：内联添加的设置行（悬停显示原图、智能图片策略、全浅色通用自适应检测、图片特效模式、视频特效引擎、时间线记忆）此前从不回显真实状态——"悬停显示原图"显示为关而功能实际开着，首次点击反而写入相反值。现在所有行都随面板打开同步真实偏好；
+- **文档根上下文污染修复**：`[class*="content"]` 等子串选择器会命中 `<html>` 上的框架类（实测 Wikipedia 的 `vector-feature-limited-width-content-enabled`），导致全页图片被判"正文上下文"、页头 logo 保护失效。上下文命中现在忽略 html/body；
+- **透明底图形守护**：透明占比高的"浅色"判定一律保持原样——透明底 logo/徽标是为其所在背景设计的，反色必然破坏；
+- **防闪光守卫零白交接**：深色站点从"黑→深色"绝不闪白（守卫等到底色桶就绪才撤黑，2.5s 兜底）；并修复守卫黑底污染首扫采样导致页面底色桶缺失的缺陷；
+- **空闲调度硬兜底**：`requestIdleCallback` 在部分环境可被无限推迟（实测 4s+），现在与 setTimeout 双通道竞速，扫描/重扫确定性完成。
+
+### 2. 🪟 Dark Reader 式工具栏弹窗 (扩展)
+- 点击扩展图标即出弹窗：**本站电源开关、反色预设（柔和灰/夜间纯黑）、图片策略、图片特效模式、图片反色与悬停开关、本页已反色统计**；
+- 弹窗命令与页面内设置面板走同一批处理器（`setSitePower`/行处理器），语义零分歧；
+- 无内容脚本的浏览器内部页自动显示"本页不可用"。
+
+### 3. 📦 规则分发 (导入/导出/订阅)
+- **从链接导入**：设置 → 数据与备份 → 从链接导入，填 `svi-rules` 规则包 URL 即合并（GM 通道绕开页面 CSP）；
+- **导出学习成果**：只含 Alt+点击修正积累的特征/命中数，不含浏览记录，可安全分享；接收方导入并合并（同特征保留命中更高者）；
+- **一体化规则包** `rules/svi-pack.import.json`：Dark Reader 暗色名单 + 内置适配的可翻译子集，一个文件分发全部规则（机器生成、合并幂等、永不冲突）。
+
+### 4. 📱 移动端与响应式
+- 窄屏（≤520px）设置面板自动全宽化、输入控件 16px 起（防 iOS 聚焦缩放）、触屏粗指针下隐藏停靠拖拽把手并加大触控目标。
 
 ---
 
