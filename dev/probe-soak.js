@@ -7,7 +7,8 @@ const http = require('http');
 const os = require('os');
 
 const CHROME = process.env.SVI_CHROME_PATH || 'C:/Program Files/Google/Chrome/Application/chrome.exe';
-const CDP_PORT = 9244;
+// v4.6: CDP 端口按 PID 派生 (并行探针端口冲突是已知事故, 见 AGENTS.md 基建教训)
+const CDP_PORT = 9244 + (process.pid % 400);
 const userDataDir = fs.mkdtempSync(os.tmpdir() + '/svi-soak-');
 const chrome = spawn(CHROME, [
   `--remote-debugging-port=${CDP_PORT}`, `--user-data-dir=${userDataDir}`,

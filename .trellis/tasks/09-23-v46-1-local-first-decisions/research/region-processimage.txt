@@ -1,0 +1,60 @@
+5436:     async processImage(img) {
+5437:       if (runtime.siteActive === false) return; // v4.0 站点挂起闸
+5438:       const src = getMediaSrc(img);
+5439:       if (!src) return;
+5440: 
+5441:       try {
+5442:         if (img.getAttribute && img.getAttribute('data-svi-checked-src') === src) return;
+5443:       } catch (e) { /* ignore */ }
+5444: 
+5445:       const profile = getSiteProfile();
+5446:       if (state.imageInvert === false || profile.enabled === false || profile.imageInvert === false) return;
+5447: 
+5448:       // v4.6 回退开关: localFirstDecide=false → v4.5 旧行为 (未解码挂 load 等网络, 无本地保守判定)
+5449:       if (state.localFirstDecide === false) {
+5450:         const ready = (img.complete !== undefined)
+5451:           ? (img.complete && (img.naturalWidth > 0 || !img.getAttribute('src')))
+5452:           : true;
+5453:         if (ready || typeof img.addEventListener !== 'function') {
+5454:           await this.decideImage(img, src);
+5455:         } else {
+5456:           img.addEventListener('load', () => {
+5457:             this.decideImage(img, getMediaSrc(img));
+5458:           }, { once: true });
+5459:           img.addEventListener('error', () => {
+5460:             this.markFailure(img, src);
+5461:           }, { once: true });
+5462:         }
+5463:         return;
+5464:       }
+5465: 
+5466:       // —— v4.6 本地优先三档分派 (R1/R2/R3): 网络语义的 load 仅作档位升级增强通道 ——
+5467:       const ev = localEvidence(img);
+5468:       if (ev.tier === 'A' || typeof img.addEventListener !== 'function') {
+5469:         // 档 A (像素可读) → 既有统一决策管线
+5470:         await this.decideImage(img, src);
+5471:         return;
+5472:       }
+5473: 
+5474:       if (ev.tier === 'B') {
+5475:         // 档 B (布局盒已知 / 像素未解码, 典型: 占位图、懒加载未达):
+5476:         // 立即用本地证据出保守结论, 绝不等网络 (弱网抢先主路径)
+5477:         const known = this.decisionBySrc.get(src);
+5478:         if (known && !isProvisionalDecision(known)) {
+5479:           this.applyDecision(img, src, known); // 已有权威结论 → 直接继承
+5480:           this.registerPending(img, src);
+5481:           return;
+5482:         }
+5483:         // 规则结论 (手动/元素/学习/种子) 不依赖像素, 可在字节交付前落地 (decide-once 同序)
+5484:         await this.decideImage(img, src, { localOnly: true });
+5485:         const decided = this.decisionBySrc.get(src);
+5486:         if (!decided) {
+5487:           // 无规则可依 → 本地上下文保守结论: keep (绝不凭 cssContext 反色, design §5)
+5488:           const reason = (ev.inlineHint.width != null || ev.inlineHint.height != null)
+5489:             ? 'local-inline-hint' : 'local-context';
+5490:           this.applyDecision(img, src, this.recordDecision(src, 'keep', reason, false, true));
+5491:         }
+5492:         this.registerPending(img, src);   // 等 load 升级档 A (一次性监听, 无悬挂状态)
+5493:         this.attachPendingWake(img, src);
+5494:         return;
+5495:       }

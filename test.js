@@ -1406,6 +1406,10 @@ console.log('✓ v3.0 core unit tests passed: transformPixel / mergeSegments / l
 
 // 显式退出: 脚本启动桩中的常驻定时器 (统计落盘 interval、3s 后的引擎初始化循环) 会阻止进程自然退出
 // v3.0: 延长至 1500ms —— 等待异步 Store (chrome.storage mock) 单测链完成
+// v4.6: 本地优先判定单测 (localEvidence / 档 B / pending 唤醒 / R5 收敛) 同时限内完成
+require('./test-local-first.js');
+
+
 setTimeout(() => {
   console.log('✓ All unit, benchmark, multi-light-color, and v2.0 site-engine tests passed successfully!');
   process.exit(0);

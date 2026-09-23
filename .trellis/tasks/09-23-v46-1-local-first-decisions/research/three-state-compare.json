@@ -1,0 +1,48 @@
+{
+  "rows": [
+    {
+      "id": "i0",
+      "fast": "invert/pixel",
+      "throttle": "invert/pixel",
+      "offline": "invert/pixel",
+      "consistent": true
+    },
+    {
+      "id": "i1",
+      "fast": "invert/pixel",
+      "throttle": "invert/pixel",
+      "offline": "invert/pixel",
+      "consistent": true
+    },
+    {
+      "id": "i2",
+      "fast": "invert/pixel",
+      "throttle": "invert/pixel",
+      "offline": "invert/pixel",
+      "consistent": true
+    },
+    {
+      "id": "i5",
+      "fast": "invert/pixel",
+      "throttle": "invert/pixel",
+      "offline": "invert/pixel",
+      "consistent": true
+    },
+    {
+      "id": "i10",
+      "fast": "invert/pixel",
+      "throttle": "invert/pixel",
+      "offline": "invert/pixel",
+      "consistent": true
+    },
+    {
+      "id": "i15",
+      "fast": "invert/pixel",
+      "throttle": "invert/pixel",
+      "offline": "invert/pixel",
+      "consistent": true
+    }
+  ],
+  "decidedSteadyConsistent": 6,
+  "inconsistent": 0
+}
