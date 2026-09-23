@@ -240,6 +240,9 @@
     settingsLayout: 'center',  // 设置页布局: 'center'(居中窗口) | 'left'(靠左停靠) | 'right'(靠右停靠)
     settingsWidth: 420,        // 停靠形态宽度 px (320 ~ 600)
     elementRules: [],          // 元素级规则: [{ id, pattern, selector, action: 'invert'|'protect', note, createdAt }]
+
+    // ===== v4.6 新增偏好: 本地优先判定 (R1/R2: 判定依据 = 本地已渲染状态, 与网络交付解耦) =====
+    localFirstDecide: true,    // 本地优先判定总开关: false 回退 v4.5 旧行为 (未解码等 load, 不做本地保守判定)
   };
 
   // 运行时状态 (仅存于内存, 每个标签页独立, 绝不写入存储 —— 标签页隔离)
@@ -924,6 +927,8 @@
     if (['balanced', 'conservative', 'aggressive'].indexOf(merged.imagePolicy) === -1) merged.imagePolicy = 'balanced';
     merged.hoverRestore = merged.hoverRestore !== false;
     merged.eagerScanBudget = Math.round(clampNumber(merged.eagerScanBudget, 10, 500, 80));
+    // v4.6 字段规范化: 本地优先判定开关 (布尔; 损坏数据回退默认开)
+    merged.localFirstDecide = merged.localFirstDecide !== false;
     // v3.2 字段规范化: 视频画面调节对象逐字段钳制 (损坏数据回退默认)
     merged.videoTune = { ...defaults.videoTune, ...(safeStored.videoTune || {}) };
     merged.videoTune.enabled = merged.videoTune.enabled === true;
@@ -4689,6 +4694,86 @@
   const ruleLearner = new RuleLearner();
 
   // ==========================================
+  // 14.5 v4.6 本地证据分类 (R1/R2: 判定依据 = 本地已渲染状态, 与网络交付解耦)
+  // ==========================================
+  // 档位 (design.md §2):
+  //   A  像素可读 (complete && naturalWidth>0)     → 既有像素管线 (analyzeSrc)
+  //   B  像素未解码但有布局盒 (占位图/懒加载)      → 本地保守判定: 只允许 keep 或既有规则结论
+  //   C  连布局都没有 (未布局/隐藏/零尺寸)         → 只登记 pending, 由 load/IO/Mutation 唤醒
+  // 只读无副作用: 绝不写属性/样式, 盒尺寸一次性读取, 不做强制布局; 祖先上下文仅 ≤3 层。
+  function localEvidence(el) {
+    const ev = {
+      tier: 'C',
+      hasDecodedPixels: false,
+      box: { w: 0, h: 0 },
+      visible: false,
+      cssContext: { ancestorBg: null },          // 最近祖先背景 computed 串 (仅审计, 不参与反色决策)
+      inlineHint: { width: null, height: null }, // 元素本地声明的尺寸提示 (弱网下先于字节可知)
+    };
+    if (!el || el.nodeType !== 1) return ev;
+
+    // 已解码像素: img 系列看 complete+naturalWidth;
+    // 无 complete 生命周期的媒体 (SVG <image> / input[type=image]) 视作本地可判
+    // (与 v4.5 的 ready=true 分支对齐 —— 绝不落入档 C 等一个不会到来的 load)
+    try {
+      if (typeof el.complete === 'boolean') {
+        ev.hasDecodedPixels = el.complete && (el.naturalWidth > 0);
+      } else {
+        ev.hasDecodedPixels = true;
+      }
+    } catch (e) { /* ignore */ }
+
+    // 布局盒 + 可见性
+    try {
+      let w = 0;
+      let h = 0;
+      if (typeof el.getBoundingClientRect === 'function') {
+        const rect = el.getBoundingClientRect();
+        w = Math.round(rect.width) || 0;
+        h = Math.round(rect.height) || 0;
+      }
+      if (!w || !h) {
+        w = w || el.clientWidth || 0;
+        h = h || el.clientHeight || 0;
+      }
+      ev.box.w = w;
+      ev.box.h = h;
+      ev.visible = w > 0 && h > 0;
+    } catch (e) { /* ignore */ }
+
+    // 内联尺寸提示 (HTML width/height 属性声明的本地尺寸)
+    try {
+      const aw = el.getAttribute ? el.getAttribute('width') : null;
+      const ah = el.getAttribute ? el.getAttribute('height') : null;
+      const num = (v) => (v != null && v !== '' && !isNaN(parseFloat(v)) ? Math.round(parseFloat(v)) : null);
+      ev.inlineHint.width = num(aw);
+      ev.inlineHint.height = num(ah);
+    } catch (e) { /* ignore */ }
+
+    // 有限层祖先背景上下文 (≤3 层; 只读 computed, 供审计与保守规则扩展)
+    try {
+      let node = el.parentElement;
+      for (let i = 0; node && i < 3; i++, node = node.parentElement) {
+        if (typeof window.getComputedStyle !== 'function') break;
+        const bg = window.getComputedStyle(node).backgroundColor;
+        if (bg && bg !== 'rgba(0, 0, 0, 0)' && bg !== 'transparent') {
+          ev.cssContext.ancestorBg = bg;
+          break;
+        }
+      }
+    } catch (e) { /* ignore */ }
+
+    ev.tier = ev.hasDecodedPixels ? 'A' : (ev.visible ? 'B' : 'C');
+    return ev;
+  }
+
+  // 临时决策判定 (v4.6 C4/C5): 档 B 本地保守结论落快照时携带 provisional 标记 ——
+  // 元素本地证据升级 (占位图解码完成) 时允许被权威结论 force 刷新; 同档输入绝不翻转。
+  function isProvisionalDecision(d) {
+    return !!(d && d.provisional === true);
+  }
+
+  // ==========================================
   // 15. 网页图片与矢量图智能反色引擎 (ImageInvertEngine)
   //     v3.0: 学习规则优先级注入 + 媒体全覆盖 (SVG image / input[type=image] / Shadow DOM)
   //     v3.1: 统一决策管线 decideImage (R1/R2) —— 所有处理入口 (IO / 变更 flush / eager / 重扫)
@@ -4708,6 +4793,8 @@
       this.maxCacheSize = 1000;
       this.maxDecisionSize = 2000;
       this.srcCount = new Map();      // 同 src 重复计数 (小元素重复判定), 上限 500
+      // v4.6 本地优先: 档 B/C pending 登记表 (有界 LRU ≤500; load/IO/Mutation 均可唤醒重判)
+      this.pendingEls = new Map();
       this.pendingMutNodes = new Set();
       this.mutTimer = null;
       // v3.0: 覆盖 img + svg + 内联 SVG image + input[type=image]
@@ -4754,6 +4841,8 @@
       this._eagerTimers.push(setTimeout(() => this.runEagerPass(), 2500));
       this._eagerTimers.push(setTimeout(() => this.runEagerPass(), 6000));
       this._eagerTimers.push(setTimeout(() => this.runEagerPass(), 12000));
+      // v4.6: 上述三轮仅作兜底补扫 (覆盖引擎启动后才出现的媒体); 本地优先判定已由
+      // 首轮 runEagerPass + IO/Mutation 事件完成, 不再以补扫作为主路径 (R3)。
 
       const mo = new MutationObserver((mutations) => {
         // 变更记录先合并去重, ≤100ms 后批量处理 (性能: 避免高频 DOM 抖动逐条扫描)
@@ -4813,7 +4902,9 @@
         } else if (typeof el.complete === 'boolean') {
           loaded = el.complete;
         }
-        if (!loaded) return;
+        // v4.6 本地优先 (R3): 未解码不再跳过 —— 档 B 立即本地保守判定 / 档 C 登记 pending;
+        // eager 升级为首屏抢先主路径 (回退开关 localFirstDecide=false 维持 v4.5 旧行为)
+        if (!loaded && state.localFirstDecide === false) return;
         used++;
         self.processImage(el);
       };
@@ -4852,7 +4943,8 @@
           if (el.getAttribute && el.getAttribute('data-svi-checked-src') === src) return; // 本元素已决
         } catch (e) { /* ignore */ }
         const known = self.decisionBySrc.get(src);
-        if (known && fastApplied < 200) {
+        // v4.6 C4: 档 B 临时结论不走快路径继承 —— provisional 快照留给 IO/eager 通道做档位升级重判
+        if (known && fastApplied < 200 && !isProvisionalDecision(known)) {
           fastApplied++;
           self.applyDecision(el, src, known);
           return;
@@ -4930,6 +5022,7 @@
       this.cache.clear();
       this.decisionBySrc.clear();
       this.failures.clear();
+      if (this.pendingEls) this.pendingEls.clear(); // v4.6: pending 登记随全量重扫一并清空
       const bg = window.__svi && window.__svi.engines ? window.__svi.engines.bgImage : null;
       if (bg && bg.cache) bg.cache.clear();
       const root = document.body || document.documentElement;
@@ -5109,14 +5202,17 @@
 
     // 记录最终决策 (decide-once): 同一 src 只允许记录一次;
     // 后续任何入口命中快照即同步应用, 绝不重算 (F3 根因修复)。
-    // 例外: force=true (手动覆盖是最高优先级决策源, 必须刷新既有快照,
+    // 例外1: force=true (手动覆盖是最高优先级决策源, 必须刷新既有快照,
     // 否则变更快路径会用旧决策覆盖用户显式选择)
-    recordDecision(src, verdict, reason, force) {
+    // 例外2 (v4.6 C4): provisional=true 标记档 B 临时结论 —— 元素本地证据升级
+    // (占位图解码完成) 时允许权威结论 force 刷新; 同档输入绝不翻转。
+    recordDecision(src, verdict, reason, force, provisional) {
       if (!force && this.decisionBySrc.has(src)) return this.decisionBySrc.get(src);
       if (this.decisionBySrc.size >= this.maxDecisionSize) {
         this.decisionBySrc.delete(this.decisionBySrc.keys().next().value);
       }
       const d = { verdict, reason: reason || '', at: Date.now() };
+      if (provisional) d.provisional = true;
       this.decisionBySrc.set(src, d);
       return d;
     }
@@ -5144,10 +5240,12 @@
     // 优先级: 手动覆盖 > 元素规则(v3.3) > 学习规则 > 种子保护/强制反色 > 小元素门 + 策略门 > 像素分析。
     // decide-once: 决策一经达成即冻结 (decisionBySrc), 仅 clearCacheAndRescan 显式重置。
     // ==========================================
-    async decideImage(img, src) {
+    async decideImage(img, src, opts) {
       if (!src) return;
       const profile = getSiteProfile();
       if (state.imageInvert === false || profile.enabled === false || profile.imageInvert === false) return;
+      // v4.6 本地优先 (档 B 通道): localOnly=true 只走规则前缀, 到像素门前止步 (R1/R3)
+      const localOnly = !!(opts && opts.localOnly);
 
       // —— decide-once: 本元素该 src 已决 → 直接返回 ——
       try {
@@ -5173,11 +5271,18 @@
         return;
       }
 
-      // —— 全局决策快照命中: 同步应用 (同 src 新元素/换源元素绝不重算, F3 修复核心) ——
+      // —— 全局决策快照命中 ——
+      // v4.6 C4 档位升级: 档 B 临时结论 (provisional, 占位期间的本地保守判定) 不早退 ——
+      // 元素本地证据升级 (占位图解码完成) 属于新证据, 删除临时快照后按全管线重判;
+      // 同档输入之间仍绝不翻转 (decide-once 语义不变)。
       const known = this.decisionBySrc.get(src);
       if (known) {
-        this.applyDecision(img, src, known);
-        return;
+        if (isProvisionalDecision(known)) {
+          this.decisionBySrc.delete(src);
+        } else {
+          this.applyDecision(img, src, known);
+          return;
+        }
       }
 
       // 2. 自学习规则 (tag+#id+首类 词干聚合, 命中 ≥ learnHits 生效; 优先于内置种子规则)
@@ -5229,6 +5334,10 @@
         return;
       }
 
+      // v4.6 本地优先 (档 B 止步门): 规则前缀全部未命中 → 绝不做像素分析 (R1: 不以网络为门);
+      // 返回信号由档 B 调用方落本地保守结论 (keep; 绝不凭 cssContext 反色 —— design §5 约束)
+      if (localOnly) return { localOnly: true };
+
       // 7. 分析失败有界重试 (R2): 60s TTL 内静默 (未决); 累计 ≥3 次 → 永久跳过决策。
       //    位置刻意晚于全部确定性门 (覆盖/学习/种子/小元素/策略), 绝不阻塞更优先的决策来源
       const fail = this.failures.get(src);
@@ -5270,6 +5379,17 @@
         // 网络或格式异常: 不落决策 (未决), 记录失败 TTL 防抖 (≤3 次, 之后永久跳过)
         this.markFailure(img, src);
         return;
+      }
+
+      // v4.6 竞态复核: await 期间落盘的更高优先级决策 (手动覆盖等) 不可被像素结论覆盖;
+      // 档 B 临时结论 (provisional) 让位于像素权威结论 —— 档位升级的最终落点 (C4)
+      const raced = this.decisionBySrc.get(src);
+      if (raced) {
+        if (!isProvisionalDecision(raced)) {
+          this.applyDecision(img, src, raced);
+          return;
+        }
+        this.decisionBySrc.delete(src);
       }
 
       if (this.cache.size >= this.maxCacheSize) {
@@ -5364,20 +5484,95 @@
       const profile = getSiteProfile();
       if (state.imageInvert === false || profile.enabled === false || profile.imageInvert === false) return;
 
-      const ready = (img.complete !== undefined)
-        ? (img.complete && (img.naturalWidth > 0 || !img.getAttribute('src')))
-        : true;
-      if (ready || typeof img.addEventListener !== 'function') {
-        await this.decideImage(img, src);
-      } else {
-        // 晚加载: load 驱动决策; error 登记失败 (有界重试), 均为一次性监听, 无悬挂状态
-        img.addEventListener('load', () => {
-          this.decideImage(img, getMediaSrc(img));
-        }, { once: true });
-        img.addEventListener('error', () => {
-          this.markFailure(img, src);
-        }, { once: true });
+      // v4.6 回退开关: localFirstDecide=false → v4.5 旧行为 (未解码挂 load 等网络, 无本地保守判定)
+      if (state.localFirstDecide === false) {
+        const ready = (img.complete !== undefined)
+          ? (img.complete && (img.naturalWidth > 0 || !img.getAttribute('src')))
+          : true;
+        if (ready || typeof img.addEventListener !== 'function') {
+          await this.decideImage(img, src);
+        } else {
+          img.addEventListener('load', () => {
+            this.decideImage(img, getMediaSrc(img));
+          }, { once: true });
+          img.addEventListener('error', () => {
+            this.markFailure(img, src);
+          }, { once: true });
+        }
+        return;
       }
+
+      // —— v4.6 本地优先三档分派 (R1/R2/R3): 网络语义的 load 仅作档位升级增强通道 ——
+      const ev = localEvidence(img);
+      if (ev.tier === 'A' || typeof img.addEventListener !== 'function') {
+        // 档 A (像素可读) → 既有统一决策管线
+        await this.decideImage(img, src);
+        return;
+      }
+
+      if (ev.tier === 'B') {
+        // 档 B (布局盒已知 / 像素未解码, 典型: 占位图、懒加载未达):
+        // 立即用本地证据出保守结论, 绝不等网络 (弱网抢先主路径)
+        const known = this.decisionBySrc.get(src);
+        if (known && !isProvisionalDecision(known)) {
+          this.applyDecision(img, src, known); // 已有权威结论 → 直接继承
+          this.registerPending(img, src);
+          return;
+        }
+        // 规则结论 (手动/元素/学习/种子) 不依赖像素, 可在字节交付前落地 (decide-once 同序)
+        await this.decideImage(img, src, { localOnly: true });
+        const decided = this.decisionBySrc.get(src);
+        if (!decided) {
+          // 无规则可依 → 本地上下文保守结论: keep (绝不凭 cssContext 反色, design §5)
+          const reason = (ev.inlineHint.width != null || ev.inlineHint.height != null)
+            ? 'local-inline-hint' : 'local-context';
+          this.applyDecision(img, src, this.recordDecision(src, 'keep', reason, false, true));
+        }
+        this.registerPending(img, src);   // 等 load 升级档 A (一次性监听, 无悬挂状态)
+        this.attachPendingWake(img, src);
+        return;
+      }
+
+      // 档 C (连布局都没有): 只登记不判定 (C3: 不写 checked-src / 不落快照),
+      // 由 load / IO 交叉 / Mutation 事件自然唤醒重判
+      this.registerPending(img, src);
+      this.attachPendingWake(img, src);
+    }
+
+    // —— v4.6 档 B/C pending 登记表 (有界 LRU ≤500; 可被 load / IO / Mutation 唤醒重判) ——
+    registerPending(el, src) {
+      if (!this.pendingEls) this.pendingEls = new Map();
+      if (this.pendingEls.has(el)) this.pendingEls.delete(el);
+      else if (this.pendingEls.size >= 500) {
+        this.pendingEls.delete(this.pendingEls.keys().next().value);
+      }
+      this.pendingEls.set(el, { src, at: Date.now() });
+    }
+
+    wakePending(el) {
+      if (!this.pendingEls) return null;
+      const rec = this.pendingEls.get(el) || null;
+      if (rec) this.pendingEls.delete(el);
+      return rec;
+    }
+
+    // 档位升级唤醒 (v4.6): load = 新证据到达 → 清 B 档标记后按全管线重判;
+    // error = 失败登记 (有界重试)。均为一次性监听, 无长期悬挂。
+    attachPendingWake(img, src) {
+      if (typeof img.addEventListener !== 'function') return;
+      img.addEventListener('load', () => {
+        this.wakePending(img);
+        try {
+          if (img.getAttribute && img.getAttribute('data-svi-checked-src') === src) {
+            img.removeAttribute('data-svi-checked-src');
+          }
+        } catch (e) { /* ignore */ }
+        this.processImage(img);
+      }, { once: true });
+      img.addEventListener('error', () => {
+        this.wakePending(img);
+        this.markFailure(img, src);
+      }, { once: true });
     }
   }
 
@@ -8164,6 +8359,8 @@
       // 不可依赖, 且合并本身幂等去重, 直接执行) + 仅学习成果的可分享小包
       sec.appendChild(ui.infoLine('规则分发：填入 svi-rules 规则包链接拉取合并（重复条目自动去重，可重复导入）；学习成果包只含修正特征与命中数，可安全分享。').row);
       const packRow = document.createElement('div');
+      // v4.6 R5: 手动导入通道明示 (需联网; 脚本自身绝不在启动/扫描路径自动联网)
+      sec.appendChild(ui.infoLine('以下为手动导入通道：需联网拉取，仅在你点击按钮时执行；脚本不会在启动或扫描时自动联网。').row);
       packRow.className = 'svi-er-form';
       const packInput = document.createElement('input');
       packInput.type = 'text';
@@ -9795,12 +9992,17 @@
   window.__svi = {
     version: SCRIPT_VERSION,
     runtime,
-    prefs: state,
+    // v4.6: prefs 改为动态 getter —— Store.onRemoteLoaded 重指派 state 后,
+    // 调试/单测句柄始终引用活状态, 消除句柄脱钩
+    get prefs() { return state; },
     get profile() { return getSiteProfile(); },
     resolveProfile: getSiteProfile,
     resolveSiteProfile,
     hostMatchesPattern,
     classifySmallElement,
+    // v4.6 本地优先判定 (单测契约): 证据分档与临时结论判定
+    localEvidence,
+    isProvisionalDecision,
     mapLightToDark,
     mapDarkToLight,
     mapBorderToDark,
@@ -9857,7 +10059,7 @@
     Store.onRemoteLoaded = () => {
       try {
         state = loadState();
-        window.__svi.prefs = state;
+        // v4.6: prefs 已是 getter, 永远引用活 state, 不再需要显式回写
         updateImageFilterCss();
         applyVideoTune();
         updateFontCss();

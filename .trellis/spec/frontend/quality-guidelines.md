@@ -249,3 +249,39 @@ rules below are battle-tested conventions from v1.4.0 → v2.0.0; follow them fo
       overrides still winning.
 - [ ] README.md / README_EN.md / `@version` / `@description` updated together and claims match
       actual behavior (no over-claiming perf numbers).
+
+---
+
+## v4.6 Additions (local-first decisions, network-independent judging)
+
+- **Decision evidence is local-first; network delivery is only an upgrade channel.**
+  `localEvidence(el)` (§14.5) classifies each media element into tier A (decoded pixels →
+  pixel pipeline), tier B (laid-out but undecoded placeholder → immediate conservative local
+  verdict), tier C (no layout → register-only). `processImage` never gates on `complete`:
+  the eager pre-scroll pass now feeds tier B/C elements through the same unified pipeline
+  (rollback switch `state.localFirstDecide=false` restores v4.5 behavior and is unit-locked).
+- **Tier B is conservative by contract**: only `keep` (reason `local-context` /
+  `local-inline-hint`) or an existing rule verdict (manual/element/learned/seed) may be
+  recorded — never an invert from cssContext alone. Provisional snapshots carry
+  `provisional: true` on the decision object.
+- **Tier upgrades are the one sanctioned decide-once refresh** (same precedent as manual
+  overrides): when decoded evidence arrives (load via `attachPendingWake`), the provisional
+  snapshot is deleted and the full pipeline re-decides; same-tier re-entry must never flip
+  a verdict. After any await inside `decideImage`, re-read the snapshot: a racing
+  authoritative decision wins; only a provisional one yields to the pixel verdict.
+- **Pending registry**: `pendingEls` is a bounded LRU (≤500) cleared by
+  `clearCacheAndRescan`; wake channels are load / IO re-entry / Mutation — never a hanging
+  timeout. Media without a `complete` lifecycle (SVG `<image>`, `input[type=image]`)
+  classify as tier A (v4.5 `ready=true` parity) — do NOT send them to tier C or they never
+  decide (bench Scenario 9 regression).
+- **Zero automatic network paths**: `gmFetchText` has exactly one call site, inside
+  `importRulesFromUrl` (manual button only; static assert in test-local-first.js).
+  `@connect *` stays solely for that plus the cross-origin pixel-sampling blob fallback
+  (`gmFetchBlob` fetches the image's own data, not telemetry) — documented in the header
+  block and the 数据与备份 UI (手动导入通道 label). Never add startup/scan-time fetches.
+- **Probe infrastructure**: CDP ports and shot directories derive from `process.pid`
+  (parallel-agent collisions are a known incident). `dev/probe-weaknet.js` reproduces
+  throttled states (300kbps/400ms RTT) with a self-hosted delayed server — the
+  network-coupled decision latency (956ms→18s+ undecided) is the bisected v3.1.0 regression
+  signature (task 09-23-v4.6-1 research/bisect-report.md); three-state steady decision
+  equality (fast/throttle/offline) is asserted via `dev/compare-states.js`.
