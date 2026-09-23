@@ -1,0 +1,243 @@
+{
+  "url": "file:///D:/Repo/Github-repo/Pubilc/Dark-viewer/.worktrees/v46-impl-4/dev/fixtures/dark-veil.html",
+  "sviVersion": "4.5.0",
+  "enginePresent": true,
+  "totalChecked": 18,
+  "cases": [
+    {
+      "k": "A",
+      "inv": false,
+      "checked": true,
+      "verdict": "keep",
+      "reason": "masked-dark",
+      "mctx": {
+        "masked": true,
+        "reason": "ancestor-veil",
+        "veilLum": 0,
+        "coverage": 1
+      }
+    },
+    {
+      "k": "B",
+      "inv": true,
+      "checked": true,
+      "verdict": "invert",
+      "reason": "pixel",
+      "mctx": {
+        "masked": false,
+        "reason": "",
+        "veilLum": 0,
+        "coverage": 0
+      }
+    },
+    {
+      "k": "C",
+      "inv": true,
+      "checked": true,
+      "verdict": "invert",
+      "reason": "pixel",
+      "mctx": {
+        "masked": false,
+        "reason": "",
+        "veilLum": 0,
+        "coverage": 0
+      }
+    },
+    {
+      "k": "D",
+      "inv": false,
+      "checked": true,
+      "verdict": "keep",
+      "reason": "pixel",
+      "mctx": {
+        "masked": true,
+        "reason": "ancestor-veil",
+        "veilLum": 0,
+        "coverage": 1
+      }
+    },
+    {
+      "k": "E",
+      "inv": false,
+      "checked": true,
+      "verdict": "keep",
+      "reason": "masked-dark",
+      "mctx": {
+        "masked": true,
+        "reason": "sibling-veil",
+        "veilLum": 10,
+        "coverage": 1
+      }
+    },
+    {
+      "k": "F",
+      "inv": false,
+      "checked": true,
+      "verdict": "keep",
+      "reason": "masked-dark",
+      "mctx": {
+        "masked": true,
+        "reason": "self-opacity-over-dark",
+        "veilLum": 16,
+        "coverage": 1
+      }
+    },
+    {
+      "k": "ctl-1",
+      "inv": true,
+      "checked": true,
+      "verdict": "invert",
+      "reason": "pixel",
+      "mctx": {
+        "masked": false,
+        "reason": "",
+        "veilLum": 0,
+        "coverage": 0
+      }
+    },
+    {
+      "k": "ctl-2",
+      "inv": true,
+      "checked": true,
+      "verdict": "invert",
+      "reason": "pixel",
+      "mctx": {
+        "masked": false,
+        "reason": "",
+        "veilLum": 0,
+        "coverage": 0
+      }
+    },
+    {
+      "k": "ctl-3",
+      "inv": true,
+      "checked": true,
+      "verdict": "invert",
+      "reason": "pixel",
+      "mctx": {
+        "masked": false,
+        "reason": "",
+        "veilLum": 0,
+        "coverage": 0
+      }
+    },
+    {
+      "k": "ctl-4",
+      "inv": true,
+      "checked": true,
+      "verdict": "invert",
+      "reason": "pixel",
+      "mctx": {
+        "masked": false,
+        "reason": "",
+        "veilLum": 0,
+        "coverage": 0
+      }
+    },
+    {
+      "k": "ctl-5",
+      "inv": true,
+      "checked": true,
+      "verdict": "invert",
+      "reason": "pixel",
+      "mctx": {
+        "masked": false,
+        "reason": "",
+        "veilLum": 0,
+        "coverage": 0
+      }
+    },
+    {
+      "k": "ctl-6",
+      "inv": true,
+      "checked": true,
+      "verdict": "invert",
+      "reason": "pixel",
+      "mctx": {
+        "masked": false,
+        "reason": "",
+        "veilLum": 0,
+        "coverage": 0
+      }
+    },
+    {
+      "k": "ctl-7",
+      "inv": true,
+      "checked": true,
+      "verdict": "invert",
+      "reason": "pixel",
+      "mctx": {
+        "masked": false,
+        "reason": "",
+        "veilLum": 0,
+        "coverage": 0
+      }
+    },
+    {
+      "k": "ctl-8",
+      "inv": true,
+      "checked": true,
+      "verdict": "invert",
+      "reason": "pixel",
+      "mctx": {
+        "masked": false,
+        "reason": "",
+        "veilLum": 0,
+        "coverage": 0
+      }
+    },
+    {
+      "k": "ctl-9",
+      "inv": true,
+      "checked": true,
+      "verdict": "invert",
+      "reason": "pixel",
+      "mctx": {
+        "masked": false,
+        "reason": "",
+        "veilLum": 0,
+        "coverage": 0
+      }
+    },
+    {
+      "k": "ctl-10",
+      "inv": true,
+      "checked": true,
+      "verdict": "invert",
+      "reason": "pixel",
+      "mctx": {
+        "masked": false,
+        "reason": "",
+        "veilLum": 0,
+        "coverage": 0
+      }
+    },
+    {
+      "k": "ctl-11",
+      "inv": true,
+      "checked": true,
+      "verdict": "invert",
+      "reason": "pixel",
+      "mctx": {
+        "masked": false,
+        "reason": "",
+        "veilLum": 0,
+        "coverage": 0
+      }
+    },
+    {
+      "k": "ctl-12",
+      "inv": true,
+      "checked": true,
+      "verdict": "invert",
+      "reason": "pixel",
+      "mctx": {
+        "masked": false,
+        "reason": "",
+        "veilLum": 0,
+        "coverage": 0
+      }
+    }
+  ],
+  "pageExceptions": []
+}
