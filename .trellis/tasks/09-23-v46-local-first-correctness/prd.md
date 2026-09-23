@@ -58,6 +58,37 @@
 - [ ] 四绿门禁全绿：`node --check` / `node test.js` / `node test-browser.js` / `build-extension.js && pack.js`
 - [ ] `@version` bump + README/README_EN 同步 + 统一 commit **并 push**
 
+### 集成记录（主代理，2026-09-23）
+
+**派发方式**：4 个 Trellis channel worker（claude CLI + 本地代理）因模型 ID 不匹配失败
+（`GLM-5.3 Flash` 被判 `unrecognized_model` / 502），用户改为**只用 Copilot 子代理**并确认
+精确串 `GLM-5.3 Flash (unify-chat-provider)`；随后 4 个子代理并发执行（impl-4 首轮无响应，重试成功）。
+
+**隔离**：每个子代理一个 git worktree（`.worktrees/v46-impl-N`，分支 `v46/impl-N`）——
+单文件代码库并行改的必需品（否则互相覆盖 + 测试结果不可信）。合并顺序 impl-3 → impl-1 → impl-4 → impl-2。
+
+**子任务结论**：
+
+| 子任务 | 结论 |
+|---|---|
+| -1 本地优先判定 | 回归引入点 = v3.1.0 (`b865ad6`)；三档 `localEvidence`(A/B/C) + pending 唤醒；限速 300kbps/400ms 下首屏判定 956ms~18s+ → **560ms** |
+| -2 Alt+点击 | 3 个真因：fx 在途回调清掉杀停、fx 投递规则未排除 `[data-svi-fx-off]`、canvas 首扫改写属性 → 单一 `applyInvertState` 收口 + T1–T5 护栏 |
+| -3 悬停开关 | **分支 D**：4.5.0 上四通道×两态全正确；用户症状在 ≤4.3.0 旧版可复现（设置行回显缺陷导致首次点击写反值）→ 交付版本自检徽标 + 旧版对照腿，判定逻辑零改动 |
+| -4 暗色遮罩 | `maskedDarkContext` 三级检测（祖先蒙层 / 兄弟覆盖层 / 低透明度叠深底）+ `masked-dark` 原因码 + `state.maskAware` 开关；四案例矩阵 + 防误伤断言 |
+| -5 子代理规则 | 四件套已落盘（见下）；执行中发现**两个通道模型 ID 空间不同**，已回写规则正文 |
+
+**集成期发现并修复的真实缺陷（非纸面冲突）**：
+
+1. `loadState` 错过遗留键回退：`svi:prefs` 按设计删除了 `manualOverrides`，而“现代键存在但为空”会
+   短路回退 → **用户全部 Alt+点击记忆在“命名空间已写、svi:overrides 缺失”时静默丢失**。
+   已改为“现代键非空优先，否则与遗留键合并”。
+2. `updateImageFilterCss` 只判真值就访问 `.classList` → 宿主文档/桩环境缺 `classList/style` 时
+   抛错并中断整个 boot。已改为能力检测。
+3. 套件内“种外部存储再 boot”的 T5a 时序脆弱 → 改为真实 `Store.onRemoteLoaded()` 路径。
+
+**规范沉淀**：`.trellis/spec/frontend/quality-guidelines.md` 新增「v4.6 Integration Notes」
+（并行 worktree、存储回退、能力检测、测试桩还原、PowerShell 退出码陷阱、合并后必须重跑四绿）。
+
 ## Notes
 
 - 依赖关系：子任务 2/3/4 需真机复现，彼此独立可并行；子任务 1 的二分结论可能改变 3/4 的根因判断，

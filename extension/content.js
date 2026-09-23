@@ -3,7 +3,7 @@
  * universal-smart-invert — browser extension content script
  * GENERATED FILE — DO NOT EDIT.
  * Built by scripts/build-extension.js from universal-smart-invert.user.js
- * Source version: 4.5.0
+ * Source version: 4.6.0
  *
  * Prelude contract (see scripts/build-extension.js header):
  *   - EXT_MODE (wrapper scope)   → core claims coexistence kind 'ext'
@@ -75,7 +75,7 @@
   // ==========================================
   // 1. 配置与常量定义
   // ==========================================
-  const SCRIPT_VERSION = '4.5.0';
+  const SCRIPT_VERSION = '4.6.0';
   const PREFS_KEY = 'universal_smart_invert_v4';   // v2.0 遗留偏好键 (迁移源, 迁移后原样保留以便回滚)
   const LEGACY_KEY = 'universal_smart_invert_v3';  // v1.x 旧键 (仅读取迁移, 保留不删以便回滚)
   const STATS_KEY = 'universal_smart_invert_stats_v1'; // v2.0 遗留统计键 (保留写入以兼容回滚)
@@ -225,6 +225,9 @@
 
     // ===== v4.3 新增偏好: 防闪光守卫 =====
     flashGuard: true,          // 防闪光黑底: 深色站点加载前先铺黑底消除白闪 (仅动态主题站生效)
+
+    // ===== v4.6 新增偏好: 暗色遮罩上下文感知 (任务 v4.6-4) =====
+    maskAware: true,           // 遮罩感知: 祖先暗色蒙层下合成观感已暗, 不再对媒体自动反色; 关闭即回到旧行为
 
     // ===== v3.2 新增偏好: 独立视频画面调节 (与反色可组合) =====
     videoTune: {
@@ -957,14 +960,44 @@
     merged.scheduleEnd = Math.round(clampNumber(merged.scheduleEnd, 0, 23, 7));
     // v4.3 字段规范化: 防闪光守卫 (默认开)
     merged.flashGuard = merged.flashGuard !== false;
+    // v4.6 字段规范化: 暗色遮罩上下文感知 (默认开)
+    merged.maskAware = merged.maskAware !== false;
     // 标签页隔离: 运行时状态绝不入库
     delete merged.invertActive;
 
     // 手动覆盖记忆: 落盘位于 svi:overrides 独立键 (容量大, 与偏好分键管理)
+    // v4.6 集成修复: svi:prefs 按设计会 delete manualOverrides, 所以回退必须满足两点才不丢数据:
+    //  (1) "现代键存在但为空" 也算缺失 —— 否则空对象会短路回退 (集成回归 T5a 的真实机制);
+    //  (2) 遗留键 (v4 → v3) 独立再读一次 —— 命名空间已写时 safeStored 回退必然落空。
+    // 手动覆盖是用户数据 (Alt+点击记忆), 绝不因为另一个键存在就放弃它。
+    // 安全性: flushPrefsNow 每次都会用当前 state 重写遗留键, 因此"用户主动清空"时两边同时为空,
+    // 不会把已清空的记忆复活。
     let overrides = Store.get('overrides', null);
-    if (!overrides || typeof overrides !== 'object' || Array.isArray(overrides)) {
-      overrides = (safeStored && safeStored.manualOverrides && typeof safeStored.manualOverrides === 'object')
-        ? safeStored.manualOverrides : {};
+    const modernOverrides = (overrides && typeof overrides === 'object' && !Array.isArray(overrides)) ? overrides : null;
+    if (!modernOverrides || Object.keys(modernOverrides).length === 0) {
+      // 两个遗留来源都要合并, 不能二选一: svi:prefs 走迁移时可能残留旧副本,
+      // 而遗留键每次 flush 都与当前 state 同步 —— 后者最后写入, 冲突时以它为准。
+      const legacyOverrides = {};
+      let hasLegacy = false;
+      if (safeStored && safeStored.manualOverrides && typeof safeStored.manualOverrides === 'object'
+        && !Array.isArray(safeStored.manualOverrides)) {
+        Object.assign(legacyOverrides, safeStored.manualOverrides);
+        hasLegacy = hasLegacy || Object.keys(safeStored.manualOverrides).length > 0;
+      }
+      try {
+        const rawLegacy = localStorage.getItem(PREFS_KEY) || localStorage.getItem(LEGACY_KEY);
+        if (rawLegacy) {
+          const parsedLegacy = JSON.parse(rawLegacy);
+          const mo = parsedLegacy && parsedLegacy.manualOverrides;
+          if (mo && typeof mo === 'object' && !Array.isArray(mo)) {
+            Object.assign(legacyOverrides, mo);
+            hasLegacy = hasLegacy || Object.keys(mo).length > 0;
+          }
+        }
+      } catch (e) { /* ignore */ }
+      overrides = hasLegacy ? legacyOverrides : (modernOverrides || {});
+    } else {
+      overrides = modernOverrides;
     }
     merged.manualOverrides = overrides;
 
@@ -1055,15 +1088,20 @@
     const profile = getSiteProfile();
     // v4.2: 站点电源 (含定时档) 挂起时强制熄灭门类 —— 挂起期间 profile 可能仍 enabled
     const imgOn = !!state.imageInvert && runtime.siteActive !== false && profile.enabled !== false && profile.imageInvert !== false;
-    if (document.documentElement) {
-      document.documentElement.style.setProperty('--svi-img-filter', f);
-      document.documentElement.style.setProperty('--svi-img-transition', t);
-      document.documentElement.classList.toggle('svi-img-invert-on', imgOn);
+    // v4.6 集成加固: 能力检测代替真值判定 —— 宿主文档/测试桩可能给出"存在但缺 classList/style"
+    // 的 documentElement / body (例如 XML 文档、跨壳框架、以及测试中临时替换的 DOM 桩)。
+    // 只判真值会让 .classList.toggle 抛错并中断整个 boot 流程。
+    const rootEl = document.documentElement;
+    if (rootEl && rootEl.classList && rootEl.style) {
+      rootEl.style.setProperty('--svi-img-filter', f);
+      rootEl.style.setProperty('--svi-img-transition', t);
+      rootEl.classList.toggle('svi-img-invert-on', imgOn);
       // v3.1 R5: 悬停还原开关门类 (关闭后 :hover 还原规则不再命中, 悬停保持反色视图)
-      document.documentElement.classList.toggle('svi-hover-restore', state.hoverRestore !== false);
+      rootEl.classList.toggle('svi-hover-restore', state.hoverRestore !== false);
     }
-    if (document.body) {
-      document.body.classList.toggle('svi-img-invert-on', imgOn);
+    const bodyEl = document.body;
+    if (bodyEl && bodyEl.classList) {
+      bodyEl.classList.toggle('svi-img-invert-on', imgOn);
     }
   }
 
@@ -1448,6 +1486,176 @@
       if (rule && safeMatches(el, [rule.selector])) return rule;
     }
     return null;
+  }
+
+  // ==========================================
+  // v4.6 暗色遮罩上下文 (纯函数, 无副作用, 只读) —— 任务 v4.6-4
+  // 场景: 祖先容器存在绘制在媒体之上的暗色半透明蒙层 (::after/::before 覆盖层、
+  //   兄弟覆盖层节点、低不透明度媒体叠深色实底), 合成观感已暗 —— 此时按媒体自身
+  //   像素反色会破坏站点设计的合成效果 (用户: 「视觉还好, 但原图是亮的」)。
+  // 注意: 祖先容器"自身背景"绘制在图片之下, 不构成蒙层 (对不透明媒体不可见), 不检测。
+  // 预算 (C3): 祖先 ≤ MASK_VEIL_DEPTH 层; 目标 rect 至多读 1 次, 蒙层节点 rect 有界
+  //   (兄弟 ≤4); 全程只读不写入, 连续批量读不触发多次强制布局。
+  // 保守性 (C2/C4): 仅高置信形态判 masked; 白/浅蒙层绝不触发; 证据不足沿用旧管线;
+  //   任何异常按"未检出"返回, 绝不抛错。
+  // 返回 { masked, reason, veilLum, coverage } (纯诊断字段, 不含 DOM 引用)。
+  // ==========================================
+  const MASK_VEIL_DEPTH = 3;       // 祖先检查层数预算
+  const MASK_VEIL_COVER_MIN = 0.8; // 蒙层对目标的几何覆盖率下限 (C4: 覆盖不足不触发)
+  const MASK_COMPOSITE_MAX = 150;  // 最亮白像素经蒙层合成后的亮度上限 (低于即"观感已暗")
+
+  // 合成观感: 最亮白 (255) 以 alpha 透明度混入亮度 lum 的蒙层后的合成亮度
+  function maskCompositeWhite(alpha, lum) {
+    return 255 * (1 - alpha) + lum * alpha;
+  }
+
+  // 从 backgroundImage 计算值提取渐变色标, 返回"压暗最强"的色标; 无色标返回 null。
+  // 兼容 rgba(0,0,0,.62) 与 rgb(0 0 0 / .62) 两种序列化; 计算样式不会输出百分比 alpha。
+  function maskStrongestGradientStop(bgImage) {
+    if (!bgImage || typeof bgImage !== 'string' || bgImage.indexOf('gradient') === -1) return null;
+    let best = null;
+    try {
+      const stops = bgImage.match(/rgba?\(([^)]+)\)/gi) || [];
+      for (const raw of stops) {
+        const nums = raw.match(/\d+\.?\d*/g);
+        if (!nums || nums.length < 3) continue;
+        const r = Number(nums[0]);
+        const g = Number(nums[1]);
+        const b = Number(nums[2]);
+        if (!(r <= 255 && g <= 255 && b <= 255)) continue;
+        const a = nums.length >= 4 ? Math.min(1, Math.max(0, Number(nums[3]))) : 1;
+        const lum = relLuminance(r, g, b);
+        const comp = maskCompositeWhite(a, lum);
+        if (!best || comp < best.comp) best = { comp, alpha: a, lum };
+      }
+    } catch (e) { return null; }
+    return best;
+  }
+
+  // 单个蒙层节点的填充判定: 计算样式存在足够压暗的填充来源 (暗色纯色/暗渐变色标/
+  // backdrop-filter 变暗)。返回 { comp, lum } 或 null。
+  function maskVeilFill(cs) {
+    try {
+      const bgC = parseColorString(cs.backgroundColor);
+      if (bgC && bgC[3] > 0) {
+        const lum = relLuminance(bgC[0], bgC[1], bgC[2]);
+        const comp = maskCompositeWhite(bgC[3], lum);
+        if (comp < MASK_COMPOSITE_MAX) return { comp, lum };
+      }
+      const stop = maskStrongestGradientStop(cs.backgroundImage);
+      if (stop && stop.comp < MASK_COMPOSITE_MAX) return stop;
+      const bf = cs.backdropFilter || cs.webkitBackdropFilter || '';
+      const mb = /brightness\(([\d.]+)\)/i.exec(String(bf));
+      if (mb) {
+        const factor = parseFloat(mb[1]);
+        if (factor > 0 && factor < 0.6) return { comp: 255 * factor, lum: 255 * factor };
+      }
+    } catch (e) { /* ignore */ }
+    return null;
+  }
+
+  // 层叠判定: 蒙层是否绘制在目标之上。目标为 static 时定位蒙层恒在其上;
+  // 目标参与定位时按数值 z-index (auto 视作 0) 比较, 相同则绘制顺序在后者胜 (保守)。
+  function maskPaintsAbove(targetCs, veilCs, veilPaintsLater) {
+    try {
+      if (targetCs.position === 'static') return true;
+      const zt = parseInt(targetCs.zIndex, 10) || 0;
+      const zv = parseInt(veilCs.zIndex, 10) || 0;
+      return zv > zt || (zv === zt && !!veilPaintsLater);
+    } catch (e) { return false; }
+  }
+
+  // 覆盖率: 蒙层矩形与目标矩形的交叠面积 / 目标面积
+  function maskCoverage(veilRect, targetRect) {
+    const x1 = Math.max(veilRect.left, targetRect.left);
+    const y1 = Math.max(veilRect.top, targetRect.top);
+    const x2 = Math.min(veilRect.right, targetRect.right);
+    const y2 = Math.min(veilRect.bottom, targetRect.bottom);
+    const w = x2 - x1;
+    const h = y2 - y1;
+    if (w <= 0 || h <= 0) return 0;
+    return (w * h) / (targetRect.width * targetRect.height);
+  }
+
+  // 主入口: 检测元素是否处于"暗色蒙层上下文" (形态 1 祖先伪元素覆盖层 / 形态 2 兄弟
+  // 覆盖层节点 / 形态 3 低不透明度叠深底)。决策管线仅在拦截"自动反色"时消费本结果。
+  function maskedDarkContext(el) {
+    const res = { masked: false, reason: '', veilLum: 0, coverage: 0 };
+    try {
+      if (!el || el.nodeType !== 1 || typeof el.getBoundingClientRect !== 'function') return res;
+      const targetRect = el.getBoundingClientRect();
+      if (!(targetRect.width > 4 && targetRect.height > 4)) return res;
+
+      // 形态 3: 媒体自身低不透明度叠在直接容器深色实底上 (opacity 合成压暗)
+      const parent = el.parentElement;
+      if (parent && parent.nodeType === 1) {
+        const selfOp = parseFloat(window.getComputedStyle(el).opacity);
+        if (selfOp < 0.9) {
+          const bgC = parseColorString(window.getComputedStyle(parent).backgroundColor);
+          if (bgC && bgC[3] >= 0.9) {
+            const lum = relLuminance(bgC[0], bgC[1], bgC[2]);
+            if (maskCompositeWhite(selfOp, lum) < MASK_COMPOSITE_MAX) {
+              res.masked = true;
+              res.reason = 'self-opacity-over-dark';
+              res.veilLum = lum;
+              res.coverage = 1;
+              return res;
+            }
+          }
+        }
+      }
+
+      // 形态 1/2: 沿祖先 (≤3 层) 查找绘制在目标之上的暗色覆盖蒙层
+      const targetCs = window.getComputedStyle(el);
+      let node = el.parentElement;
+      for (let depth = 0; node && node.nodeType === 1 && depth < MASK_VEIL_DEPTH; depth++) {
+        const hostRect = node.getBoundingClientRect();
+
+        // 形态 1: 祖先的 ::after / ::before 定位覆盖层 (几何以宿主矩形近似, inset:0 铺满)
+        for (let pi = 0; pi < 2; pi++) {
+          const pseudo = pi === 0 ? '::after' : '::before';
+          const cs = window.getComputedStyle(node, pseudo);
+          if (!cs || cs.content === 'none' || cs.position === 'static') continue;
+          const fill = maskVeilFill(cs);
+          if (!fill) continue;
+          const cover = maskCoverage(hostRect, targetRect);
+          if (cover < MASK_VEIL_COVER_MIN) continue;
+          if (!maskPaintsAbove(targetCs, cs, pi === 0)) continue;
+          res.masked = true;
+          res.reason = 'ancestor-veil';
+          res.veilLum = fill.lum;
+          res.coverage = cover;
+          return res;
+        }
+
+        // 形态 2 (仅第一层容器): 兄弟绝对定位覆盖层节点 (rect 读取有界 ≤4)
+        if (depth === 0 && node.children) {
+          const kids = node.children;
+          let rectReads = 0;
+          for (let i = 0; i < kids.length && rectReads < 4; i++) {
+            const sib = kids[i];
+            if (!sib || sib === el || sib.nodeType !== 1) continue;
+            let scs = null;
+            try { scs = window.getComputedStyle(sib); } catch (e) { continue; }
+            if (!scs || (scs.position !== 'absolute' && scs.position !== 'fixed')) continue;
+            const fill = maskVeilFill(scs);
+            if (!fill) continue;
+            rectReads++;
+            const cover = maskCoverage(sib.getBoundingClientRect(), targetRect);
+            if (cover < MASK_VEIL_COVER_MIN) continue;
+            if (!maskPaintsAbove(targetCs, scs, true)) continue;
+            res.masked = true;
+            res.reason = 'sibling-veil';
+            res.veilLum = fill.lum;
+            res.coverage = cover;
+            return res;
+          }
+        }
+
+        node = node.parentElement;
+      }
+    } catch (e) { /* 保守: 任何异常按未检出处理 */ }
+    return res;
   }
 
   function debounce(fn, waitMs) {
@@ -2548,6 +2756,18 @@
         display: flex;
         align-items: center;
         gap: 6px;
+      }
+      /* v4.6 版本自检徽标 (R-H4): 面板头显著显示运行版本, 供与发布页比对 */
+      .svi-modal-ver {
+        font-size: 11px;
+        font-weight: 500;
+        color: #94a3b8;
+        background: rgba(148, 163, 184, 0.12);
+        border: 1px solid rgba(148, 163, 184, 0.25);
+        border-radius: 8px;
+        padding: 1px 7px;
+        margin-left: 4px;
+        letter-spacing: 0.2px;
       }
       .svi-modal-close {
         background: none;
@@ -5372,6 +5592,22 @@
         return;
       }
 
+      // 1.6 v4.6 暗色遮罩上下文 (优先级: 元素规则之下、快照/学习/种子/像素之上):
+      // 祖先暗色蒙层使合成观感已暗 —— 对本管线后续一切"自动反色"结论 (学习/种子强制/像素)
+      // 施行否决, 改判 keep 并记原因 masked-dark (C1)。手动覆盖与元素规则不受影响 (用户
+      // 显式意图最高)。仅对尚无快照的 src 计算一次 (C5 decide-once: 首轮吸收本元素几何
+      // 证据入快照, 同 src 后续元素复用快照, 绝不重算不翻转)。
+      let maskCtx = null;
+      if (!this.decisionBySrc.has(src) && state.maskAware !== false) {
+        maskCtx = maskedDarkContext(img);
+      }
+      const maskedVeto = () => {
+        if (!(maskCtx && maskCtx.masked)) return false;
+        StatsManager.count('maskedDarkKeeps');
+        this.applyDecision(img, src, this.recordDecision(src, 'keep', 'masked-dark'));
+        return true;
+      };
+
       // —— 全局决策快照命中 ——
       // v4.6 C4 档位升级: 档 B 临时结论 (provisional, 占位期间的本地保守判定) 不早退 ——
       // 元素本地证据升级 (占位图解码完成) 属于新证据, 删除临时快照后按全管线重判;
@@ -5389,6 +5625,7 @@
       // 2. 自学习规则 (tag+#id+首类 词干聚合, 命中 ≥ learnHits 生效; 优先于内置种子规则)
       const learned = ruleLearner.decideFor(profileKey(), img);
       if (learned === 'invert') {
+        if (maskedVeto()) return; // v4.6: 遮罩否决 (合成观感已暗, 自动反色让位)
         this.applyDecision(img, src, this.recordDecision(src, 'invert', 'learned'));
         return;
       }
@@ -5413,6 +5650,7 @@
       //    强制反色先于小元素/策略门, 首个处理通道 (含 eager 首扫) 即生效,
       //    同一图片在任何通道得到同一决策, 不再随处理轮次翻转
       if (safeMatches(img, profile.forceInvert)) {
+        if (maskedVeto()) return; // v4.6: 遮罩否决优先于种子强制反色 (蒙层下强制反色同样破坏合成)
         if (this.cache.size >= this.maxCacheSize) {
           this.cache.delete(this.cache.keys().next().value);
         }
@@ -5455,6 +5693,7 @@
       //    并发入口共享一次分析 —— eager/IO/补扫同时触达同一图片时绝不重复解码)
       if (this.cache.has(src)) {
         const isLight = this.cache.get(src);
+        if (isLight && maskedVeto()) return; // v4.6: 遮罩否决 (缓存像素判定为亮时仍需过蒙层上下文)
         this.applyDecision(img, src, this.recordDecision(src, isLight ? 'invert' : 'keep', 'pixel'));
         return;
       }
@@ -5515,6 +5754,8 @@
         this.applyDecision(img, src, this.recordDecision(src, 'keep', 'transparent-light'));
         return;
       }
+
+      if (r.isLight && maskedVeto()) return; // v4.6: 遮罩否决 (合成观感已暗, 不反色; 不入复检网避免翻转)
 
       this.applyDecision(img, src, this.recordDecision(src, r.isLight ? 'invert' : 'keep', 'pixel'));
 
@@ -6678,6 +6919,19 @@
 
         this.elLastUrl.set(el, abs);
         if (decision === true) {
+          // v4.6 暗色遮罩上下文否决 (元素级事实, 在 URL 判定之后、打标之前生效):
+          // 祖先暗色蒙层下合成观感已暗, 不再对背景图施加反色滤镜。
+          // 仅对"将反色"的元素调用 (暗图/跳过路径零额外开销); elLastUrl 已先行登记,
+          // 本元素此 URL 不会重复评估 (decide-once 与主判定路径一致)。
+          if (state.maskAware !== false) {
+            let mctx = null;
+            try { mctx = maskedDarkContext(el); } catch (e) { /* 保守放行 */ }
+            if (mctx && mctx.masked) {
+              StatsManager.count('maskedDarkKeeps');
+              el.removeAttribute('data-svi-bginv');
+              return;
+            }
+          }
           el.setAttribute('data-svi-bginv', 'true');
         } else {
           el.removeAttribute('data-svi-bginv');
@@ -7893,6 +8147,16 @@
         <div class="svi-modal-title"><span>⚡ 智能反色</span></div>
         <button class="svi-modal-close" title="关闭">✕</button>
       `;
+      // v4.6 版本自检 (R-H4): 面板显著显示运行中脚本的版本号, 供用户与发布页比对排查旧版问题。
+      // 不做远程版本检查 (禁止自动网络遥测), 仅本地展示。
+      try {
+        const titleEl = header.querySelector('.svi-modal-title');
+        const verEl = document.createElement('span');
+        verEl.className = 'svi-modal-ver';
+        verEl.textContent = 'v' + SCRIPT_VERSION;
+        verEl.title = '当前运行脚本版本 (与 GreasyFork/GitHub 发布页比对可判断是否旧版)';
+        titleEl.appendChild(verEl);
+      } catch (e) { /* ignore */ }
       header.querySelector('.svi-modal-close').addEventListener('click', () => {
         this.closeSettingsModal();
       });
@@ -8158,6 +8422,22 @@
         });
       sec.add(generalLightRow);
       this.rowSyncs.push(() => generalLightRow.sync());
+
+      // v4.6: 暗色遮罩上下文感知 (任务 v4.6-4)。变更即全量重扫 (对齐元素规则编辑契约:
+      // savePrefs → clearCacheAndRescan + 背景图 sweep), 关闭即完全回到旧行为 (回滚点 R2)
+      const maskAwareRow = ui.toggleRow('暗色遮罩感知', '祖先有暗色蒙层且合成后已足够暗时不再反色图片，避免破坏原有合成观感；关闭立即回到旧行为并重扫',
+        () => state.maskAware !== false,
+        (v) => {
+          state.maskAware = v;
+          savePrefs();
+          window.__svi_image_engine?.clearCacheAndRescan();
+          try {
+            const bgEng = window.__svi && window.__svi.engines ? window.__svi.engines.bgImage : null;
+            if (bgEng && typeof bgEng.sweep === 'function') bgEng.sweep();
+          } catch (e) { /* ignore */ }
+        });
+      sec.add(maskAwareRow);
+      this.rowSyncs.push(() => maskAwareRow.sync());
 
       sec.add(ui.infoLine('预设浅色色卡，点击启用或禁用对应浅色系：'));
       const colorChipRow = ui.chipRow(
@@ -9229,6 +9509,7 @@
         const engine = window.__svi_image_engine;
         const d = (src && engine) ? engine.decisionBySrc.get(src) : null;
         if (d && d.verdict === 'skip') return '跳过:' + (SKIP_REASON_ZH[d.reason] || d.reason);
+        if (d && d.verdict === 'keep' && d.reason === 'masked-dark') return '原样 (遮罩已暗)'; // v4.6: 遮罩上下文否决可审计
         if (d && d.verdict === 'keep') return '原样';
         if (el.hasAttribute && el.hasAttribute('data-svi-failed')) return '分析失败 (待重试)';
         return '未处理';
@@ -10134,6 +10415,8 @@
     countGridGroup,
     // v4.5 纯函数导出 (单测契约): 上下文命中忽略文档根
     closestContextHit,
+    // v4.6 纯函数导出 (单测契约): 暗色遮罩上下文检测 (任务 v4.6-4)
+    maskedDarkContext,
     ImageInvertEngine,
     // v3.2 纯函数导出 (单测契约): 视频画面调节滤镜链构建
     buildVideoTuneFilter,

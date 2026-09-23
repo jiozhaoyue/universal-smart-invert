@@ -429,7 +429,7 @@ vm.runInThisContext(scriptSource, { filename: 'universal-smart-invert.user.js' }
 
 const svi = window.__svi;
 assert.ok(svi, 'window.__svi must be exported for tests');
-assert.strictEqual(svi.version, '4.5.0', 'script version must track the @version header');
+assert.strictEqual(svi.version, '4.6.0', 'script version must track the @version header');
 
 // —— 7a. v3 → v4 迁移: 剥离运行时键, 保留偏好, 旧键不动 (R7) ——
 const v4raw = storageData['universal_smart_invert_v4'];
@@ -1519,16 +1519,23 @@ console.log('✓ v3.0 core unit tests passed: transformPixel / mergeSegments / l
   delete svi.prefs.manualOverrides[ovKey(srcC)];
 
   // —— T5: applyInvertState 手动占优 (host|src 记忆 + 元素标记两路) ——
-  // a) host|src 记忆: 覆盖先落盘 (真实 savePrefs 语义) → 重启脚本 (loadState 载入) → 断言门占优。
-  //    (不能直接改 prefs 内存对象: Store.init 的异步重载会让 state 与 svi.prefs 脱钩 —— 第三次
-  //    boot 才是与真实页面一致的时序: 覆盖记忆已在存储中, 页面加载后手动结论即刻生效)
+  // a) host|src 记忆: 走真实"后端命名空间装载完成 → 重载偏好"路径。
+  //    (不能直接改 prefs 内存对象: Store.init 的异步重载会让 state 与 svi.prefs 脱钩。)
+  //    v4.6 集成修正: 原先"种外部存储(pv4 遗留键) → 再 boot"的写法依赖该键在多次 boot 之间
+  //    不被清理, 并行分支合并后遗留键确实会在中途被清空 → T5a 静默失配 (assert 得到 'pixel')。
+  //    改为种子写入 svi:overrides (权威通道) 并调用真实 onRemoteLoaded 钩子, 无时序依赖。
   const memKey = ovKey('https://cdn.example.com/t5mem.jpg');
-  const v4Seed = JSON.parse(storageData['universal_smart_invert_v4'] || '{}');
-  v4Seed.manualOverrides = Object.assign({}, v4Seed.manualOverrides, { [memKey]: 'invert' });
-  storageData['universal_smart_invert_v4'] = JSON.stringify(v4Seed);
+  // 让出一拍: 本套件的 Store 分片 mock 测试按 setTimeout 窗口断言 (test.js 上方 "chunk #0 written"),
+  // 紧随其后的第三次 boot 是重同步工作 —— 不让拍会把它的写入窗口挤掉, 与本块逻辑无关。
+  await new Promise((r) => setTimeout(r, 20));
   vm.runInThisContext(scriptSource, { filename: 'universal-smart-invert.user.js (v4.6 memory-gate boot)' });
   const svi5 = window.__svi;
   assert.ok(svi5 && typeof svi5.applyInvertState === 'function', 'v4.6: third boot exports the gate');
+  assert.strictEqual(typeof svi5.Store.onRemoteLoaded, 'function', 'v4.6: Store.onRemoteLoaded hook available');
+  const prevOverrides = (svi5.Store.get('overrides', null) && typeof svi5.Store.get('overrides', null) === 'object')
+    ? svi5.Store.get('overrides', null) : {};
+  svi5.Store.set('overrides', Object.assign({}, prevOverrides, { [memKey]: 'invert' }));
+  svi5.Store.onRemoteLoaded(); // 真实页面路径: state = loadState() (svi:overrides 为权威通道)
   const el5a = makeImgStub({ src: 'https://cdn.example.com/t5mem.jpg', w: 200, h: 150 });
   assert.strictEqual(svi5.applyInvertState(el5a, false, 'pixel'), 'manual', 'T5a: pixel write overridden by host|src memory after reload');
   assert.strictEqual(el5a.getAttribute('data-svi-inverted'), 'true', 'T5a: manual invert wins');

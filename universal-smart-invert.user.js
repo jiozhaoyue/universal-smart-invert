@@ -3,10 +3,10 @@
 // @name:zh-CN   全网通用智能视频与图片反色
 // @name:en      Universal Smart Video & Image Invert
 // @namespace    https://github.com/jiozhaoyue/universal-smart-invert
-// @version      4.5.0
-// @description  全网通用智能视频与图片反色脚本 (v4.5, AGPL-3.0 开源)。新增: Dark Reader 式工具栏弹窗面板, 设置行回显修复 (悬停显示原图开关真实生效), 零白交接防闪光 (深色站点黑→深色绝不闪白), 规则分发 (从链接导入 / 导出学习成果 / 一体化规则包), 窄屏与触控响应式; 保留动态主题/定时模式/字体可读性等全部能力。
-// @description:zh-CN 全网通用智能视频与图片反色脚本 (v4.5, AGPL-3.0 开源)。新增: 工具栏弹窗面板、设置回显修复、零白交接防闪光、规则包链接导入与学习成果分享、移动端响应式; 保留全部既有能力。
-// @description:en Universal smart video and image invert userscript (v4.5, AGPL-3.0 licensed). New: DarkReader-style toolbar popup, settings-row display-sync fix (hover-restore toggle now truly applies), zero-white flash-guard handoff, rule-pack distribution (URL import / learned-pack export / one-file pack), and mobile-friendly responsive UI. All prior capabilities retained.
+// @version      4.6.0
+// @description  全网通用智能视频与图片反色脚本 (v4.6, AGPL-3.0 开源)。新增: 本地优先判定 (所见即所得, 弱网/断网下按本地已渲染内容抢先判定, 不再等资源加载完成), Alt+点击一次生效的手动结论防覆盖层, 暗色遮罩上下文感知 (合成已够暗的媒体不再误反色), 版本自检徽标; 保留动态主题/定时模式/字体可读性/工具栏弹窗/规则分发等全部能力。
+// @description:zh-CN 全网通用智能视频与图片反色脚本 (v4.6, AGPL-3.0 开源)。新增: 本地优先判定 (所见即所得/弱网抢先)、Alt+点击一次生效、暗色遮罩上下文感知、版本自检; 保留全部既有能力。
+// @description:en Universal smart video and image invert userscript (v4.6, AGPL-3.0 licensed). New: local-first decisions (what is already rendered locally decides immediately, winning the race on slow/offline networks), one-click-stable Alt+click manual verdicts (no overwrite layer), dark-veil ancestor awareness (already-dark composites stay natural), and a version self-check badge. All prior capabilities retained.
 // @author       jiozhaoyue
 // @license      AGPL-3.0-or-later
 // @icon         data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><circle cx=%2250%22 cy=%2250%22 r=%2246%22 fill=%22%231e293b%22 stroke=%22%2338bdf8%22 stroke-width=%228%22/><path d=%22M50 4 A46 46 0 0 1 50 96 Z%22 fill=%22%2338bdf8%22/></svg>
@@ -40,7 +40,7 @@
   // ==========================================
   // 1. 配置与常量定义
   // ==========================================
-  const SCRIPT_VERSION = '4.5.0';
+  const SCRIPT_VERSION = '4.6.0';
   const PREFS_KEY = 'universal_smart_invert_v4';   // v2.0 遗留偏好键 (迁移源, 迁移后原样保留以便回滚)
   const LEGACY_KEY = 'universal_smart_invert_v3';  // v1.x 旧键 (仅读取迁移, 保留不删以便回滚)
   const STATS_KEY = 'universal_smart_invert_stats_v1'; // v2.0 遗留统计键 (保留写入以兼容回滚)
@@ -931,10 +931,38 @@
     delete merged.invertActive;
 
     // 手动覆盖记忆: 落盘位于 svi:overrides 独立键 (容量大, 与偏好分键管理)
+    // v4.6 集成修复: svi:prefs 按设计会 delete manualOverrides, 所以回退必须满足两点才不丢数据:
+    //  (1) "现代键存在但为空" 也算缺失 —— 否则空对象会短路回退 (集成回归 T5a 的真实机制);
+    //  (2) 遗留键 (v4 → v3) 独立再读一次 —— 命名空间已写时 safeStored 回退必然落空。
+    // 手动覆盖是用户数据 (Alt+点击记忆), 绝不因为另一个键存在就放弃它。
+    // 安全性: flushPrefsNow 每次都会用当前 state 重写遗留键, 因此"用户主动清空"时两边同时为空,
+    // 不会把已清空的记忆复活。
     let overrides = Store.get('overrides', null);
-    if (!overrides || typeof overrides !== 'object' || Array.isArray(overrides)) {
-      overrides = (safeStored && safeStored.manualOverrides && typeof safeStored.manualOverrides === 'object')
-        ? safeStored.manualOverrides : {};
+    const modernOverrides = (overrides && typeof overrides === 'object' && !Array.isArray(overrides)) ? overrides : null;
+    if (!modernOverrides || Object.keys(modernOverrides).length === 0) {
+      // 两个遗留来源都要合并, 不能二选一: svi:prefs 走迁移时可能残留旧副本,
+      // 而遗留键每次 flush 都与当前 state 同步 —— 后者最后写入, 冲突时以它为准。
+      const legacyOverrides = {};
+      let hasLegacy = false;
+      if (safeStored && safeStored.manualOverrides && typeof safeStored.manualOverrides === 'object'
+        && !Array.isArray(safeStored.manualOverrides)) {
+        Object.assign(legacyOverrides, safeStored.manualOverrides);
+        hasLegacy = hasLegacy || Object.keys(safeStored.manualOverrides).length > 0;
+      }
+      try {
+        const rawLegacy = localStorage.getItem(PREFS_KEY) || localStorage.getItem(LEGACY_KEY);
+        if (rawLegacy) {
+          const parsedLegacy = JSON.parse(rawLegacy);
+          const mo = parsedLegacy && parsedLegacy.manualOverrides;
+          if (mo && typeof mo === 'object' && !Array.isArray(mo)) {
+            Object.assign(legacyOverrides, mo);
+            hasLegacy = hasLegacy || Object.keys(mo).length > 0;
+          }
+        }
+      } catch (e) { /* ignore */ }
+      overrides = hasLegacy ? legacyOverrides : (modernOverrides || {});
+    } else {
+      overrides = modernOverrides;
     }
     merged.manualOverrides = overrides;
 
@@ -1025,15 +1053,20 @@
     const profile = getSiteProfile();
     // v4.2: 站点电源 (含定时档) 挂起时强制熄灭门类 —— 挂起期间 profile 可能仍 enabled
     const imgOn = !!state.imageInvert && runtime.siteActive !== false && profile.enabled !== false && profile.imageInvert !== false;
-    if (document.documentElement) {
-      document.documentElement.style.setProperty('--svi-img-filter', f);
-      document.documentElement.style.setProperty('--svi-img-transition', t);
-      document.documentElement.classList.toggle('svi-img-invert-on', imgOn);
+    // v4.6 集成加固: 能力检测代替真值判定 —— 宿主文档/测试桩可能给出"存在但缺 classList/style"
+    // 的 documentElement / body (例如 XML 文档、跨壳框架、以及测试中临时替换的 DOM 桩)。
+    // 只判真值会让 .classList.toggle 抛错并中断整个 boot 流程。
+    const rootEl = document.documentElement;
+    if (rootEl && rootEl.classList && rootEl.style) {
+      rootEl.style.setProperty('--svi-img-filter', f);
+      rootEl.style.setProperty('--svi-img-transition', t);
+      rootEl.classList.toggle('svi-img-invert-on', imgOn);
       // v3.1 R5: 悬停还原开关门类 (关闭后 :hover 还原规则不再命中, 悬停保持反色视图)
-      document.documentElement.classList.toggle('svi-hover-restore', state.hoverRestore !== false);
+      rootEl.classList.toggle('svi-hover-restore', state.hoverRestore !== false);
     }
-    if (document.body) {
-      document.body.classList.toggle('svi-img-invert-on', imgOn);
+    const bodyEl = document.body;
+    if (bodyEl && bodyEl.classList) {
+      bodyEl.classList.toggle('svi-img-invert-on', imgOn);
     }
   }
 

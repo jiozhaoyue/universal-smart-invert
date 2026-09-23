@@ -119,7 +119,29 @@ Active task: <task.py current 输出的任务路径>
 
 ---
 
-## 四、维护提示
+## 四、两个通道的模型 ID 空间不同（2026-09-23 实测）
+
+“模型名不是全称”这件事在**不同派发通道上表现不同**，必须分别取精确串：
+
+| 通道 | 名称来源 | `glm5.3flash` 对应的**精确串** | 实测 |
+|---|---|---|---|
+| VS Code / Copilot 子代理 | 模型选择器显示名 + 厂商 | `GLM-5.3 Flash (unify-chat-provider)` | 平台接受 |
+| | （错误尝试） | `GLM-5.3 Flash (copilot)` / `GLM-5.3 Flash` | ❌ 平台拒绝：model not found |
+| Trellis channel worker（claude CLI） | 本地代理 `127.0.0.1:15721/v1/models` 的 slug，或 `~/.claude/settings.json` 里的别名 | `glm-5.3-flash` 或别名 `claude-sonnet-5[1M]` | ✅ 代理 HTTP 200（分别 49.7s / 21.4s） |
+| | （错误尝试） | `GLM-5.3 Flash` | ❌ CLI 报 `unrecognized_model`，代理回 502 |
+
+经验规则：
+
+1. **先定通道，再取 ID**。Copilot 子代理填“显示名 (厂商)”；claude CLI / 代理填 slug 或 settings 别名。
+2. **厂商后缀不能省也不能猜**：`(copilot)` 与 `(unify-chat-provider)` 是不同厂商空间，填错直接失败。
+3. **获取清单的可靠方式**：Copilot 侧拿不到清单时，故意发一次不合法的 `model` —— 平台会在错误
+   信息里列出全部可用模型；代理侧则直接 `GET /v1/models`（本机实测返回 9 个模型）。
+4. **连通性先验证再派发**：对代理直接发一次极小请求（`max_tokens: 4`）确认 200，避免 worker 陷入
+   502 重试风暴（本次实测：4 个 worker 同时重试 10 次，白烧额度）。
+5. 本项目已确认的**默认选择**：Copilot 子代理用 `GLM-5.3 Flash (unify-chat-provider)`；
+   channel worker 用 `glm-5.3-flash`（或别名 `claude-sonnet-5[1M]`）。
+
+## 五、维护提示
 
 - `.trellis/agents/implement.md`、`.trellis/agents/check.md` 的 frontmatter `model` 字段
   是本策略的落地载体，但这两个文件由 Trellis 生成/维护：

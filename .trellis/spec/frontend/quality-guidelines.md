@@ -343,3 +343,33 @@ rules below are battle-tested conventions from v1.4.0 → v2.0.0; follow them fo
   network-coupled decision latency (956ms→18s+ undecided) is the bisected v3.1.0 regression
   signature (task 09-23-v4.6-1 research/bisect-report.md); three-state steady decision
   equality (fast/throttle/offline) is asserted via `dev/compare-states.js`.
+
+---
+
+## v4.6 Integration Notes (并行 worktree、存储回退、退出码)
+
+多分支并行改**同一个 8300 行单文件**时的实战教训（非风格要求，都是踩过的坑）：
+
+- **并行 worker 必须用 git worktree 隔离**（`.worktrees/v46-impl-N` + `v46/impl-N` 分支，已 gitignore）。
+  共享工作区同时改同一文件必然互相覆盖，且各自的 `node test.js` 结果不可信。
+  合并顺序：小改动先合（UI/页脚）→ 管线类后合；冲突集中在
+  `.trellis/spec/**`（两边都追加同名小节）与 `extension/content.js`（生成物，重新生成即可）。
+- **`LoadState` 的遗留键回退不能是“二选一”**：`svi:prefs` 按设计 `delete manualOverrides`，
+  所以“命名空间已写”时 `safeStored.manualOverrides` 回退必然落空；且“现代键存在但为空”会短路
+  回退。正确做法：现代键**非空**优先；否则把 `safeStored` 与原始遗留键**合并**（遗留键最后写入，
+  冲突以它为准）。手动覆盖是用户数据，绝不能因另一个键存在就丢弃。
+- **能力检测优于真值判断**：`if (document.body)` 不足以保护 `document.body.classList.toggle()` ——
+  宿主文档/测试桩可能是“存在但缺 classList/style”的对象（实测导致 boot 中断）。
+  已改为 `rootEl.classList && rootEl.style` / `bodyEl.classList`。
+- **异步测试块的全局污染会打到后面的 boot**：测试里替换 `window.getComputedStyle`、
+  `document.body`、`document.documentElement` 的块若在 await 窗口内执行且不还原，
+  会让后续 `vm.runInThisContext` 的 boot 跑在桩环境上（本次集成失败的最后一层原因）。
+  临时桩一律 `try/finally` 还原。
+- **不要“种外部存储再 boot”来模拟重载**：依赖存储内部键在多次 boot 之间不被清理，时序脆弱。
+  改用真实钩子（如 `Store.onRemoteLoaded()` = 后端命名空间装载完成 → `state = loadState()`），
+  无时序依赖且与真实页面路径一致。
+- **PowerShell 陷阱**：`node test.js | Select-Object -First N` 会在取够 N 行后关闭管道，
+  **杀掉 node 并让 `$LASTEXITCODE` 变成 1**。判断门禁必须重定向到文件（`*> $env:TEMP\x.log`）
+  或用异步终端；不要用 `-First` 截断长跑命令的输出。
+- **集成期必须重跑全量门禁**：分支各自绿 ≠ 合并后绿。四绿（`node --check` / `node test.js` /
+  `node test-browser.js` / `build-extension.js && pack.js`）在合并后全部重跑才算完成。
