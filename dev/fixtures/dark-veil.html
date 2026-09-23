@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>v4.6-4 暗色遮罩上下文 fixture (A/B/C/D/E/F + 亮图控件组)</title>
+<!--
+  离线单文件 fixture (nocdn / htmlc2r): 所有图片均为内联 canvas 生成的同源 data URI, 零网络依赖。
+  用途: 复现并验证「祖先暗色蒙层 → 合成观感已暗, 但图片自身像素亮 → 被误反色」场景。
+  案例 (与 design.md §4 矩阵对齐, E/F 为补充形态):
+    A 亮图 + 黑 62% ::after 蒙层 (期望: 修复前 invert=误反色 / 修复后 keep+masked-dark)
+    B 亮图 + 无蒙层        (期望: invert, 行为不变)
+    C 亮图 + 白 62% 蒙层   (期望: invert, 浅色蒙层绝不触发遮罩规则)
+    D 暗图 + 黑 62% 蒙层   (期望: keep, 原本就 keep, 遮罩否决不改变结论)
+    E 亮图 + 兄弟覆盖层蒙层 (形态 2: 同容器内绝对定位蒙层节点)
+    F 亮图(低不透明度) 叠深色实底 (形态 3: opacity 合成压暗)
+    ctl-1..12 普通亮图 (无蒙层, 防误伤对照: 必须全部仍被反色)
+  说明: 类名刻意避开 chrome-context 启发式 (card/cover/logo/icon/banner/content 等子串)。
+-->
+<style>
+  body { font: 14px/1.5 "Microsoft YaHei", sans-serif; margin: 16px; background: #fafafa; color: #222; }
+  h1 { font-size: 18px; } h2 { font-size: 15px; margin: 18px 0 6px; }
+  .row { display: flex; flex-wrap: wrap; gap: 14px; }
+  .case { padding: 6px; border: 1px dashed #bbb; }
+  .case p { margin: 4px 0; font-size: 12px; }
+  /* A: 容器 ::after 半透明黑蒙层, 绝对定位铺满容器, 画在静态 img 之上 */
+  .veil-box { position: relative; width: 260px; height: 150px; }
+  .veil-box::after { content: ""; position: absolute; inset: 0; background: rgba(0, 0, 0, 0.62); }
+  /* C: 浅色(白)蒙层对照 —— 绝不触发遮罩规则 */
+  .light-veil-box { position: relative; width: 260px; height: 150px; }
+  .light-veil-box::after { content: ""; position: absolute; inset: 0; background: rgba(255, 255, 255, 0.62); }
+  /* B: 无蒙层对照 */
+  .plain-box { width: 260px; height: 150px; }
+  /* D: 暗图 + 黑蒙层 (与 A 同构) */
+  .dark-img-box { position: relative; width: 260px; height: 150px; }
+  .dark-img-box::after { content: ""; position: absolute; inset: 0; background: rgba(0, 0, 0, 0.62); }
+  /* E: 兄弟覆盖层形态 —— 蒙层是容器内的绝对定位元素节点 (DOM 顺序在 img 之后) */
+  .sib-box { position: relative; width: 260px; height: 150px; }
+  .sib-box .veil-node { position: absolute; inset: 0; background: rgba(10, 10, 10, 0.66); }
+  /* F: 低不透明度图片叠深色实底 (合成压暗) */
+  .op-box { width: 260px; height: 150px; background: #101010; }
+  .op-box img { opacity: 0.55; display: block; }
+  /* 控件组: 普通亮图, 无任何蒙层 */
+  .ctl-box { width: 240px; height: 140px; }
+  img { display: block; width: 100%; height: 100%; object-fit: cover; }
+</style>
+</head>
+<body>
+<h1>暗色遮罩上下文 fixture — v4.6-4</h1>
+<p>所有图片为内联生成的同源 data URI。探针 (dev/probe-veil-fixture.js) 会读取每个 img 的
+<code>data-svi-inverted</code> 与决策原因并截图。</p>
+
+<h2>矩阵案例 A–F</h2>
+<div class="row">
+  <div class="case"><div class="veil-box"><img data-case="A" alt="A 亮图+黑蒙层"></div><p>A 亮图 + 黑 62% ::after 蒙层</p></div>
+  <div class="case"><div class="plain-box"><img data-case="B" alt="B 亮图+无蒙层"></div><p>B 亮图 + 无蒙层</p></div>
+  <div class="case"><div class="light-veil-box"><img data-case="C" alt="C 亮图+白蒙层"></div><p>C 亮图 + 白 62% 蒙层</p></div>
+  <div class="case"><div class="dark-img-box"><img data-case="D" alt="D 暗图+黑蒙层"></div><p>D 暗图 + 黑 62% 蒙层</p></div>
+  <div class="case"><div class="sib-box"><img data-case="E" alt="E 亮图+兄弟蒙层"><div class="veil-node"></div></div><p>E 亮图 + 兄弟覆盖层蒙层</p></div>
+  <div class="case"><div class="op-box"><img data-case="F" alt="F 亮图低不透明度+深底"></div><p>F 亮图 (不透明度 0.55) + 深色实底</p></div>
+</div>
+
+<h2>防误伤控件组: 12 张普通亮图 (无蒙层)</h2>
+<div class="row" id="ctl-row"></div>
+
+<script>
+(function () {
+  // —— 离线生成像素图: 亮图 (浅色低饱和, 亮度足够) / 暗图 (深色) ——
+  function makeImage(kind, seed) {
+    const c = document.createElement('canvas');
+    c.width = 260; c.height = 150;
+    const ctx = c.getContext('2d');
+    if (kind === 'bright') {
+      // 浅灰底 + 同色系浅纹理: 亮度 >= 200 且低饱和 → 判"浅色"
+      ctx.fillStyle = 'rgb(238,238,236)';
+      ctx.fillRect(0, 0, 260, 150);
+      for (let i = 0; i < 7; i++) {
+        const g = 205 + ((seed * 7 + i * 13) % 30);
+        ctx.fillStyle = 'rgb(' + g + ',' + (g - 4) + ',' + (g - 8) + ')';
+        ctx.fillRect(14 + i * 34, 18 + (i % 3) * 38, 22 + (i % 2) * 8, 52 + (i % 2) * 22);
+      }
+      ctx.fillStyle = 'rgb(60,60,58)';
+      ctx.fillRect(16 + seed * 8, 118, 150, 16); // 少量深色装饰条 (占比远低于 48%)
+    } else {
+      // 暗图: 深底 + 深纹理, 亮度远低于 180
+      ctx.fillStyle = 'rgb(26,28,30)';
+      ctx.fillRect(0, 0, 260, 150);
+      for (let i = 0; i < 7; i++) {
+        const g = 34 + ((seed * 11 + i * 7) % 26);
+        ctx.fillStyle = 'rgb(' + g + ',' + (g + 2) + ',' + (g + 5) + ')';
+        ctx.fillRect(12 + i * 36, 20 + (i % 3) * 36, 26, 50);
+      }
+    }
+    return c.toDataURL('image/png');
+  }
+
+  function fill(sel, kind, seed) {
+    const img = document.querySelector(sel);
+    if (img) img.src = makeImage(kind, seed);
+  }
+  fill('img[data-case="A"]', 'bright', 1);
+  fill('img[data-case="B"]', 'bright', 2);
+  fill('img[data-case="C"]', 'bright', 3);
+  fill('img[data-case="D"]', 'dark', 4);
+  fill('img[data-case="E"]', 'bright', 5);
+  fill('img[data-case="F"]', 'bright', 6);
+
+  // 12 张控件亮图: 不同浅色调 (含浅暖/浅冷), 各自独立容器
+  const row = document.getElementById('ctl-row');
+  for (let i = 1; i <= 12; i++) {
+    const box = document.createElement('div');
+    box.className = 'case';
+    const holder = document.createElement('div');
+    holder.className = 'ctl-box';
+    const img = document.createElement('img');
+    img.setAttribute('data-case', 'ctl-' + i);
+    img.alt = '控件亮图 ' + i;
+    img.src = makeImage('bright', 10 + i);
+    holder.appendChild(img);
+    box.appendChild(holder);
+    const cap = document.createElement('p');
+    cap.textContent = 'ctl-' + i + ' (无蒙层)';
+    box.appendChild(cap);
+    row.appendChild(box);
+  }
+})();
+</script>
+</body>
+</html>

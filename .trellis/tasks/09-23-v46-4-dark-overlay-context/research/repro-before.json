@@ -1,0 +1,135 @@
+{
+  "url": "file:///D:/Repo/Github-repo/Pubilc/Dark-viewer/.worktrees/v46-impl-4/dev/fixtures/dark-veil.html",
+  "sviVersion": "4.5.0",
+  "enginePresent": true,
+  "totalChecked": 18,
+  "cases": [
+    {
+      "k": "A",
+      "inv": true,
+      "checked": true,
+      "verdict": "invert",
+      "reason": "pixel"
+    },
+    {
+      "k": "B",
+      "inv": true,
+      "checked": true,
+      "verdict": "invert",
+      "reason": "pixel"
+    },
+    {
+      "k": "C",
+      "inv": true,
+      "checked": true,
+      "verdict": "invert",
+      "reason": "pixel"
+    },
+    {
+      "k": "D",
+      "inv": false,
+      "checked": true,
+      "verdict": "keep",
+      "reason": "pixel"
+    },
+    {
+      "k": "E",
+      "inv": true,
+      "checked": true,
+      "verdict": "invert",
+      "reason": "pixel"
+    },
+    {
+      "k": "F",
+      "inv": true,
+      "checked": true,
+      "verdict": "invert",
+      "reason": "pixel"
+    },
+    {
+      "k": "ctl-1",
+      "inv": true,
+      "checked": true,
+      "verdict": "invert",
+      "reason": "pixel"
+    },
+    {
+      "k": "ctl-2",
+      "inv": true,
+      "checked": true,
+      "verdict": "invert",
+      "reason": "pixel"
+    },
+    {
+      "k": "ctl-3",
+      "inv": true,
+      "checked": true,
+      "verdict": "invert",
+      "reason": "pixel"
+    },
+    {
+      "k": "ctl-4",
+      "inv": true,
+      "checked": true,
+      "verdict": "invert",
+      "reason": "pixel"
+    },
+    {
+      "k": "ctl-5",
+      "inv": true,
+      "checked": true,
+      "verdict": "invert",
+      "reason": "pixel"
+    },
+    {
+      "k": "ctl-6",
+      "inv": true,
+      "checked": true,
+      "verdict": "invert",
+      "reason": "pixel"
+    },
+    {
+      "k": "ctl-7",
+      "inv": true,
+      "checked": true,
+      "verdict": "invert",
+      "reason": "pixel"
+    },
+    {
+      "k": "ctl-8",
+      "inv": true,
+      "checked": true,
+      "verdict": "invert",
+      "reason": "pixel"
+    },
+    {
+      "k": "ctl-9",
+      "inv": true,
+      "checked": true,
+      "verdict": "invert",
+      "reason": "pixel"
+    },
+    {
+      "k": "ctl-10",
+      "inv": true,
+      "checked": true,
+      "verdict": "invert",
+      "reason": "pixel"
+    },
+    {
+      "k": "ctl-11",
+      "inv": true,
+      "checked": true,
+      "verdict": "invert",
+      "reason": "pixel"
+    },
+    {
+      "k": "ctl-12",
+      "inv": true,
+      "checked": true,
+      "verdict": "invert",
+      "reason": "pixel"
+    }
+  ],
+  "pageExceptions": []
+}

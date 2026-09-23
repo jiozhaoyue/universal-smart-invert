@@ -1411,4 +1411,185 @@ setTimeout(() => {
   process.exit(0);
 }, 1500);
 
+// —— v4.6 单测: 暗色遮罩上下文 maskedDarkContext (任务 v4.6-4) ——
+// 以局部 DOM 桩 (计算样式 + rect + 祖先链) 单测真实脚本导出的纯函数;
+// 引擎级四案例结果由 dev/probe-veil-fixture.js 在真实 Chrome 中断言 (决策落点含像素/蒙层证据)。
+(() => {
+  const mdc = svi.maskedDarkContext;
+  assert.strictEqual(typeof mdc, 'function', 'maskedDarkContext must be exported for tests (v4.6-4)');
+  assert.strictEqual(svi.prefs.maskAware, true, 'maskAware pref must default to true (v4.6-4)');
+
+  const STYLE_DEFAULTS = {
+    position: 'static', zIndex: 'auto', content: 'none',
+    backgroundColor: 'rgba(0, 0, 0, 0)', backgroundImage: 'none',
+    opacity: '1', backdropFilter: 'none',
+  };
+  const RECT = (l, t, r, b) => ({ left: l, top: t, right: r, bottom: b, width: r - l, height: b - t });
+  const created = [];
+  function makeEl(o) {
+    o = o || {};
+    const el = {
+      nodeType: 1,
+      _styles: Object.assign({}, STYLE_DEFAULTS, o.styles || {}),
+      _pseudo: o.pseudo || {},
+      _rect: o.rect || RECT(0, 0, 280, 170),
+      parentElement: null,
+      children: o.children || [],
+      _gcrCalls: 0,
+      getBoundingClientRect() { this._gcrCalls++; return this._rect; },
+      contains() { return false; },
+    };
+    for (const c of el.children) { c.parentElement = el; created.push(c); }
+    created.push(el);
+    return el;
+  }
+  // gBCR 总计按元素去重 (容器 children 回填会使同一桩被登记两次)
+  const gcrTotal = () => Array.from(new Set(created)).reduce((n, e) => n + e._gcrCalls, 0);
+  let gcsCalls = 0;
+  global.window.getComputedStyle = (el, pseudo) => {
+    gcsCalls++;
+    if (pseudo) {
+      const map = (el && el._pseudo && el._pseudo[pseudo]) || null;
+      return Object.assign({}, STYLE_DEFAULTS, map || {});
+    }
+    return (el && el._styles) ? el._styles : Object.assign({}, STYLE_DEFAULTS);
+  };
+
+  // A: 亮图 + 祖先 ::after 黑 62% 蒙层 (覆盖率 100%) → masked=true / ancestor-veil
+  const imgA = makeEl({ rect: RECT(10, 10, 270, 160) });
+  const boxA = makeEl({
+    pseudo: { '::after': { content: '""', position: 'absolute', backgroundColor: 'rgba(0, 0, 0, 0.62)' } },
+  });
+  imgA.parentElement = boxA;
+  const rA = mdc(imgA);
+  assert.strictEqual(rA.masked, true, 'A: dark ::after veil must be detected');
+  assert.strictEqual(rA.reason, 'ancestor-veil', 'A: reason must be ancestor-veil');
+
+  // B: 亮图 + 无蒙层 → masked=false
+  const imgB = makeEl({ rect: RECT(10, 10, 270, 160) });
+  imgB.parentElement = makeEl({});
+  assert.strictEqual(mdc(imgB).masked, false, 'B: plain image must not be masked');
+
+  // C: 亮图 + 白 62% 蒙层 → masked=false (浅色蒙层绝不触发, C4)
+  const imgC = makeEl({ rect: RECT(10, 10, 270, 160) });
+  imgC.parentElement = makeEl({
+    pseudo: { '::after': { content: '""', position: 'absolute', backgroundColor: 'rgba(255, 255, 255, 0.62)' } },
+  });
+  assert.strictEqual(mdc(imgC).masked, false, 'C: white veil must never trigger');
+
+  // D (检测器层): 暗图 + 黑 62% 蒙层 → 几何检测为 true; 引擎只对"自动反色"消费否决,
+  // 暗图像素判定为 keep, 最终结论 keep/像素 不变 (矩阵语义: 否决未生效)
+  const imgD = makeEl({ rect: RECT(10, 10, 270, 160) });
+  imgD.parentElement = makeEl({
+    pseudo: { '::after': { content: '""', position: 'absolute', backgroundColor: 'rgba(0, 0, 0, 0.62)' } },
+  });
+  assert.strictEqual(mdc(imgD).masked, true, 'D: detector is geometry-only (engine veto applies to auto-invert only)');
+
+  // E: 兄弟覆盖层节点 (形态 2) → masked=true / sibling-veil
+  const imgE = makeEl({ rect: RECT(10, 10, 270, 160) });
+  const veilNode = makeEl({
+    rect: RECT(0, 0, 280, 170),
+    styles: { position: 'absolute', backgroundColor: 'rgba(10, 10, 10, 0.66)' },
+  });
+  imgE.parentElement = makeEl({ children: [imgE, veilNode] });
+  const rE = mdc(imgE);
+  assert.strictEqual(rE.masked, true, 'E: positioned sibling veil must be detected');
+  assert.strictEqual(rE.reason, 'sibling-veil', 'E: reason must be sibling-veil');
+
+  // F: 低不透明度媒体叠深色实底 (形态 3) → masked=true / self-opacity-over-dark
+  const imgF = makeEl({ rect: RECT(0, 0, 260, 150), styles: { opacity: '0.55' } });
+  imgF.parentElement = makeEl({ styles: { backgroundColor: 'rgb(16, 16, 16)' } });
+  const rF = mdc(imgF);
+  assert.strictEqual(rF.masked, true, 'F: translucent media over solid dark bg must be detected');
+  assert.strictEqual(rF.reason, 'self-opacity-over-dark', 'F: reason must be self-opacity-over-dark');
+
+  // 防误伤/保守性补充
+  // 覆盖率不足 (蒙层只盖住 30% 宽) → false
+  const imgCov = makeEl({ rect: RECT(0, 0, 260, 150) });
+  imgCov.parentElement = makeEl({
+    rect: RECT(0, 0, 100, 150),
+    pseudo: { '::after': { content: '""', position: 'absolute', backgroundColor: 'rgba(0, 0, 0, 0.9)' } },
+  });
+  assert.strictEqual(mdc(imgCov).masked, false, 'veil covering <80% of target must not trigger');
+  // 目标带更高 z-index (蒙层画不到它) → false
+  const imgZ = makeEl({ rect: RECT(10, 10, 270, 160), styles: { position: 'relative', zIndex: '10' } });
+  imgZ.parentElement = makeEl({
+    pseudo: { '::after': { content: '""', position: 'absolute', zIndex: '1', backgroundColor: 'rgba(0, 0, 0, 0.9)' } },
+  });
+  assert.strictEqual(mdc(imgZ).masked, false, 'veil below a higher-z target must not trigger');
+  // 弱蒙层 (黑 20%: 合成 204 > 150) → false
+  const imgWeak = makeEl({ rect: RECT(10, 10, 270, 160) });
+  imgWeak.parentElement = makeEl({
+    pseudo: { '::after': { content: '""', position: 'absolute', backgroundColor: 'rgba(0, 0, 0, 0.2)' } },
+  });
+  assert.strictEqual(mdc(imgWeak).masked, false, 'too-weak dark veil must not trigger');
+  // 暗渐变蒙层 (最暗色标压暗) → true
+  const imgGrad = makeEl({ rect: RECT(10, 10, 270, 160) });
+  imgGrad.parentElement = makeEl({
+    pseudo: { '::after': { content: '""', position: 'absolute', backgroundImage: 'linear-gradient(rgba(0, 0, 0, 0.8), rgba(0, 0, 0, 0.2))' } },
+  });
+  assert.strictEqual(mdc(imgGrad).masked, true, 'dark gradient scrim must trigger');
+  // 白渐变蒙层 → false
+  const imgGradW = makeEl({ rect: RECT(10, 10, 270, 160) });
+  imgGradW.parentElement = makeEl({
+    pseudo: { '::after': { content: '""', position: 'absolute', backgroundImage: 'linear-gradient(rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0.1))' } },
+  });
+  assert.strictEqual(mdc(imgGradW).masked, false, 'light gradient scrim must never trigger');
+  // backdrop-filter 变暗蒙层 → true
+  const imgBf = makeEl({ rect: RECT(10, 10, 270, 160) });
+  imgBf.parentElement = makeEl({
+    pseudo: { '::after': { content: '""', position: 'absolute', backdropFilter: 'brightness(0.4)' } },
+  });
+  assert.strictEqual(mdc(imgBf).masked, true, 'backdrop-filter dimming veil must trigger');
+
+  // 鲁棒性: 非法输入一律"未检出", 绝不抛错
+  assert.strictEqual(mdc(null).masked, false, 'null input must be unmasked');
+  assert.strictEqual(mdc({ nodeType: 1, getBoundingClientRect: () => ({ width: 0, height: 0, left: 0, top: 0, right: 0, bottom: 0 }) }).masked, false, 'zero-size target must be unmasked');
+
+  // 性能预算 (C3): 4 个低覆盖暗色兄弟消耗 rect 预算后仍正常检出深层伪元素蒙层;
+  // gBCR ≤ 8 (目标 1 + 每层宿主 3 + 兄弟 4), 计算样式读取有界; 全程只读 (无布局循环)。
+  // 计数器先清零: 只统计本用例这一次调用的开销。
+  created.length = 0;
+  gcsCalls = 0;
+  const imgBudget = makeEl({ rect: RECT(10, 10, 270, 160) });
+  const sibs = [];
+  for (let i = 0; i < 4; i++) {
+    sibs.push(makeEl({
+      rect: RECT(i * 30, 0, i * 30 + 80, 60), // 只覆盖目标左上一角 → 覆盖率不足
+      styles: { position: 'absolute', backgroundColor: 'rgba(0, 0, 0, 0.9)' },
+    }));
+  }
+  const midBudget = makeEl({});
+  const topBudget = makeEl({});
+  const veilBox = makeEl({
+    pseudo: { '::after': { content: '""', position: 'absolute', backgroundColor: 'rgba(0, 0, 0, 0.7)' } },
+  });
+  imgBudget.parentElement = makeEl({ children: [imgBudget].concat(sibs) });
+  imgBudget.parentElement.parentElement = midBudget;
+  midBudget.parentElement = topBudget;
+  topBudget.parentElement = veilBox; // 第 4 层祖先的 ::after 蒙层: 超出 3 层预算, 不应检出
+  const rBudget = mdc(imgBudget);
+  assert.strictEqual(rBudget.masked, false, 'veil beyond 3-level ancestor budget must not be found');
+  assert.ok(gcrTotal() <= 8, 'getBoundingClientRect calls must stay within budget (≤8), got ' + gcrTotal());
+  assert.ok(gcsCalls <= 24, 'getComputedStyle calls must stay bounded, got ' + gcsCalls);
+
+  // 预算内 3 层祖先仍可检出 (覆盖率代理: 宿主矩形含目标)
+  created.length = 0;
+  gcsCalls = 0;
+  const imgDeep = makeEl({ rect: RECT(10, 10, 270, 160) });
+  const midDeep = makeEl({ rect: RECT(0, 0, 280, 170) });
+  const topDeep = makeEl({
+    rect: RECT(0, 0, 280, 170),
+    pseudo: { '::before': { content: '""', position: 'absolute', backgroundColor: 'rgba(0, 0, 0, 0.75)' } },
+  });
+  imgDeep.parentElement = midDeep;
+  midDeep.parentElement = topDeep;
+  const rDeep = mdc(imgDeep);
+  assert.strictEqual(rDeep.masked, true, 'veil on the 3rd ancestor must be found within budget');
+  assert.strictEqual(rDeep.reason, 'ancestor-veil', 'deep veil reason ancestor-veil');
+  assert.ok(gcrTotal() <= 8, 'deep-veil gBCR budget respected, got ' + gcrTotal());
+
+  console.log('✓ v4.6 unit tests passed: maskedDarkContext four-case matrix (A/E/F detect, B/C clean) + veil forms + budget cap');
+})();
+
 
