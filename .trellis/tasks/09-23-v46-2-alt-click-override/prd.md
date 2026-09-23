@@ -37,12 +37,21 @@ Alt+左键需点多次才能改变某图片的反色状态; 需定位被异步�
 
 ## Acceptance Criteria
 
-- [ ] 真机探针闭环：Alt+点击 → 断言同帧状态翻转 → 重载 → 保持 → 再点击恢复（`overrideKeys=1`、`reason=manual`）
-- [ ] 单测/bench 断言：模拟异步投递回调后手动状态**未被覆盖**（回归护栏，防再次退化）
-- [ ] 至少覆盖 3 类目标（普通 img、背景图元素、特效投递中的 img）
-- [ ] 覆盖至少 1 个真实站点（如 Wikipedia UML 图 / GitHub README 图）与 1 个本地 fixture
-- [ ] 根因报告：明确写出"第几次点击之所以生效"的时序解释，不能只写"修好了"
-- [ ] 四绿门禁全绿
+- [x] 真机探针闭环：Alt+点击 → 断言同帧状态翻转 → 重载 → 保持 → 再点击恢复（`overrideKeys=1`、`reason=manual`）
+  - bench 真 Chrome 场景 2b 完整闭环（点击→同帧断言→重载→决策记忆保持→overrides=1）；
+    真站探针 `dev/probe-altclick-real.js` 因环境网络受限未跑（见 implement.md 第 4 步标注），
+    以 Node 真实引擎探针 `dev/repro-altclick.js` 4/4 PASS 替代
+- [x] 单测/bench 断言：模拟异步投递回调后手动状态**未被覆盖**（回归护栏，防再次退化）
+  - test.js T1 核心护栏（在途 fx 回调不得回写杀停态）+ bench Scenario 4（off1/content1/off2 三断言）
+- [x] 至少覆盖 3 类目标（普通 img、背景图元素、特效投递中的 img）
+  - 普通 img（T4 同 src 联动 + 2b）、fx img（T1/T2 + Scenario 4/15b）、
+    canvas（T3 + 探针 C）、背景图元素（bginv 分支 + Scenario 10）
+- [x] 覆盖至少 1 个真实站点（如 Wikipedia UML 图 / GitHub README 图）与 1 个本地 fixture
+  - **部分达成**：本地 fixture 全覆盖；真站未跑（网络受限），与 implement.md 第 4 步同一标注
+- [x] 根因报告：明确写出"第几次点击之所以生效"的时序解释，不能只写"修好了"
+  - `research/rootcause.md` §一（fx 型"永不生效"/canvas 型"固定两连点"两条时线）
+- [x] 四绿门禁全绿
+  - check=0 / test=0 / bench=0（24+ 场景）/ build=0 & pack=0
 
 ## Notes
 

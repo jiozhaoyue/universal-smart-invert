@@ -412,6 +412,9 @@ global.document = {
 };
 global.MutationObserver = class { observe() {} disconnect() {} unobserve() {} };
 global.self = {}; // 与 window.top 不同 → 顶层框架判定为 false, 不构建 UI
+// v4.6: 引擎类直构 (护栏单测) 需要 window 级事件桩
+global.addEventListener = global.addEventListener || (() => {});
+global.removeEventListener = global.removeEventListener || (() => {});
 
 // 迁移前种子: 旧 v3 键包含必须被剥离的运行时键 invertActive
 storageData['universal_smart_invert_v3'] = JSON.stringify({
@@ -1403,6 +1406,146 @@ const sameParentSibs = (self, n, w, h) => {
 console.log('✓ v3.0 core unit tests passed: transformPixel / mergeSegments / lookupSegment / selectorStem / RuleLearner / Store / mediaDominantViewport / rect / hash32');
 
 
+
+// ============================================================
+// v4.6 Alt+点击手动结论防覆盖 (回归护栏; 根因: research/rootcause.md)
+// T1 fx 在途投递回调不得覆盖手动杀停结论 (H1, 核心护栏)
+// T2 fx 投递规则选择器必须排除杀停态 (H4 变体)
+// T3 canvas 首扫尊重手动标记, 且无手动标记时自动判定照常 (H8)
+// T4 同 src 兄弟元素同帧继承手动结论 (H3)
+// T5 applyInvertState 手动占优: host|src 记忆 + 元素标记两路 (C2)
+// ============================================================
+(async () => {
+  const svi = global.window.__svi; // v4.5 套件二次 boot 已把 window.__svi 换成新实例 —— 本块一律取用当前实例
+  const applyInvertState = svi.applyInvertState;
+  const manualStateFor = svi.manualStateFor;
+  assert.strictEqual(typeof applyInvertState, 'function', 'v4.6: applyInvertState exported');
+  assert.strictEqual(typeof manualStateFor, 'function', 'v4.6: manualStateFor exported');
+  const host = 'mail.163.com';
+  const ovKey = (src) => svi.manualOverrideKey(host, src);
+
+  // —— T1: fx 在途投递回调不覆盖手动杀停 (H1) ——
+  const fxEng = new svi.ImageFxEngine();
+  svi.engines.imageFx = fxEng; // 引擎挂回注册表, 使 toggleMediaOverride 的 kill 分支能 clearFor
+  const engT1 = new svi.ImageInvertEngine();
+  const srcA = 'https://cdn.example.com/guard-photo.jpg';
+  const elA = makeImgStub({ src: srcA, w: 300, h: 200 });
+  elA.isConnected = true;
+  elA.setAttribute('data-svi-fx', 'fx00000001');
+  // 模拟在途投递 (真实 process() 尾段: 解码后逐 target applyTo)
+  fxEng.process = async function (job) {
+    await new Promise((r) => setTimeout(r, 10));
+    for (const el of job.targets) {
+      if (el && el.isConnected) this.applyTo(el, 'fx00000009', 'blob:https://cdn.example.com/g', job.key);
+    }
+  };
+  fxEng.enqueue(elA, srcA, true);
+  assert.strictEqual(engT1.toggleMediaOverride(elA), true, 'T1: Alt+click kill-switch accepted');
+  assert.strictEqual(elA.getAttribute('data-svi-manual'), 'restore', 'T1: element manual marker written');
+  assert.strictEqual(svi.prefs.manualOverrides[ovKey(srcA)], 'restore', 'T1: host|src override written');
+  assert.strictEqual(elA.getAttribute('data-svi-fx-off'), 'true', 'T1: kill-switch attr set same-frame (fx hook kept, rule excludes it)');
+  assert.strictEqual(engT1.decisionBySrc.get(srcA).reason, 'manual', 'T1: decision snapshot force-refreshed');
+  await new Promise((r) => setTimeout(r, 40)); // 让在途投递回调落地
+  assert.strictEqual(elA.getAttribute('data-svi-fx-off'), 'true', 'T1: in-flight fx callback must NOT wipe kill-switch (H1 regression)');
+  assert.strictEqual(elA.getAttribute('data-svi-manual'), 'restore', 'T1: manual marker survives fx callback');
+  delete svi.prefs.manualOverrides[ovKey(srcA)];
+
+  // —— T2: fx 投递规则选择器排除杀停态 (H4 变体) ——
+  const srcB = 'https://cdn.example.com/rule-photo.jpg';
+  const elB = makeImgStub({ src: srcB, w: 300, h: 200 });
+  fxEng.ensureStyleNode();
+  if (fxEng._rules) fxEng._rules.clear();
+  fxEng.applyTo(elB, 'fx00000002', 'blob:https://cdn.example.com/r', 'k-t2');
+  const ruleT2 = Array.from(fxEng._rules.values())[0] || '';
+  assert.ok(ruleT2.indexOf('data-svi-fx-off') !== -1, 'T2: fx rule selector must exclude fx-off state (H4 regression): ' + ruleT2.slice(0, 90));
+  assert.strictEqual(elB.getAttribute('data-svi-fx'), 'fx00000002', 'T2: fx attr written for normal delivery');
+
+  // —— T3: canvas 首扫尊重手动标记 + 无标记时自动判定照常 (H8) ——
+  const mcEng = new svi.MediaCoverageEngine();
+  const darkPx = () => { const p = new Uint8ClampedArray(8 * 8 * 4); for (let i = 0; i < p.length; i += 4) { p[i] = 20; p[i + 1] = 20; p[i + 2] = 20; p[i + 3] = 255; } return p; };
+  const lightPx = () => { const p = new Uint8ClampedArray(8 * 8 * 4); for (let i = 0; i < p.length; i += 4) { p[i] = 250; p[i + 1] = 250; p[i + 2] = 250; p[i + 3] = 255; } return p; };
+  let probePx = darkPx(); // 引擎 8×8 探针当前采样 (可切换深/浅)
+  const savedCreate = global.document.createElement;
+  global.document.createElement = (tag) => {
+    const el = savedCreate.call(global.document, tag);
+    if (String(tag).toLowerCase() === 'canvas') {
+      el.getContext = () => ({ drawImage() {}, getImageData: () => ({ width: 8, height: 8, data: probePx }) });
+    }
+    return el;
+  };
+  try {
+    const mkCanvas = () => ({
+      tagName: 'CANVAS', nodeType: 1, clientWidth: 300, clientHeight: 200, width: 300, height: 200,
+      attrs: {}, isConnected: true,
+      classList: { contains() { return false; } },
+      setAttribute(k, v) { this.attrs[k] = String(v); },
+      getAttribute(k) { return (k in this.attrs) ? this.attrs[k] : null; },
+      removeAttribute(k) { delete this.attrs[k]; },
+      hasAttribute(k) { return k in this.attrs; },
+    });
+    const c1 = mkCanvas();
+    mcEng.processCanvas(c1); // 首扫 (深色像素): 引擎自动判定 = keep
+    assert.ok(!('data-svi-inverted' in c1.attrs), 'T3: unmarked dark canvas stays auto-keep');
+    c1.setAttribute('data-svi-inverted', 'true'); // 用户 Alt+点击手动反色 (canvas 无 src → 元素标记承载结论)
+    c1.setAttribute('data-svi-manual', 'invert');
+    mcEng.checked.delete(c1); // 模拟"首扫发生在点击之后"的时序
+    mcEng.processCanvas(c1); // 深色像素分析不得把手动结论拉回 (H8 回归)
+    assert.strictEqual(c1.attrs['data-svi-inverted'], 'true', 'T3: manual invert must survive first canvas scan (H8 regression)');
+    const c2 = mkCanvas();
+    probePx = lightPx();
+    mcEng.processCanvas(c2); // 无手动标记的浅色画布: 自动反色照常生效
+    assert.strictEqual(c2.attrs['data-svi-inverted'], 'true', 'T3: unmarked light canvas still auto-inverts');
+  } finally {
+    global.document.createElement = savedCreate;
+  }
+
+  // —— T4: 同 src 兄弟元素同帧继承手动结论 (H3) ——
+  const engT4 = new svi.ImageInvertEngine();
+  const srcC = 'https://cdn.example.com/shared.jpg';
+  const el4a = makeImgStub({ src: srcC, w: 300, h: 200 });
+  const el4b = makeImgStub({ src: srcC, w: 300, h: 200 });
+  const el4c = makeImgStub({ src: 'https://cdn.example.com/other.jpg', w: 300, h: 200 });
+  const savedBody = global.document.body;
+  global.document.body = { querySelectorAll: () => [el4b, el4c] };
+  try {
+    assert.strictEqual(engT4.toggleMediaOverride(el4a), true, 'T4: toggle accepted');
+    assert.strictEqual(el4a.getAttribute('data-svi-inverted'), 'true', 'T4: clicked element inverted');
+    assert.strictEqual(el4b.getAttribute('data-svi-inverted'), 'true', 'T4: same-src sibling inherits manual verdict same-frame');
+    assert.strictEqual(el4b.getAttribute('data-svi-manual'), 'invert', 'T4: sibling carries manual marker');
+    assert.ok(!('data-svi-inverted' in el4c.attrs), 'T4: different-src element untouched');
+  } finally {
+    global.document.body = savedBody;
+  }
+  delete svi.prefs.manualOverrides[ovKey(srcC)];
+
+  // —— T5: applyInvertState 手动占优 (host|src 记忆 + 元素标记两路) ——
+  // a) host|src 记忆: 覆盖先落盘 (真实 savePrefs 语义) → 重启脚本 (loadState 载入) → 断言门占优。
+  //    (不能直接改 prefs 内存对象: Store.init 的异步重载会让 state 与 svi.prefs 脱钩 —— 第三次
+  //    boot 才是与真实页面一致的时序: 覆盖记忆已在存储中, 页面加载后手动结论即刻生效)
+  const memKey = ovKey('https://cdn.example.com/t5mem.jpg');
+  const v4Seed = JSON.parse(storageData['universal_smart_invert_v4'] || '{}');
+  v4Seed.manualOverrides = Object.assign({}, v4Seed.manualOverrides, { [memKey]: 'invert' });
+  storageData['universal_smart_invert_v4'] = JSON.stringify(v4Seed);
+  vm.runInThisContext(scriptSource, { filename: 'universal-smart-invert.user.js (v4.6 memory-gate boot)' });
+  const svi5 = window.__svi;
+  assert.ok(svi5 && typeof svi5.applyInvertState === 'function', 'v4.6: third boot exports the gate');
+  const el5a = makeImgStub({ src: 'https://cdn.example.com/t5mem.jpg', w: 200, h: 150 });
+  assert.strictEqual(svi5.applyInvertState(el5a, false, 'pixel'), 'manual', 'T5a: pixel write overridden by host|src memory after reload');
+  assert.strictEqual(el5a.getAttribute('data-svi-inverted'), 'true', 'T5a: manual invert wins');
+  const el5b = makeImgStub({ src: 'https://cdn.example.com/t5b.jpg', w: 200, h: 150 });
+  el5b.setAttribute('data-svi-manual', 'restore');
+  assert.strictEqual(svi5.applyInvertState(el5b, true, 'pixel'), 'manual', 'T5b: pixel write overridden by element marker');
+  assert.ok(!('data-svi-inverted' in el5b.attrs), 'T5b: manual restore wins');
+  const el5c = makeImgStub({ src: 'https://cdn.example.com/t5c.jpg', w: 200, h: 150 });
+  assert.strictEqual(svi5.applyInvertState(el5c, true, 'pixel'), 'pixel', 'T5c: no manual input → engine verdict passes through');
+  assert.strictEqual(el5c.getAttribute('data-svi-inverted'), 'true', 'T5c: normal engine write intact');
+  assert.strictEqual(svi5.applyInvertState(el5c, true, 'manual'), 'manual', 'T5c: manual reason writes directly');
+
+  console.log('✓ v4.6 unit tests passed: Alt+click manual verdict survives fx callback / canvas first-scan / sibling sync / applyInvertState gate');
+})().catch((err) => {
+  console.error('v4.6 regression tests failed:', err);
+  process.exit(1);
+});
 
 // 显式退出: 脚本启动桩中的常驻定时器 (统计落盘 interval、3s 后的引擎初始化循环) 会阻止进程自然退出
 // v3.0: 延长至 1500ms —— 等待异步 Store (chrome.storage mock) 单测链完成
