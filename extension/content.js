@@ -1550,6 +1550,57 @@
     }
   }
 
+  // ===== v4.6 Alt+点击手动结论防覆盖层 =====
+  // 元素级手动标记读取 (无 src 的 canvas/背景元素也受保护):
+  // data-svi-manual="invert|restore" 由 toggleMediaOverride 点击时同帧写入
+  function manualStateFor(el) {
+    try {
+      // 守卫放宽为能力检测: 测试桩/跨壳元素可能没有 nodeType (只要求可读写属性)
+      if (!el || typeof el.getAttribute !== 'function') return null;
+      const m = el.getAttribute('data-svi-manual');
+      if (m === 'invert') return true;
+      if (m === 'restore') return false;
+      const src = getMediaSrc(el);
+      if (src) {
+        const ov = state.manualOverrides[manualOverrideKey(profileKey(), src)];
+        if (ov === 'invert') return true;
+        if (ov === 'restore') return false;
+      }
+    } catch (e) { /* ignore */ }
+    return null;
+  }
+
+  // 反色状态写点唯一收口 (v4.6 C3): 所有决策来源的 data-svi-inverted 写入/摘除一律经此门。
+  // 规则 (v4.6 C2): 非 manual 来源写入前先解析手动结论 —— 手动结论存在则以其为准 (幂等占优),
+  // 杜绝 fx 投递回调 / canvas 首扫 / 重扫把用户 Alt+点击结论拉回。
+  // 例外: reason='manual' (手动本身) 与 'fx-mutex' (fx 投递与滤镜互斥的机械摘除) 直写。
+  // 返回实际生效的原因码 ('manual' = 发生了手动占优改写)。
+  function applyInvertState(el, wantInvert, reason) {
+    // 守卫放宽为能力检测: 测试桩/跨壳元素可能没有 nodeType (只要求可读写属性)
+    if (!el || typeof el.setAttribute !== 'function' || typeof el.getAttribute !== 'function') return reason || '';
+    let want = !!wantInvert;
+    let why = reason || 'pixel';
+    if (why !== 'manual' && why !== 'fx-mutex') {
+      const manual = manualStateFor(el);
+      if (manual !== null) {
+        want = manual;
+        why = 'manual';
+      }
+    }
+    try {
+      const cur = el.getAttribute('data-svi-inverted') === 'true';
+      if (cur !== want) {
+        if (want) {
+          el.setAttribute('data-svi-inverted', 'true');
+          try { StatsManager.count('imagesInverted'); } catch (e2) { /* ignore */ }
+        } else {
+          el.removeAttribute('data-svi-inverted');
+        }
+      }
+    } catch (e) { /* ignore */ }
+    return why;
+  }
+
   function showToast(msg) {
     let toast = null;
     try { toast = document.getElementById('svi-toast'); } catch (e) { return; }
@@ -4994,45 +5045,99 @@
     }
 
     // v3.1: Alt+点击核心抽取 (当前页媒体面板"反色/复原"复用同一覆盖路径);
-    // 覆盖即决策: 同步刷新决策快照, 后续新增元素经快路径立即继承手动决策
+    // 覆盖即决策: 同步刷新决策快照, 后续新增元素经快路径立即继承手动决策。
+    // v4.6 防覆盖重写: 全分支同帧写齐「属性 + data-svi-manual 标记 + manualOverrides +
+    // force 决策快照」四元组, 异步投递回调 / canvas 首扫 / 重扫一律不得拉回 (C2/C4);
+    // fx 杀停同帧摘投递挂点 (clearFor), 视觉还原不依赖 CSS 级联顺序 (根因 B)。
     toggleMediaOverride(target) {
       if (!target) return false;
       try {
-        // v3.0: 特效投递中的图片 Alt+点击 = 单图 kill switch (还原原始渲染)
+        const src = getMediaSrc(target);
+        // —— 分支 1: 特效投递态 (data-svi-fx) —— 杀停 ⇄ 恢复特效, 结论一律落 manual
         if (target.getAttribute('data-svi-fx')) {
           const off = target.getAttribute('data-svi-fx-off') === 'true';
           if (off) {
             target.removeAttribute('data-svi-fx-off');
             showToast('已恢复特效 (Alt+点击)');
           } else {
+            // v4.6 杀停: fx-off 属性保留 (视觉还原由投递规则 :not 选择器同帧完成 —— 根因 H4 变体
+            // 已修: 规则不再命中杀停态); 在途投递回调经 applyTo 的占优门放弃, 不会回写
             target.setAttribute('data-svi-fx-off', 'true');
             showToast('已还原原图 (Alt+点击)');
           }
+          this.markManual(target, src, off ? 'invert' : 'restore', off ? 'invert' : 'keep');
           return true;
         }
-        const isCurrentlyInverted = target.getAttribute('data-svi-inverted') === 'true';
-        if (isCurrentlyInverted) {
-          target.removeAttribute('data-svi-inverted');
-          showToast('已恢复原色 (Alt+点击)');
+        // —— 分支 2: 背景图元素 (通用标签): 反色标记是 data-svi-bginv (元素级 CSS 门) ——
+        const tag = target.tagName ? String(target.tagName).toLowerCase() : '';
+        const isMediaTag = tag === 'img' || tag === 'svg' || tag === 'canvas' || tag === 'video' || tag === 'image'
+          || (tag === 'input' && String(target.getAttribute('type') || '').toLowerCase() === 'image');
+        const isBginv = target.getAttribute('data-svi-bginv') === 'true';
+        const isCurrentlyInverted = isBginv || target.getAttribute('data-svi-inverted') === 'true';
+        const want = !isCurrentlyInverted;
+        if (!isMediaTag) {
+          if (want) target.setAttribute('data-svi-bginv', 'true');
+          else target.removeAttribute('data-svi-bginv');
+          target.removeAttribute('data-svi-inverted'); // 双标记互斥, 防双重滤镜
         } else {
-          target.setAttribute('data-svi-inverted', 'true');
-          showToast('已手动反色 (Alt+点击)');
+          applyInvertState(target, want, 'manual');
         }
-        // 持久化手动覆盖记忆 (host|src → 决策), 下次访问自动应用
-        const src = getMediaSrc(target);
-        if (src) {
-          addManualOverride(state.manualOverrides, manualOverrideKey(profileKey(), src), isCurrentlyInverted ? 'restore' : 'invert', 400);
-          savePrefs();
-          // v3.1: 决策快照强制刷新 (手动覆盖最高优先; 后续新增同 src 元素经快路径立即继承手动决策)
-          this.recordDecision(src, isCurrentlyInverted ? 'keep' : 'invert', 'manual', true);
-        }
-        // v3.0: 自学习规则累积 (tag+#id+首类 词干聚合, 命中 ≥ learnHits 自动生效)
-        try {
-          ruleLearner.record(profileKey(), target, isCurrentlyInverted ? 'protect' : 'invert');
-        } catch (err) { /* ignore */ }
+        showToast(want ? '已手动反色 (Alt+点击)' : '已恢复原色 (Alt+点击)');
+        this.markManual(target, src, want ? 'invert' : 'restore', want ? 'invert' : 'keep');
+        // v4.6 H4 防线: 手动写属性后立即重算 CSS 门类 (属性可见性必须同帧成立)
+        try { updateImageFilterCss(); } catch (e) { /* ignore */ }
+        // —— 同 src 兄弟元素同帧联动 (H3): 手动结论是 src 级, 渲染态保持一致 ——
+        if (src) this.propagateManualToSiblings(target, src, want);
         return true;
       } catch (e) { /* ignore */ }
       return false;
+    }
+
+    // v4.6: 手动结论四元组落位 (元素标记 + host|src 记忆 + force 决策快照 + 学习累积)
+    markManual(el, src, overrideValue, verdict) {
+      try {
+        // 元素级标记: 无 src 的媒体 (canvas/背景元素) 也受防覆盖保护 (C2)
+        el.setAttribute('data-svi-manual', overrideValue);
+      } catch (e) { /* ignore */ }
+      if (src) {
+        addManualOverride(state.manualOverrides, manualOverrideKey(profileKey(), src), overrideValue, 400);
+        savePrefs();
+        // v3.1: 决策快照强制刷新 (手动覆盖最高优先; 后续新增同 src 元素经快路径立即继承手动决策)
+        this.recordDecision(src, verdict, 'manual', true);
+      }
+      try {
+        ruleLearner.record(profileKey(), el, overrideValue === 'invert' ? 'invert' : 'protect');
+      } catch (err) { /* ignore */ }
+    }
+
+    // v4.6: 同 src 兄弟元素同帧继承手动结论 (有界 24 个; fx 兄弟只切 fx-off, 不写滤镜标记)
+    propagateManualToSiblings(origin, src, want) {
+      let n = 0;
+      const visit = (el) => {
+        if (n >= 24 || !el || el === origin) return;
+        try { if (getMediaSrc(el) !== src) return; } catch (e) { return; }
+        try {
+          if (el.getAttribute('data-svi-fx')) {
+            if (want) el.removeAttribute('data-svi-fx-off');
+            else el.setAttribute('data-svi-fx-off', 'true');
+            el.setAttribute('data-svi-manual', want ? 'invert' : 'restore');
+          } else {
+            applyInvertState(el, want, 'manual');
+            el.setAttribute('data-svi-manual', want ? 'invert' : 'restore');
+          }
+          n++;
+        } catch (e) { /* ignore */ }
+      };
+      try {
+        const root = document.body || document.documentElement;
+        if (root && root.querySelectorAll) root.querySelectorAll('img, image, input[type="image" i], canvas, video').forEach(visit);
+      } catch (e) { /* ignore */ }
+      ShadowDomRegistry.forEachRoot((sr) => {
+        try { sr.querySelectorAll('img, image, input[type="image" i], canvas, video').forEach(visit); } catch (e) { /* ignore */ }
+      });
+      if (n > 0) {
+        try { StatsManager.count('manualSiblingSyncs'); } catch (e) { /* ignore */ }
+      }
     }
 
     bindManualToggle() {
@@ -5064,7 +5169,7 @@
       if (rect) {
         const fill = (rect.getAttribute('fill') || '').toLowerCase();
         if (fill === '#fff' || fill === '#ffffff' || fill === 'white' || fill === 'rgb(255,255,255)') {
-          svg.setAttribute('data-svi-inverted', 'true');
+          applyInvertState(svg, true, 'pixel'); // v4.6: 写点收口
           return;
         }
       }
@@ -5072,23 +5177,24 @@
       if (window.getComputedStyle) {
         const styleBg = window.getComputedStyle(svg).backgroundColor;
         if (styleBg === 'rgb(255, 255, 255)' || styleBg === '#fff' || styleBg === '#ffffff') {
-          svg.setAttribute('data-svi-inverted', 'true');
+          applyInvertState(svg, true, 'pixel'); // v4.6: 写点收口
         }
       }
     }
 
     // 最终反色决策落点: 特效引擎接管 (content:url 部分反色) 或 CSS 滤镜属性
+    // v4.6: 属性写点全部收口 applyInvertState (手动结论幂等占优, C2/C3)
     finalizeInvert(el, src, wantInvert) {
       // kill switch 生效中的图片: 保持原图 (既不走特效也不走 CSS 滤镜, 防双重处理)
       try {
         if (el.getAttribute && el.getAttribute('data-svi-fx') && el.getAttribute('data-svi-fx-off') === 'true') {
-          el.removeAttribute('data-svi-inverted');
+          applyInvertState(el, false, 'fx-mutex');
           return;
         }
       } catch (e) { /* ignore */ }
       const fx = this.fx;
       if (fx && fx.wantsFx(el, src)) {
-        el.removeAttribute('data-svi-inverted');
+        applyInvertState(el, false, 'fx-mutex');
         if (wantInvert || fx.modeAppliesToAll(el)) {
           fx.enqueue(el, src, wantInvert);
         } else {
@@ -5097,12 +5203,7 @@
         return;
       }
       if (fx) fx.clearFor(el);
-      if (wantInvert) {
-        el.setAttribute('data-svi-inverted', 'true');
-        StatsManager.count('imagesInverted');
-      } else {
-        el.removeAttribute('data-svi-inverted');
-      }
+      applyInvertState(el, wantInvert, 'pixel');
     }
 
     // —— v3.1 决策快照与落点 ——
@@ -5581,11 +5682,16 @@
 
     applyTo(el, fxId, blobUrl, key) {
       try {
+        // v4.6 手动结论占优门 (根因 H1): 杀停态或手动"还原"结论下, 在途投递回调一律放弃。
+        // 杀停态只放弃投递、不摘属性 —— data-svi-fx-off 保留 (媒体面板状态文案与二次点击
+        // 恢复特效的状态机依赖它), 视觉还原由投递规则的 :not 选择器同帧完成 (根因 H4 变体)
+        if (el.getAttribute('data-svi-fx-off') === 'true') { return; }
+        if (manualStateFor(el) === false) { this.clearFor(el); return; }
         el.removeAttribute('data-svi-inverted'); // content 投递与 CSS 滤镜互斥 (防双重处理)
         el.setAttribute('data-svi-fx', fxId);
         el.removeAttribute('data-svi-fx-off');
         this.ensureStyleNode();
-        const ruleSel = 'img[data-svi-fx="' + fxId + '"]';
+        const ruleSel = 'img[data-svi-fx="' + fxId + '"]:not([data-svi-fx-off="true"])'; // v4.6: 排除杀停态 (级联双保险)
         const rule = ruleSel + ' { content: url(' + blobUrl + ') !important; }';
         if (!this._rules) this._rules = new Map();
         if (this._rules.get(key) !== rule) {
@@ -6327,6 +6433,15 @@
       }
       if (!bg || bg.indexOf('url(') === -1) return;
 
+      // v4.6: Alt+点击手动结论占优门 (C2) —— 元素带手动标记时 bg 扫描不做任何自动改写,
+      // 杜绝背景图首扫/重扫把用户手动结论拉回 (与 canvas 首扫同源的覆盖路径)
+      const manual = manualStateFor(el);
+      if (manual !== null) {
+        if (manual) el.setAttribute('data-svi-bginv', 'true');
+        else el.removeAttribute('data-svi-bginv');
+        return;
+      }
+
       // v3.3 用户元素规则: 显式保护/强制反色优先于尺寸门槛与亮度判定
       // v4.3: 'recolor' 局部改色 —— 不走滤镜, 交给背景替换桶引擎只改该元素的浅色部分
       const erule = firstMatchingElementRule(el, profile.elementRules);
@@ -6925,12 +7040,9 @@
       }
       const isLight = evaluateImagePixels(data, getEvalPrefs());
       StatsManager.count('canvasesAnalyzed');
-      if (isLight) {
-        canvas.setAttribute('data-svi-inverted', 'true');
-        StatsManager.count('imagesInverted');
-      } else {
-        canvas.removeAttribute('data-svi-inverted');
-      }
+      // v4.6: 首扫写点收口 —— 手动结论 (data-svi-manual / host|src) 幂等占优,
+      // 像素分析不得把用户 Alt+点击的反色拉回 (根因 H8, 固定两连点)
+      applyInvertState(canvas, isLight, 'pixel');
     }
 
     processPoster(video) {
@@ -9843,6 +9955,11 @@
     LOGIN_SELECTORS,
     manualOverrideKey,
     addManualOverride,
+    // v4.6 收口导出 (单测契约): 状态写点唯一门 + 手动结论解析 + fx/canvas 引擎类
+    applyInvertState,
+    manualStateFor,
+    ImageFxEngine,
+    MediaCoverageEngine,
     // v3.3 纯函数导出 (单测契约): 元素级规则归一化 / 首条命中
     normalizeElementRules,
     firstMatchingElementRule,

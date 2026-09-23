@@ -235,6 +235,38 @@ rules below are battle-tested conventions from v1.4.0 → v2.0.0; follow them fo
 - Any bug fixed in production code gets a regression test in the same change (v2.0 example:
   whitelist-vs-override precedence).
 
+## v4.6 Additions (manual-verdict guard, single state-write gate)
+
+- **Alt+click manual verdicts are authoritative and idempotent (v4.6-2)** — every non-manual write
+  of `data-svi-inverted` MUST go through the single gate `applyInvertState(el, want, reason)`,
+  which re-resolves the manual input (element marker `data-svi-manual="invert|restore"` first,
+  then `host|src` memory) before writing; reasons `manual` and `fx-mutex` bypass the gate.
+  Direct `setAttribute/removeAttribute('data-svi-inverted')` in decision paths is forbidden
+  (mechanical resets in strip/rescan are the documented exception).
+- **The fx delivery callback must never clobber manual state**: `ImageFxEngine.applyTo` gives up
+  when the element is killed (`data-svi-fx-off="true"` → plain return, keep attrs so the media
+  panel state text and the second-click re-enable state machine survive) or when a restore
+  override exists (`manualStateFor(el) === false` → `clearFor`). Unconditional attribute
+  stripping in `applyTo` was the root cause of "Alt+click never works on fx-delivered images".
+- **The fx per-element rule selector must exclude the kill state** —
+  `img[data-svi-fx="ID"]:not([data-svi-fx-off="true"])`. The global fallback
+  `img[data-svi-fx][data-svi-fx-off] { content: normal }` in the main stylesheet LOSES the
+  cascade to the later-created `#svi-fx-style` node (same specificity + both `!important`),
+  so relying on the fallback alone leaves the kill switch visually dead.
+- **Src-less media (canvas, bg elements) carry the manual verdict via the element marker**
+  `data-svi-manual`; first-scan writers (`MediaCoverageEngine.processCanvas`, BgImageEngine
+  element writes) must consult it, otherwise the first pixel analysis after a user click
+  reverts the choice (deterministic "click twice" pattern).
+- **Manual toggles write the four-tuple in the same frame**: render attribute +
+  `data-svi-manual` marker + `manualOverrides[host|src]` + force-refreshed decision snapshot
+  (`recordDecision(..., 'manual', true)`), then propagate to same-src connected siblings
+  (bounded 24; fx siblings only toggle `data-svi-fx-off`, never the CSS-filter attribute).
+- **Testing gotchas for this layer**: in the Node shim, `Store.init`'s async reload detaches
+  the module `state` from `svi.prefs` — memory-path assertions must seed localStorage and
+  re-boot the script (a third `vm.runInThisContext`) instead of mutating `prefs` in place;
+  direct-constructing engine classes needs `global.addEventListener` stubs; the bench itself
+  regenerates `extension/**` in its smoke step (deterministic output).
+
 ## Code Review Checklist
 
 - [ ] No runtime state in storage; migration strips runtime keys (v3→v4 pattern).
