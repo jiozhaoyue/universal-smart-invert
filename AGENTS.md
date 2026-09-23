@@ -98,3 +98,20 @@ the archived task design docs under `.trellis/tasks/archive/<month>/` for the ar
 For live-site debugging use `node scripts/probe-github.js <url>` (injects the current script into
 any page via CDP and dumps engine state).
 
+## 子代理与派发（强制，用户 2026-09-23 明令）
+
+完整规则见 `.trellis/spec/guides/subagent-model-policy.md`。要点：
+
+1. **派发前必须问用户用哪个模型**，得到确认后才允许派发；禁止静默用主代理模型。
+2. **模型名一律不视为全称**（用户写的、历史记的、文档里的都算近似名）：必须到平台实际可用
+   清单里找**最匹配候选**，把候选+推荐呈给用户点选，**禁止**把近似名当正确名写进命令。
+3. 本项目**已确认默认模型**：`GLM-5.3 Flash`。该默认值不等于免询问。
+4. 子代理选**能力最低且最匹配**的档位（读多写少的检索/提炼/核验）；旗舰模型留给主脑。
+5. **禁止用 `Kimi K3` 做子代理**（用户 2026-09-21 起长期有效）。
+6. 用户要求「并行做、主代理不等待」时，必须用 `trellis channel spawn --model "<已确认模型>"`
+   后台 worker；阻塞式子代理（如 VS Code `runSubagent`）**不得**冒充并行。
+7. 每次派发 prompt 首行必须是 `Active task: <task.py current 的任务路径>`。
+8. 派发 prompt 必须自包含（范围/问题/期望产出/是否允许写代码）。
+
+> 本小节写在 `TRELLIS:START/END` 标记块**之外**，因此不会被 Trellis 重新生成覆盖。
+

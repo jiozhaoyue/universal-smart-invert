@@ -23,6 +23,7 @@ These guides help you **ask the right questions before coding**.
 |-------|---------|-------------|
 | [Code Reuse Thinking Guide](./code-reuse-thinking-guide.md) | Identify patterns and reduce duplication | When you notice repeated patterns |
 | [Cross-Layer Thinking Guide](./cross-layer-thinking-guide.md) | Think through data flow across layers | Features spanning multiple layers |
+| [Subagent Model Policy](./subagent-model-policy.md) | 子代理/worker 派发前必须询问模型、禁止把近似名当全称 | **每次派发子代理之前**（强制） |
 
 ---
 
@@ -50,6 +51,17 @@ These guides help you **ask the right questions before coding**.
 - [ ] Multiple branches update the same derived state from `kind` / `action`
 
 → Read [Code Reuse Thinking Guide](./code-reuse-thinking-guide.md)
+
+### When Dispatching a Subagent / Worker (强制)
+
+- [ ] 已经**问过用户**用哪个模型并拿到确认了吗？
+- [ ] 用户给的模型名（含历史记录里的）被当成"近似名"去平台清单里找最匹配候选了吗？
+- [ ] 子代理用的是**能力最低且最匹配**的档位吗？
+- [ ] 用户要求"并行、主代理不等待"时，用的是 `trellis channel spawn`（真并行）而不是阻塞式子代理吗？
+- [ ] 派发 prompt 首行是 `Active task: <任务路径>` 吗？
+- [ ] 派发 prompt 自带范围/问题/期望产出吗？
+
+→ Read [Subagent Model Policy](./subagent-model-policy.md)
 
 ### When Verifying AI Cross-Review Results
 
