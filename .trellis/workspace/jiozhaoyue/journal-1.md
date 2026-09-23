@@ -250,3 +250,33 @@ Shipped v3.2.0: independent video picture tuning (brightness/contrast/saturate/w
 - 追加修复: 头像 URL 路径段 (/avatars/) 计入 META_ICON_RE (hashnode 类头像误反); 规则包导入改内联输入行 (内容脚本对话框不可依赖) + 允许环回 http; elementRules 合并按 id 幂等去重 (二次导入曾翻倍); 包动作词表 'keep'→'protect' (曾致 38→9)。
 - 教训: (1) 并行探针需按 PID 派生 CDP 端口与输出目录; (2) 动态新闻页 soak 必须按共有 URL 比较; (3) Chrome 137+ 品牌版忽略 --load-extension, 用 CDP Extensions.loadUnpacked + remote-debugging-pipe (fd3/4, \0 分隔); (4) 先量化像素数据再定阈值 (enwiki 徽标 opaqueRatio 0.707 推翻了透明假设)。
 - 门禁全程保持四绿; 每轮证据 (前后截图+决策报告) 落 dev/shots (gitignored)。
+
+
+## Session 10: v4.6.0 四分支并行集成: 本地优先判定/Alt+点击/悬停开关/暗色遮罩/子代理规则
+<!-- trellis-session: v=2 fp=64e6b13f31b1a329 -->
+
+**Date**: 2026-09-24
+**Task**: v4.6.0 四分支并行集成: 本地优先判定/Alt+点击/悬停开关/暗色遮罩/子代理规则
+**Branch**: `main`
+
+### Summary
+
+Session summary was not supplied.
+
+### Main Changes
+
+- universal-smart-invert.user.js, test.js, test-browser.js, dev/*, .trellis/spec/**, AGENTS.md, .trellis/agents/**
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `9308ece` | feat(v4.6.0): local-first decisions + one-click Alt verdicts + dark-veil awareness (4 parallel branches integrated) |
+
+### Testing
+
+- [OK] node --check 0; node test.js 0; node test-browser.js 24/24 100%; build+pack 0
+
+### Status
+
+[OK] **Completed**
