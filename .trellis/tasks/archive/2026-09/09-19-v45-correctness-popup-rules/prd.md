@@ -58,7 +58,14 @@ Fix wrong inversions and broken hover-preview-off toggle; add document-start tak
 - [x] 扩展 popup 可用且 bench 冒烟覆盖（manifest.action + 协议断言 + 语法检查）
 - [x] 真实站点视觉测试：GitHub(camo 反色正确) / Wikipedia(修复后 logo 保持) / BBC(照片保持)
 - [x] @version bump + README/README_EN v4.5 段 + @description 同步
-- [ ] commit + push
+- [x] commit + push（f6adc67 等，HEAD=origin/main）
+
+## 收尾核对（2026-09-23，本次会话）
+
+- 归档前复核：`node --check` OK、`node test.js` 全绿（v4.2/v4.5/v3.0/v3.1 各组 + Store 回归）。
+- 未在本次会话重跑 `test-browser.js`（需 Chrome + CDP 9222，上次会话 24/24 绿）与打包，视为已验证不变更。
+- 本任务归档，遗留的**用户新反馈**（弱网决策时序 / Alt+点击需多次 / 悬停开关仍还原 / 暗色遮罩场景）
+  转入新父任务 `09-23-v46-local-first-correctness` 跟踪。
 
 ## Notes
 
