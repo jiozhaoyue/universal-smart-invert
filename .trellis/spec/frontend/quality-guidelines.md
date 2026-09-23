@@ -249,3 +249,30 @@ rules below are battle-tested conventions from v1.4.0 → v2.0.0; follow them fo
       overrides still winning.
 - [ ] README.md / README_EN.md / `@version` / `@description` updated together and claims match
       actual behavior (no over-claiming perf numbers).
+
+## v4.6 Additions (toggle rows, gate-class residues, version self-check)
+
+- **Toggle rows must be captured and registered into `rowSyncs`** — never inline
+  `sec.add(ui.toggleRow(...))`. The inline pattern drops the returned row object, so its
+  `sync()` never runs: the checkbox renders the browser default (unchecked) regardless of the
+  live pref, and the user's first click on an unchecked box writes `onSet(true)` — the exact
+  OPPOSITE of the visible state. This was the real root cause of "悬停显示原图关不掉"
+  (v3.1.0–v4.3.0 shipped it; fixed in v4.5.0 via `const hoverRow = …; rowSyncs.push(() =>
+  hoverRow.sync())`; re-proven on a real browser by the v4.6-3 old-version control leg in
+  `dev/probe-hover-matrix.js`). Rule of thumb: a row whose getter exists but whose `sync` is
+  unregistered is a display/write desync waiting to be reported as "the toggle does nothing".
+- **Gate-prefix suppression beats residue cleanup** — hover-restore CSS lives under
+  `html.svi-hover-restore` (single gate class written only by `updateImageFilterCss` from
+  `state.hoverRestore`). A stale `.svi-fx-hover` on an element therefore CANNOT restore colors
+  once the gate class is off (proven live); toggling does not need to sweep residue classes to
+  be correct (the `mouseout` handler still clears them). When adding a new hover/restore
+  channel, prefix it with the same gate class instead of inventing a second toggle source.
+- **Dead gate rules hide unimplemented features** — `video[data-svi-inverted="true"]:hover`
+  never matches because `MEDIA_SELECTOR` excludes `video`; videos keep their inline
+  `!important` filter on hover in BOTH toggle states. Don't assume a CSS hover rule means the
+  feature exists — probe the live channel before claiming coverage (four-channel matrix:
+  CSS-filter img / fx content:url img / bg-image el / video).
+- **Version self-check is local-only** — the settings modal header carries a `.svi-modal-ver`
+  badge (`v` + `SCRIPT_VERSION`) so users on stale installs can self-identify (the ≤4.3.0
+  cohort above). No remote version polling: automatic network telemetry stays forbidden.
+  Bench asserts the badge exists and equals `@version` (Scenario 20b).

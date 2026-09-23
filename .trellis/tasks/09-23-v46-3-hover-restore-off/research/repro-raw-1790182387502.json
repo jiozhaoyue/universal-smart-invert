@@ -1,0 +1,28 @@
+{
+  "scriptVersion": "4.5.0",
+  "matrix": [],
+  "extras": {
+    "oldVersion": {
+      "version": "4.3.0 (8c1ee9f~1)",
+      "displayClick": {
+        "shownBefore": false,
+        "checkedAfterClick": true
+      },
+      "persistedAfterClick": {
+        "gateClass": true,
+        "pref": true
+      },
+      "hoverAfterClick": {
+        "filter": "none",
+        "inverted": "true"
+      },
+      "secondClick": {
+        "gateClass": false,
+        "pref": false
+      },
+      "hoverAfterSecondClick": {
+        "filter": "invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9)"
+      }
+    }
+  }
+}

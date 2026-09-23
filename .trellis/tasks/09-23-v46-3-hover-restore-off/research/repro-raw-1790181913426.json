@@ -1,0 +1,611 @@
+{
+  "scriptVersion": "4.5.0",
+  "matrix": [
+    {
+      "restore": 0,
+      "fx": "full",
+      "before": {
+        "gateClass": false,
+        "css": {
+          "inverted": "true",
+          "fx": null,
+          "bginv": null,
+          "classList": [],
+          "filter": "invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9)",
+          "content": "normal"
+        },
+        "fx": {
+          "inverted": "true",
+          "fx": null,
+          "bginv": null,
+          "classList": [],
+          "filter": "invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9)",
+          "content": "normal"
+        },
+        "bg": {
+          "inverted": null,
+          "fx": null,
+          "bginv": "true",
+          "classList": [],
+          "filter": "invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9)",
+          "content": "normal"
+        },
+        "video": {
+          "filter": "none",
+          "inline": "",
+          "playing": true
+        },
+        "pref": false
+      },
+      "after": {
+        "css": {
+          "gateClass": false,
+          "css": {
+            "inverted": "true",
+            "fx": null,
+            "bginv": null,
+            "classList": [],
+            "filter": "invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9)",
+            "content": "normal"
+          },
+          "fx": {
+            "inverted": "true",
+            "fx": null,
+            "bginv": null,
+            "classList": [],
+            "filter": "invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9)",
+            "content": "normal"
+          },
+          "bg": {
+            "inverted": null,
+            "fx": null,
+            "bginv": "true",
+            "classList": [],
+            "filter": "invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9)",
+            "content": "normal"
+          },
+          "video": {
+            "filter": "none",
+            "inline": "",
+            "playing": true
+          },
+          "pref": false
+        },
+        "fx": {
+          "gateClass": false,
+          "css": {
+            "inverted": "true",
+            "fx": null,
+            "bginv": null,
+            "classList": [],
+            "filter": "invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9)",
+            "content": "normal"
+          },
+          "fx": {
+            "inverted": "true",
+            "fx": null,
+            "bginv": null,
+            "classList": [],
+            "filter": "invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9)",
+            "content": "normal"
+          },
+          "bg": {
+            "inverted": null,
+            "fx": null,
+            "bginv": "true",
+            "classList": [],
+            "filter": "invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9)",
+            "content": "normal"
+          },
+          "video": {
+            "filter": "none",
+            "inline": "",
+            "playing": true
+          },
+          "pref": false
+        },
+        "bg": {
+          "gateClass": false,
+          "css": {
+            "inverted": "true",
+            "fx": null,
+            "bginv": null,
+            "classList": [],
+            "filter": "invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9)",
+            "content": "normal"
+          },
+          "fx": {
+            "inverted": "true",
+            "fx": null,
+            "bginv": null,
+            "classList": [],
+            "filter": "invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9)",
+            "content": "normal"
+          },
+          "bg": {
+            "inverted": null,
+            "fx": null,
+            "bginv": "true",
+            "classList": [],
+            "filter": "invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9)",
+            "content": "normal"
+          },
+          "video": {
+            "filter": "none",
+            "inline": "",
+            "playing": true
+          },
+          "pref": false
+        }
+      }
+    },
+    {
+      "restore": 0,
+      "fx": "luma",
+      "before": {
+        "gateClass": false,
+        "css": {
+          "inverted": null,
+          "fx": "fx81546dbc",
+          "bginv": null,
+          "classList": [],
+          "filter": "none",
+          "content": "url(\"blob:http://127.0.0.1:8877/be5e3dca-1947-4ae4-939b-51d5349a613e\")"
+        },
+        "fx": {
+          "inverted": null,
+          "fx": "fx2dc52d0c",
+          "bginv": null,
+          "classList": [],
+          "filter": "none",
+          "content": "url(\"blob:http://127.0.0.1:8877/f4d8e6b9-4cb0-4a7b-b3d9-3a9b71a517e0\")"
+        },
+        "bg": {
+          "inverted": null,
+          "fx": null,
+          "bginv": "true",
+          "classList": [],
+          "filter": "invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9)",
+          "content": "normal"
+        },
+        "video": {
+          "filter": "none",
+          "inline": "",
+          "playing": true
+        },
+        "pref": false
+      },
+      "after": {
+        "css": {
+          "gateClass": false,
+          "css": {
+            "inverted": null,
+            "fx": "fx81546dbc",
+            "bginv": null,
+            "classList": [],
+            "filter": "none",
+            "content": "url(\"blob:http://127.0.0.1:8877/be5e3dca-1947-4ae4-939b-51d5349a613e\")"
+          },
+          "fx": {
+            "inverted": null,
+            "fx": "fx2dc52d0c",
+            "bginv": null,
+            "classList": [],
+            "filter": "none",
+            "content": "url(\"blob:http://127.0.0.1:8877/f4d8e6b9-4cb0-4a7b-b3d9-3a9b71a517e0\")"
+          },
+          "bg": {
+            "inverted": null,
+            "fx": null,
+            "bginv": "true",
+            "classList": [],
+            "filter": "invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9)",
+            "content": "normal"
+          },
+          "video": {
+            "filter": "none",
+            "inline": "",
+            "playing": true
+          },
+          "pref": false
+        },
+        "fx": {
+          "gateClass": false,
+          "css": {
+            "inverted": null,
+            "fx": "fx81546dbc",
+            "bginv": null,
+            "classList": [],
+            "filter": "none",
+            "content": "url(\"blob:http://127.0.0.1:8877/be5e3dca-1947-4ae4-939b-51d5349a613e\")"
+          },
+          "fx": {
+            "inverted": null,
+            "fx": "fx2dc52d0c",
+            "bginv": null,
+            "classList": [],
+            "filter": "none",
+            "content": "url(\"blob:http://127.0.0.1:8877/f4d8e6b9-4cb0-4a7b-b3d9-3a9b71a517e0\")"
+          },
+          "bg": {
+            "inverted": null,
+            "fx": null,
+            "bginv": "true",
+            "classList": [],
+            "filter": "invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9)",
+            "content": "normal"
+          },
+          "video": {
+            "filter": "none",
+            "inline": "",
+            "playing": true
+          },
+          "pref": false
+        },
+        "bg": {
+          "gateClass": false,
+          "css": {
+            "inverted": null,
+            "fx": "fx81546dbc",
+            "bginv": null,
+            "classList": [],
+            "filter": "none",
+            "content": "url(\"blob:http://127.0.0.1:8877/be5e3dca-1947-4ae4-939b-51d5349a613e\")"
+          },
+          "fx": {
+            "inverted": null,
+            "fx": "fx2dc52d0c",
+            "bginv": null,
+            "classList": [],
+            "filter": "none",
+            "content": "url(\"blob:http://127.0.0.1:8877/f4d8e6b9-4cb0-4a7b-b3d9-3a9b71a517e0\")"
+          },
+          "bg": {
+            "inverted": null,
+            "fx": null,
+            "bginv": "true",
+            "classList": [],
+            "filter": "invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9)",
+            "content": "normal"
+          },
+          "video": {
+            "filter": "none",
+            "inline": "",
+            "playing": true
+          },
+          "pref": false
+        }
+      }
+    },
+    {
+      "restore": 1,
+      "fx": "full",
+      "before": {
+        "gateClass": true,
+        "css": {
+          "inverted": "true",
+          "fx": null,
+          "bginv": null,
+          "classList": [],
+          "filter": "invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9)",
+          "content": "normal"
+        },
+        "fx": {
+          "inverted": "true",
+          "fx": null,
+          "bginv": null,
+          "classList": [],
+          "filter": "invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9)",
+          "content": "normal"
+        },
+        "bg": {
+          "inverted": null,
+          "fx": null,
+          "bginv": "true",
+          "classList": [],
+          "filter": "invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9)",
+          "content": "normal"
+        },
+        "video": {
+          "filter": "none",
+          "inline": "",
+          "playing": true
+        },
+        "pref": true
+      },
+      "after": {
+        "css": {
+          "gateClass": true,
+          "css": {
+            "inverted": "true",
+            "fx": null,
+            "bginv": null,
+            "classList": [],
+            "filter": "none",
+            "content": "normal"
+          },
+          "fx": {
+            "inverted": "true",
+            "fx": null,
+            "bginv": null,
+            "classList": [],
+            "filter": "invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9)",
+            "content": "normal"
+          },
+          "bg": {
+            "inverted": null,
+            "fx": null,
+            "bginv": "true",
+            "classList": [],
+            "filter": "invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9)",
+            "content": "normal"
+          },
+          "video": {
+            "filter": "none",
+            "inline": "",
+            "playing": true
+          },
+          "pref": true
+        },
+        "fx": {
+          "gateClass": true,
+          "css": {
+            "inverted": "true",
+            "fx": null,
+            "bginv": null,
+            "classList": [],
+            "filter": "invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9)",
+            "content": "normal"
+          },
+          "fx": {
+            "inverted": "true",
+            "fx": null,
+            "bginv": null,
+            "classList": [],
+            "filter": "none",
+            "content": "normal"
+          },
+          "bg": {
+            "inverted": null,
+            "fx": null,
+            "bginv": "true",
+            "classList": [],
+            "filter": "invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9)",
+            "content": "normal"
+          },
+          "video": {
+            "filter": "none",
+            "inline": "",
+            "playing": true
+          },
+          "pref": true
+        },
+        "bg": {
+          "gateClass": true,
+          "css": {
+            "inverted": "true",
+            "fx": null,
+            "bginv": null,
+            "classList": [],
+            "filter": "invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9)",
+            "content": "normal"
+          },
+          "fx": {
+            "inverted": "true",
+            "fx": null,
+            "bginv": null,
+            "classList": [],
+            "filter": "invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9)",
+            "content": "normal"
+          },
+          "bg": {
+            "inverted": null,
+            "fx": null,
+            "bginv": "true",
+            "classList": [],
+            "filter": "none",
+            "content": "normal"
+          },
+          "video": {
+            "filter": "none",
+            "inline": "",
+            "playing": true
+          },
+          "pref": true
+        }
+      }
+    },
+    {
+      "restore": 1,
+      "fx": "luma",
+      "before": {
+        "gateClass": true,
+        "css": {
+          "inverted": null,
+          "fx": "fx81546dbc",
+          "bginv": null,
+          "classList": [],
+          "filter": "none",
+          "content": "url(\"blob:http://127.0.0.1:8877/33d21247-4817-4b94-b97a-a97481338f9b\")"
+        },
+        "fx": {
+          "inverted": null,
+          "fx": "fx2dc52d0c",
+          "bginv": null,
+          "classList": [],
+          "filter": "none",
+          "content": "url(\"blob:http://127.0.0.1:8877/b53968f5-7259-4cc3-ad3b-be23beb583f9\")"
+        },
+        "bg": {
+          "inverted": null,
+          "fx": null,
+          "bginv": "true",
+          "classList": [],
+          "filter": "invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9)",
+          "content": "normal"
+        },
+        "video": {
+          "filter": "none",
+          "inline": "",
+          "playing": true
+        },
+        "pref": true
+      },
+      "after": {
+        "css": {
+          "gateClass": true,
+          "css": {
+            "inverted": null,
+            "fx": "fx81546dbc",
+            "bginv": null,
+            "classList": [
+              "svi-fx-hover"
+            ],
+            "filter": "none",
+            "content": "normal"
+          },
+          "fx": {
+            "inverted": null,
+            "fx": "fx2dc52d0c",
+            "bginv": null,
+            "classList": [],
+            "filter": "none",
+            "content": "url(\"blob:http://127.0.0.1:8877/b53968f5-7259-4cc3-ad3b-be23beb583f9\")"
+          },
+          "bg": {
+            "inverted": null,
+            "fx": null,
+            "bginv": "true",
+            "classList": [],
+            "filter": "invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9)",
+            "content": "normal"
+          },
+          "video": {
+            "filter": "none",
+            "inline": "",
+            "playing": true
+          },
+          "pref": true
+        },
+        "fx": {
+          "gateClass": true,
+          "css": {
+            "inverted": null,
+            "fx": "fx81546dbc",
+            "bginv": null,
+            "classList": [],
+            "filter": "none",
+            "content": "url(\"blob:http://127.0.0.1:8877/33d21247-4817-4b94-b97a-a97481338f9b\")"
+          },
+          "fx": {
+            "inverted": null,
+            "fx": "fx2dc52d0c",
+            "bginv": null,
+            "classList": [
+              "svi-fx-hover"
+            ],
+            "filter": "none",
+            "content": "normal"
+          },
+          "bg": {
+            "inverted": null,
+            "fx": null,
+            "bginv": "true",
+            "classList": [],
+            "filter": "invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9)",
+            "content": "normal"
+          },
+          "video": {
+            "filter": "none",
+            "inline": "",
+            "playing": true
+          },
+          "pref": true
+        },
+        "bg": {
+          "gateClass": true,
+          "css": {
+            "inverted": null,
+            "fx": "fx81546dbc",
+            "bginv": null,
+            "classList": [],
+            "filter": "none",
+            "content": "url(\"blob:http://127.0.0.1:8877/33d21247-4817-4b94-b97a-a97481338f9b\")"
+          },
+          "fx": {
+            "inverted": null,
+            "fx": "fx2dc52d0c",
+            "bginv": null,
+            "classList": [],
+            "filter": "none",
+            "content": "url(\"blob:http://127.0.0.1:8877/b53968f5-7259-4cc3-ad3b-be23beb583f9\")"
+          },
+          "bg": {
+            "inverted": null,
+            "fx": null,
+            "bginv": "true",
+            "classList": [],
+            "filter": "none",
+            "content": "normal"
+          },
+          "video": {
+            "filter": "none",
+            "inline": "",
+            "playing": true
+          },
+          "pref": true
+        }
+      }
+    }
+  ],
+  "extras": {
+    "video@restore=1": {
+      "vBefore": {
+        "filter": "invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9)",
+        "inline": "invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9)"
+      },
+      "vAfter": {
+        "filter": "invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9)",
+        "inline": "invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9)"
+      }
+    },
+    "video@restore=0": {
+      "vBefore": {
+        "filter": "invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9)",
+        "inline": "invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9)"
+      },
+      "vAfter": {
+        "filter": "invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9)",
+        "inline": "invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9)"
+      }
+    },
+    "H1_residue": {
+      "cbChecked": false,
+      "gateClass": false,
+      "elClass": [
+        "svi-fx-hover"
+      ],
+      "content": "url(\"blob:http://127.0.0.1:8877/6b12f306-6693-425a-9f63-3e0dea419011\")",
+      "pref": true
+    },
+    "H3_off_reload": {
+      "gateClass": true,
+      "pref": true,
+      "fx": "fx2dc52d0c",
+      "content": "url(\"blob:http://127.0.0.1:8877/f63e655d-1b33-479c-9864-84105b3c2147\")"
+    },
+    "H3_on_reload": {
+      "gateClass": true,
+      "pref": true,
+      "content": "url(\"blob:http://127.0.0.1:8877/5325c21d-e1ab-41c8-8e4f-1caa48098dc7\")"
+    },
+    "H3_on_hover": {
+      "hoverClass": true,
+      "content": "normal"
+    },
+    "htmlClasses": [
+      "svi-img-invert-on",
+      "svi-hover-restore"
+    ]
+  }
+}

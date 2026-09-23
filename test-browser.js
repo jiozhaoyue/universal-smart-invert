@@ -529,9 +529,11 @@ const HOVER_HTML = `<!DOCTYPE html>
     });
   })();
 <\/script>
-<style>body { background: #121212; } img { display:block; width:200px; height:150px; margin: 16px; }</style>
+<style>body { background: #121212; } img { display:block; width:200px; height:150px; margin: 16px; }
+  #hover-bg { width:200px; height:150px; margin:16px; }</style>
 </head><body>
   <img id="hover-css" src="/img/white-diagram.svg" alt="css path">
+  <div id="hover-bg" style="background-image: url('/img/white-diagram.svg'); background-size: cover;"></div>
   <script>
     ${executableScript}
   <\/script>
@@ -1703,13 +1705,18 @@ async function main() {
         return {
           inverted: img.getAttribute('data-svi-inverted') === 'true',
           restoreClass: document.documentElement.classList.contains('svi-hover-restore'),
-          rect: JSON.stringify(img.getBoundingClientRect())
+          bgInv: document.getElementById('hover-bg').getAttribute('data-svi-bginv'),
+          rect: JSON.stringify(img.getBoundingClientRect()),
+          bgRect: JSON.stringify(document.getElementById('hover-bg').getBoundingClientRect())
         };
       })()`,
       returnByValue: true
     })).result.value;
     assert.strictEqual(hoverSetup.inverted, true, 'hover bench: white diagram inverted (CSS filter path)');
     assert.strictEqual(hoverSetup.restoreClass, false, 'svi-hover-restore class must be OFF when pref disabled');
+    // v4.6-3: 背景图通道元素须被 BgImageEngine 打标 (首扫在 +5s, 轮询等待)
+    const bgTagged = await hoverAssert(`document.getElementById('hover-bg').getAttribute('data-svi-bginv') === 'true'`, 9000);
+    assert.strictEqual(bgTagged, true, 'hover bench: bg-image element must be tagged data-svi-bginv (v4.6-3 four-channel matrix)');
     const cssRect = JSON.parse(hoverSetup.rect);
     await sendCdp('Input.dispatchMouseEvent', {
       type: 'mouseMoved',
@@ -1723,6 +1730,21 @@ async function main() {
     })).result.value;
     console.log('CSS path hover filter:', cssHover);
     assert.ok(String(cssHover).indexOf('invert(1)') !== -1, 'hoverRestore=false: CSS filter path keeps inversion on hover, got ' + cssHover);
+    await sendCdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 4, y: 4 });
+    // v4.6-3: 背景图通道关闭态悬停 —— filter 必须保持反色
+    const bgRect15 = JSON.parse(hoverSetup.bgRect);
+    await sendCdp('Input.dispatchMouseEvent', {
+      type: 'mouseMoved',
+      x: Math.round(bgRect15.left + bgRect15.width / 2),
+      y: Math.round(bgRect15.top + bgRect15.height / 2)
+    });
+    await new Promise((r) => setTimeout(r, 250));
+    const bgHoverOff = (await sendCdp('Runtime.evaluate', {
+      expression: `getComputedStyle(document.getElementById('hover-bg')).filter`,
+      returnByValue: true
+    })).result.value;
+    console.log('BG path hover filter (restore=0):', bgHoverOff);
+    assert.ok(String(bgHoverOff).indexOf('invert(1)') !== -1, 'hoverRestore=false: bg-image path keeps inversion on hover, got ' + bgHoverOff);
     await sendCdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 4, y: 4 });
 
     console.log('[Test] Scenario 15b: /hover-page?restore=0&fx=luma (hoverRestore=false, fx content:url path) ...');
@@ -1782,6 +1804,25 @@ async function main() {
       returnByValue: true
     })).result.value;
     assert.ok(/^none/.test(String(backHover)), 'hoverRestore=true: hover restores original (filter none), got ' + backHover);
+    await sendCdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 4, y: 4 });
+    // v4.6-3: 背景图通道开启态悬停 —— filter 必须还原 none (防过度修复)
+    const backSetup2 = (await sendCdp('Runtime.evaluate', {
+      expression: `JSON.stringify(document.getElementById('hover-bg').getBoundingClientRect())`,
+      returnByValue: true
+    })).result.value;
+    const backBgRect = JSON.parse(backSetup2);
+    await sendCdp('Input.dispatchMouseEvent', {
+      type: 'mouseMoved',
+      x: Math.round(backBgRect.left + backBgRect.width / 2),
+      y: Math.round(backBgRect.top + backBgRect.height / 2)
+    });
+    await new Promise((r) => setTimeout(r, 250));
+    const bgHoverOn = (await sendCdp('Runtime.evaluate', {
+      expression: `getComputedStyle(document.getElementById('hover-bg')).filter`,
+      returnByValue: true
+    })).result.value;
+    console.log('BG path hover filter (restore=1):', bgHoverOn);
+    assert.ok(/^none/.test(String(bgHoverOn)), 'hoverRestore=true: bg-image path restores original on hover, got ' + bgHoverOn);
     await sendCdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 4, y: 4 });
 
     // ============================================================
@@ -2202,6 +2243,14 @@ async function main() {
       returnByValue: true
     });
     await new Promise((r) => setTimeout(r, 300));
+    // v4.6-3 版本自检 (H4 分支交付物): 面板头部必须显著显示运行版本徽标
+    const verBadge = (await sendCdp('Runtime.evaluate', {
+      expression: `(() => { const v = document.querySelector('.svi-modal-ver'); return v ? v.textContent : null; })()`,
+      returnByValue: true
+    })).result.value;
+    assert.ok(verBadge && /^v\d+\.\d+\.\d+$/.test(verBadge), 'settings modal must display a version badge (.svi-modal-ver), got: ' + verBadge);
+    const userscriptVersion = (/@version\s+([\d.]+)/.exec(userscriptCode) || [])[1];
+    assert.strictEqual(verBadge, 'v' + userscriptVersion, 'version badge must match the userscript @version');
     const rowAudit = (await sendCdp('Runtime.evaluate', {
       expression: `(() => {
         const prefs = window.__svi.prefs;

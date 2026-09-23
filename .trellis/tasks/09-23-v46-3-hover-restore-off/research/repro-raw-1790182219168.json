@@ -1,0 +1,633 @@
+{
+  "scriptVersion": "4.5.0",
+  "matrix": [
+    {
+      "restore": 0,
+      "fx": "full",
+      "before": {
+        "gateClass": false,
+        "css": {
+          "inverted": "true",
+          "fx": null,
+          "bginv": null,
+          "classList": [],
+          "filter": "invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9)",
+          "content": "normal"
+        },
+        "fx": {
+          "inverted": "true",
+          "fx": null,
+          "bginv": null,
+          "classList": [],
+          "filter": "invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9)",
+          "content": "normal"
+        },
+        "bg": {
+          "inverted": null,
+          "fx": null,
+          "bginv": "true",
+          "classList": [],
+          "filter": "invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9)",
+          "content": "normal"
+        },
+        "video": {
+          "filter": "none",
+          "inline": "",
+          "playing": true
+        },
+        "pref": false
+      },
+      "after": {
+        "css": {
+          "gateClass": false,
+          "css": {
+            "inverted": "true",
+            "fx": null,
+            "bginv": null,
+            "classList": [],
+            "filter": "invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9)",
+            "content": "normal"
+          },
+          "fx": {
+            "inverted": "true",
+            "fx": null,
+            "bginv": null,
+            "classList": [],
+            "filter": "invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9)",
+            "content": "normal"
+          },
+          "bg": {
+            "inverted": null,
+            "fx": null,
+            "bginv": "true",
+            "classList": [],
+            "filter": "invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9)",
+            "content": "normal"
+          },
+          "video": {
+            "filter": "none",
+            "inline": "",
+            "playing": true
+          },
+          "pref": false
+        },
+        "fx": {
+          "gateClass": false,
+          "css": {
+            "inverted": "true",
+            "fx": null,
+            "bginv": null,
+            "classList": [],
+            "filter": "invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9)",
+            "content": "normal"
+          },
+          "fx": {
+            "inverted": "true",
+            "fx": null,
+            "bginv": null,
+            "classList": [],
+            "filter": "invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9)",
+            "content": "normal"
+          },
+          "bg": {
+            "inverted": null,
+            "fx": null,
+            "bginv": "true",
+            "classList": [],
+            "filter": "invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9)",
+            "content": "normal"
+          },
+          "video": {
+            "filter": "none",
+            "inline": "",
+            "playing": true
+          },
+          "pref": false
+        },
+        "bg": {
+          "gateClass": false,
+          "css": {
+            "inverted": "true",
+            "fx": null,
+            "bginv": null,
+            "classList": [],
+            "filter": "invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9)",
+            "content": "normal"
+          },
+          "fx": {
+            "inverted": "true",
+            "fx": null,
+            "bginv": null,
+            "classList": [],
+            "filter": "invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9)",
+            "content": "normal"
+          },
+          "bg": {
+            "inverted": null,
+            "fx": null,
+            "bginv": "true",
+            "classList": [],
+            "filter": "invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9)",
+            "content": "normal"
+          },
+          "video": {
+            "filter": "none",
+            "inline": "",
+            "playing": true
+          },
+          "pref": false
+        }
+      }
+    },
+    {
+      "restore": 0,
+      "fx": "luma",
+      "before": {
+        "gateClass": false,
+        "css": {
+          "inverted": null,
+          "fx": "fx81546dbc",
+          "bginv": null,
+          "classList": [],
+          "filter": "none",
+          "content": "url(\"blob:http://127.0.0.1:8877/69840d75-75c6-4b2d-8e0a-9b000a0418eb\")"
+        },
+        "fx": {
+          "inverted": null,
+          "fx": "fx2dc52d0c",
+          "bginv": null,
+          "classList": [],
+          "filter": "none",
+          "content": "url(\"blob:http://127.0.0.1:8877/781d37fb-f60a-4d59-9f35-a76f6d33f2d3\")"
+        },
+        "bg": {
+          "inverted": null,
+          "fx": null,
+          "bginv": "true",
+          "classList": [],
+          "filter": "invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9)",
+          "content": "normal"
+        },
+        "video": {
+          "filter": "none",
+          "inline": "",
+          "playing": true
+        },
+        "pref": false
+      },
+      "after": {
+        "css": {
+          "gateClass": false,
+          "css": {
+            "inverted": null,
+            "fx": "fx81546dbc",
+            "bginv": null,
+            "classList": [],
+            "filter": "none",
+            "content": "url(\"blob:http://127.0.0.1:8877/69840d75-75c6-4b2d-8e0a-9b000a0418eb\")"
+          },
+          "fx": {
+            "inverted": null,
+            "fx": "fx2dc52d0c",
+            "bginv": null,
+            "classList": [],
+            "filter": "none",
+            "content": "url(\"blob:http://127.0.0.1:8877/781d37fb-f60a-4d59-9f35-a76f6d33f2d3\")"
+          },
+          "bg": {
+            "inverted": null,
+            "fx": null,
+            "bginv": "true",
+            "classList": [],
+            "filter": "invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9)",
+            "content": "normal"
+          },
+          "video": {
+            "filter": "none",
+            "inline": "",
+            "playing": true
+          },
+          "pref": false
+        },
+        "fx": {
+          "gateClass": false,
+          "css": {
+            "inverted": null,
+            "fx": "fx81546dbc",
+            "bginv": null,
+            "classList": [],
+            "filter": "none",
+            "content": "url(\"blob:http://127.0.0.1:8877/69840d75-75c6-4b2d-8e0a-9b000a0418eb\")"
+          },
+          "fx": {
+            "inverted": null,
+            "fx": "fx2dc52d0c",
+            "bginv": null,
+            "classList": [],
+            "filter": "none",
+            "content": "url(\"blob:http://127.0.0.1:8877/781d37fb-f60a-4d59-9f35-a76f6d33f2d3\")"
+          },
+          "bg": {
+            "inverted": null,
+            "fx": null,
+            "bginv": "true",
+            "classList": [],
+            "filter": "invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9)",
+            "content": "normal"
+          },
+          "video": {
+            "filter": "none",
+            "inline": "",
+            "playing": true
+          },
+          "pref": false
+        },
+        "bg": {
+          "gateClass": false,
+          "css": {
+            "inverted": null,
+            "fx": "fx81546dbc",
+            "bginv": null,
+            "classList": [],
+            "filter": "none",
+            "content": "url(\"blob:http://127.0.0.1:8877/69840d75-75c6-4b2d-8e0a-9b000a0418eb\")"
+          },
+          "fx": {
+            "inverted": null,
+            "fx": "fx2dc52d0c",
+            "bginv": null,
+            "classList": [],
+            "filter": "none",
+            "content": "url(\"blob:http://127.0.0.1:8877/781d37fb-f60a-4d59-9f35-a76f6d33f2d3\")"
+          },
+          "bg": {
+            "inverted": null,
+            "fx": null,
+            "bginv": "true",
+            "classList": [],
+            "filter": "invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9)",
+            "content": "normal"
+          },
+          "video": {
+            "filter": "none",
+            "inline": "",
+            "playing": true
+          },
+          "pref": false
+        }
+      }
+    },
+    {
+      "restore": 1,
+      "fx": "full",
+      "before": {
+        "gateClass": true,
+        "css": {
+          "inverted": "true",
+          "fx": null,
+          "bginv": null,
+          "classList": [],
+          "filter": "invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9)",
+          "content": "normal"
+        },
+        "fx": {
+          "inverted": "true",
+          "fx": null,
+          "bginv": null,
+          "classList": [],
+          "filter": "invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9)",
+          "content": "normal"
+        },
+        "bg": {
+          "inverted": null,
+          "fx": null,
+          "bginv": "true",
+          "classList": [],
+          "filter": "invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9)",
+          "content": "normal"
+        },
+        "video": {
+          "filter": "none",
+          "inline": "",
+          "playing": true
+        },
+        "pref": true
+      },
+      "after": {
+        "css": {
+          "gateClass": true,
+          "css": {
+            "inverted": "true",
+            "fx": null,
+            "bginv": null,
+            "classList": [],
+            "filter": "none",
+            "content": "normal"
+          },
+          "fx": {
+            "inverted": "true",
+            "fx": null,
+            "bginv": null,
+            "classList": [],
+            "filter": "invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9)",
+            "content": "normal"
+          },
+          "bg": {
+            "inverted": null,
+            "fx": null,
+            "bginv": "true",
+            "classList": [],
+            "filter": "invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9)",
+            "content": "normal"
+          },
+          "video": {
+            "filter": "none",
+            "inline": "",
+            "playing": true
+          },
+          "pref": true
+        },
+        "fx": {
+          "gateClass": true,
+          "css": {
+            "inverted": "true",
+            "fx": null,
+            "bginv": null,
+            "classList": [],
+            "filter": "invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9)",
+            "content": "normal"
+          },
+          "fx": {
+            "inverted": "true",
+            "fx": null,
+            "bginv": null,
+            "classList": [],
+            "filter": "none",
+            "content": "normal"
+          },
+          "bg": {
+            "inverted": null,
+            "fx": null,
+            "bginv": "true",
+            "classList": [],
+            "filter": "invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9)",
+            "content": "normal"
+          },
+          "video": {
+            "filter": "none",
+            "inline": "",
+            "playing": true
+          },
+          "pref": true
+        },
+        "bg": {
+          "gateClass": true,
+          "css": {
+            "inverted": "true",
+            "fx": null,
+            "bginv": null,
+            "classList": [],
+            "filter": "invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9)",
+            "content": "normal"
+          },
+          "fx": {
+            "inverted": "true",
+            "fx": null,
+            "bginv": null,
+            "classList": [],
+            "filter": "invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9)",
+            "content": "normal"
+          },
+          "bg": {
+            "inverted": null,
+            "fx": null,
+            "bginv": "true",
+            "classList": [],
+            "filter": "none",
+            "content": "normal"
+          },
+          "video": {
+            "filter": "none",
+            "inline": "",
+            "playing": true
+          },
+          "pref": true
+        }
+      }
+    },
+    {
+      "restore": 1,
+      "fx": "luma",
+      "before": {
+        "gateClass": true,
+        "css": {
+          "inverted": null,
+          "fx": "fx81546dbc",
+          "bginv": null,
+          "classList": [],
+          "filter": "none",
+          "content": "url(\"blob:http://127.0.0.1:8877/38639926-3f9f-44e9-a3fd-b6a0e1d93d97\")"
+        },
+        "fx": {
+          "inverted": null,
+          "fx": "fx2dc52d0c",
+          "bginv": null,
+          "classList": [],
+          "filter": "none",
+          "content": "url(\"blob:http://127.0.0.1:8877/41c7ffcd-dfe7-432e-83a6-a1bb174e36f5\")"
+        },
+        "bg": {
+          "inverted": null,
+          "fx": null,
+          "bginv": "true",
+          "classList": [],
+          "filter": "invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9)",
+          "content": "normal"
+        },
+        "video": {
+          "filter": "none",
+          "inline": "",
+          "playing": true
+        },
+        "pref": true
+      },
+      "after": {
+        "css": {
+          "gateClass": true,
+          "css": {
+            "inverted": null,
+            "fx": "fx81546dbc",
+            "bginv": null,
+            "classList": [
+              "svi-fx-hover"
+            ],
+            "filter": "none",
+            "content": "normal"
+          },
+          "fx": {
+            "inverted": null,
+            "fx": "fx2dc52d0c",
+            "bginv": null,
+            "classList": [],
+            "filter": "none",
+            "content": "url(\"blob:http://127.0.0.1:8877/41c7ffcd-dfe7-432e-83a6-a1bb174e36f5\")"
+          },
+          "bg": {
+            "inverted": null,
+            "fx": null,
+            "bginv": "true",
+            "classList": [],
+            "filter": "invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9)",
+            "content": "normal"
+          },
+          "video": {
+            "filter": "none",
+            "inline": "",
+            "playing": true
+          },
+          "pref": true
+        },
+        "fx": {
+          "gateClass": true,
+          "css": {
+            "inverted": null,
+            "fx": "fx81546dbc",
+            "bginv": null,
+            "classList": [],
+            "filter": "none",
+            "content": "url(\"blob:http://127.0.0.1:8877/38639926-3f9f-44e9-a3fd-b6a0e1d93d97\")"
+          },
+          "fx": {
+            "inverted": null,
+            "fx": "fx2dc52d0c",
+            "bginv": null,
+            "classList": [
+              "svi-fx-hover"
+            ],
+            "filter": "none",
+            "content": "normal"
+          },
+          "bg": {
+            "inverted": null,
+            "fx": null,
+            "bginv": "true",
+            "classList": [],
+            "filter": "invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9)",
+            "content": "normal"
+          },
+          "video": {
+            "filter": "none",
+            "inline": "",
+            "playing": true
+          },
+          "pref": true
+        },
+        "bg": {
+          "gateClass": true,
+          "css": {
+            "inverted": null,
+            "fx": "fx81546dbc",
+            "bginv": null,
+            "classList": [],
+            "filter": "none",
+            "content": "url(\"blob:http://127.0.0.1:8877/38639926-3f9f-44e9-a3fd-b6a0e1d93d97\")"
+          },
+          "fx": {
+            "inverted": null,
+            "fx": "fx2dc52d0c",
+            "bginv": null,
+            "classList": [],
+            "filter": "none",
+            "content": "url(\"blob:http://127.0.0.1:8877/41c7ffcd-dfe7-432e-83a6-a1bb174e36f5\")"
+          },
+          "bg": {
+            "inverted": null,
+            "fx": null,
+            "bginv": "true",
+            "classList": [],
+            "filter": "none",
+            "content": "normal"
+          },
+          "video": {
+            "filter": "none",
+            "inline": "",
+            "playing": true
+          },
+          "pref": true
+        }
+      }
+    }
+  ],
+  "extras": {
+    "video@restore=1": {
+      "vBefore": {
+        "filter": "invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9)",
+        "inline": "invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9)"
+      },
+      "vAfter": {
+        "filter": "invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9)",
+        "inline": "invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9)"
+      }
+    },
+    "video@restore=0": {
+      "vBefore": {
+        "filter": "invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9)",
+        "inline": "invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9)"
+      },
+      "vAfter": {
+        "filter": "invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9)",
+        "inline": "invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9)"
+      }
+    },
+    "H1_residue": {
+      "cbChecked": false,
+      "gateClass": false,
+      "elClass": [
+        "svi-fx-hover"
+      ],
+      "content": "url(\"blob:http://127.0.0.1:8877/24b6d478-5696-4b27-96d2-6d9e729cceb8\")",
+      "pref": true
+    },
+    "H3_off_reload": {
+      "gateClass": false,
+      "pref": false,
+      "fx": "fx2dc52d0c",
+      "content": "url(\"blob:http://127.0.0.1:8877/d597e994-183d-48e0-b8f5-8f14a85798c0\")"
+    },
+    "H3_on_reload": {
+      "gateClass": true,
+      "pref": true,
+      "content": "url(\"blob:http://127.0.0.1:8877/6a7d9d87-64ea-486b-aec2-e0a1970a4359\")"
+    },
+    "H3_on_hover": {
+      "hoverClass": true,
+      "content": "normal"
+    },
+    "htmlClasses": [
+      "svi-img-invert-on",
+      "svi-hover-restore"
+    ],
+    "oldVersion": {
+      "version": "4.3.0 (8c1ee9f~1)",
+      "displayClick": {
+        "shownBefore": false,
+        "afterClick": {
+          "checked": true,
+          "gateClass": true
+        },
+        "pref": true
+      },
+      "hoverAfterClick": {
+        "filter": "invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9)",
+        "inverted": "true"
+      },
+      "secondClick": {
+        "gateClass": false,
+        "pref": true
+      },
+      "hoverAfterSecondClick": {
+        "filter": "invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9)"
+      }
+    }
+  }
+}

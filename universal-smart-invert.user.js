@@ -2455,6 +2455,18 @@
         align-items: center;
         gap: 6px;
       }
+      /* v4.6 版本自检徽标 (R-H4): 面板头显著显示运行版本, 供与发布页比对 */
+      .svi-modal-ver {
+        font-size: 11px;
+        font-weight: 500;
+        color: #94a3b8;
+        background: rgba(148, 163, 184, 0.12);
+        border: 1px solid rgba(148, 163, 184, 0.25);
+        border-radius: 8px;
+        padding: 1px 7px;
+        margin-left: 4px;
+        letter-spacing: 0.2px;
+      }
       .svi-modal-close {
         background: none;
         border: none;
@@ -7548,6 +7560,16 @@
         <div class="svi-modal-title"><span>⚡ 智能反色</span></div>
         <button class="svi-modal-close" title="关闭">✕</button>
       `;
+      // v4.6 版本自检 (R-H4): 面板显著显示运行中脚本的版本号, 供用户与发布页比对排查旧版问题。
+      // 不做远程版本检查 (禁止自动网络遥测), 仅本地展示。
+      try {
+        const titleEl = header.querySelector('.svi-modal-title');
+        const verEl = document.createElement('span');
+        verEl.className = 'svi-modal-ver';
+        verEl.textContent = 'v' + SCRIPT_VERSION;
+        verEl.title = '当前运行脚本版本 (与 GreasyFork/GitHub 发布页比对可判断是否旧版)';
+        titleEl.appendChild(verEl);
+      } catch (e) { /* ignore */ }
       header.querySelector('.svi-modal-close').addEventListener('click', () => {
         this.closeSettingsModal();
       });
