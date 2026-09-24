@@ -1,7 +1,7 @@
 # Universal Smart Video & Image Invert
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-4.6.0-blue.svg?style=flat-square" alt="Version">
+  <img src="https://img.shields.io/badge/version-4.6.1-blue.svg?style=flat-square" alt="Version">
   <img src="https://img.shields.io/badge/license-AGPL--3.0-green.svg?style=flat-square" alt="License">
   <img src="https://img.shields.io/badge/Tampermonkey-Supported-orange.svg?style=flat-square" alt="Tampermonkey">
   <img src="https://img.shields.io/badge/ScriptCat-Supported-purple.svg?style=flat-square" alt="ScriptCat">
@@ -51,6 +51,49 @@ Specifically designed to tame **blinding white PowerPoint/PDF lecture slides in 
   - `Alt + I`: Toggle video inversion (with manual override lock);
   - `Alt + A`: Toggle smart auto mode;
   - `Alt + Left Click`: Force toggle inversion on any specific image or SVG.
+
+---
+
+## 🆕 What's New in v4.6 (Local-First Decisions · Interaction Fixes · Dark-Veil Awareness)
+
+> **v4.6.1 (2026-09-24)**: startup-timing optimisation — in extension form (`document_start`
+> injection) the 50ms polling that waited for `<body>` is now event-driven, moving the
+> first-screen image verdict ~**30ms** earlier (first decision 75ms → 45ms). Also fixes a
+> deterministic false failure caused by an insufficient test wait. See the
+> [v4.6.1 Notes](.trellis/spec/frontend/quality-guidelines.md).
+
+### 1. ⚡ Local-First Decisions: What You See Is What Gets Judged
+
+The decision basis moved from "network completeness" to "what is already rendered locally" — inverted or kept based on what is on screen, never waiting on bytes.
+
+- **Three tiers of local evidence**: tier A (pixels decoded) uses the existing pixel pipeline; tier B (layout box known, pixels not decoded — placeholders, lazy loads) **decides conservatively and immediately from local evidence**, never waiting on the network; tier C (no layout at all) is only registered and woken later by load / intersection / DOM mutation;
+- **Rule verdicts land before bytes do**: manual overrides, element rules, learned rules and seed rules need no pixels, so they apply before an image's bytes arrive;
+- **Three-state consistency**: normal network / throttled 300kbps·400ms / offline (cached) all produce an **identical steady-state decision set** on the same page (measured: 6/6 images identical across all three);
+- **Measured preemption**: under throttling, all first-screen media land a verdict within **152ms→569ms** — and 400ms of that is the network's own round trip to fetch the HTML document, not the script. Before the fix the first verdict took 956ms and the slowest image never settled within 18s;
+- **Fully decoupled from network state**: the runtime code reads **no** network-state values at all — no `navigator.onLine`, no `connection.effectiveType`, no `downlink`, no online/offline listeners. Inversion behaviour cannot be affected by network conditions (verified at code level);
+- **Regression origin bisected** to v3.1.0: "analysis-failed is skipped forever" + "decision snapshot freeze" + "eager pass skips undecoded media", compounding.
+
+### 2. 🖱 Alt+Click Works On The First Click
+
+All 3 root causes of "Alt+left-click takes several tries to change the inversion" are fixed:
+
+- The fx engine's in-flight callback wiped the manual kill-switch attribute → now a single `applyInvertState` write point owns it;
+- The fx delivery rule did not exclude manually-disabled elements → now explicitly excluded;
+- The canvas first scan rewrote the manual marker → now respects manual verdicts (manual verdicts win idempotently).
+
+### 3. 🎚 Hover-Restore Toggle Fixed
+
+"Turning off 'show original on hover' still shows originals" was not a judgement-logic bug: it was the **settings-row display defect** in versions ≤4.3.0 that wrote the opposite value on the first click (already fixed in v4.5). v4.6 adds a **version self-check badge** so the effective version is visible at a glance and cannot be mistaken for a broken toggle.
+
+### 4. 🌫 Dark-Veil Awareness (New)
+
+Profile pages and similar layouts often darken content with a dark veil. The composite looks dark while the source image is bright, so it used to be misjudged as a "light image" and wrongly inverted. New three-level veil detection (ancestor veil / sibling overlay / translucent over dark) flips the verdict to keep the media natural and records a `masked-dark` reason code. It is **switchable in settings** (off restores the old behaviour and triggers a rescan), with anti-false-positive assertions covering normal inversion cases.
+
+### 5. 📴 Fully Offline And Self-Contained
+
+- **Decoupled from network state**: the runtime reads no network-state values and listens for no online/offline events, so inversion behaviour cannot be affected by connection quality;
+- **Rules and data all built in**: rule learning, site presets and seed rules ship with the script; nothing is fetched from a remote address at startup. **No telemetry, no update checks, no usage reporting**;
+- **Only two network channels, both degrading gracefully**: (1) rule-pack import by URL — a purely manual channel that runs only when you click the button; (2) the blob fallback for cross-origin pixel sampling — same-origin images are read directly with **no network access at all**, and only when the browser forbids reading pixels due to cross-origin tainting does it fetch that one image's own data. If even that fails, the image is marked undecided and left untouched — never a crash, never a wrong verdict. Local/offline pages (`file://`) stay entirely on the local path.
 
 ---
 

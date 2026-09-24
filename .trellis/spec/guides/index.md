@@ -23,7 +23,7 @@ These guides help you **ask the right questions before coding**.
 |-------|---------|-------------|
 | [Code Reuse Thinking Guide](./code-reuse-thinking-guide.md) | Identify patterns and reduce duplication | When you notice repeated patterns |
 | [Cross-Layer Thinking Guide](./cross-layer-thinking-guide.md) | Think through data flow across layers | Features spanning multiple layers |
-| [Subagent Model Policy](./subagent-model-policy.md) | 子代理/worker 派发前必须询问模型、禁止把近似名当全称 | **每次派发子代理之前**（强制） |
+| [Subagent Model Policy](./subagent-model-policy.md) | 子代理/worker 派发前必须询问模型、禁止把近似名当全称；**第六节：编排自主权——收尾类动作自行编排不问，冲突/不可逆/方向性取舍才问** | **每次派发子代理之前**（强制）；每次准备逐条征询用户之前 |
 
 ---
 
@@ -62,6 +62,17 @@ These guides help you **ask the right questions before coding**.
 - [ ] 派发 prompt 自带范围/问题/期望产出吗？
 
 → Read [Subagent Model Policy](./subagent-model-policy.md)
+
+### Before Asking The User Something (强制，用户 2026-09-24)
+
+- [ ] 这属于**收尾类 / 低风险 / 可逆**动作吗（补文档、回填验收、清理残留、归档、重跑门禁）？
+      → **自行编排执行，不要问**；做错只是返工
+- [ ] 是**冲突**吗（验收标准与实测不符 / 结论矛盾 / 规则打架）？→ 必须问，由用户裁决
+- [ ] 是**不可逆**吗（删改已有文件 / 丢弃未提交改动 / 重写历史）？→ 必须问
+- [ ] 是**方向性取舍**或**需扩大改动面**吗？→ 必须问
+- [ ] 是否已经把同批可做的收尾项**一次性做完再汇报**，而不是每件问一次？
+
+→ Read [Subagent Model Policy § 六、编排自主权](./subagent-model-policy.md#六编排自主权收尾类动作不问冲突才问)
 
 ### When Verifying AI Cross-Review Results
 

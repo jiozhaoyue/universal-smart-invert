@@ -429,7 +429,7 @@ vm.runInThisContext(scriptSource, { filename: 'universal-smart-invert.user.js' }
 
 const svi = window.__svi;
 assert.ok(svi, 'window.__svi must be exported for tests');
-assert.strictEqual(svi.version, '4.6.0', 'script version must track the @version header');
+assert.strictEqual(svi.version, '4.6.1', 'script version must track the @version header');
 
 // —— 7a. v3 → v4 迁移: 剥离运行时键, 保留偏好, 旧键不动 (R7) ——
 const v4raw = storageData['universal_smart_invert_v4'];
@@ -802,6 +802,13 @@ function makeTestStore(mock) {
   localStore.set('unitBig', big);
   assert.ok(JSON.stringify(big).length > localStore.CHUNK_SIZE, 'test value exceeds chunk size');
   localStore.flush();
+  // 等待时长说明 (v4.6.1 修复): chrome 后端的写入走 writeLogicalAsync,
+  // 其内部对每个分片键串行 await 一次 mock 往返 (各 1ms); 20000 字符 → 3 片,
+  // 加上先前的 meta 清理读取与 remove, 总共需要十余次 1ms 往返。
+  // 原值 30ms 在慢机器/高负载下会被耗尽的边缘, 导致 meta 尚未落盘就断言 (稳定复现失败:
+  // "chunked write emits meta manifest" actual=undefined)。
+  // 这是**测试等待时长不足**, 非产品缺陷 —— 已用同源补丁副本 (仅把 30 改 800) 验证全绿。
+  // 改为 300ms, 相对所需往返次数有充足余量, 同时不拖慢整体测试。
   setTimeout(() => {
     const snap = mock.__snapshot();
     const metaKey = 'svi:unitBig.meta';
@@ -848,7 +855,7 @@ function makeTestStore(mock) {
         }, 600);
       });
     }, 30);
-  }, 30);
+  }, 300);
 }
 
 // —— 8e-2. Store 回归: bootSync 后 chrome 后端必须仍可 init (插件版持久化曾因 ready 提前置位而失效) ——
@@ -981,7 +988,7 @@ function makeTestStore(mock) {
       for (const p of parts) assert.ok(enc(p) <= 7000, 'each chunk within UTF-8 byte budget');
       console.log('✓ v3.0 Store chunk-removal + byte-budget regression passed');
     }, 60);
-  }, 60);
+  }, 300);
 }
 
 // 遗留键迁移: svi:prefs 缺失时从 universal_smart_invert_v4 读取 (legacy 键原样保留)

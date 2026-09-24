@@ -373,3 +373,52 @@ rules below are battle-tested conventions from v1.4.0 → v2.0.0; follow them fo
   或用异步终端；不要用 `-First` 截断长跑命令的输出。
 - **集成期必须重跑全量门禁**：分支各自绿 ≠ 合并后绿。四绿（`node --check` / `node test.js` /
   `node test-browser.js` / `build-extension.js && pack.js`）在合并后全部重跑才算完成。
+
+## v4.6.1 Notes (启动时序、测量方法论、测试等待时长)
+
+2026-09-24 收尾会话的追加修复与教训。核心是「**先量清楚再改**」——本轮两次归因错误都源于测量方法不可靠。
+
+### 1. `whenBodyReady` 改事件驱动（真实修复）
+
+`@run-at document-end` 的 userscript 执行时 body 已存在（零等待），但**扩展形态 `run_at: document_start`**
+执行时 body 尚未创建，原实现 `setInterval(…, 50)` 轮询使回调平均晚 **50ms** 才起跑
+（三次复现 50/52/53ms）—— 而全部引擎构造本身仅约 10ms，即这是启动路径上最大的单项可归因延迟。
+
+- 改为 `MutationObserver` 事件驱动；**必须 `observe(document)`，不能 `observe(document.documentElement)`**：
+  `document_start` 时刻 `document.documentElement` **仍是 null**（实测 `readyState=loading`），
+  `observe(null)` 抛 `parameter 1 is not of type 'Node'`，被 try/catch 吞掉后**静默退化回 50ms 轮询**
+  —— 首次修复就是这样失效的（`dev/probe-diag-bodyready.js` 证实的）。
+- 保留 50ms 轮询与硬超时作兜底（覆盖 `MutationObserver` 不可用或观察器错过插入时刻）。
+- A/B 实测（`dev/probe-boot-breakdown.js`，三次复现）：等待 body **51ms → 2ms**，
+  首个决策 **75/77/77ms → 44/46/49ms**（约 −40%）。
+
+### 2. 测量方法论：**轮询打点在本项目不可信**
+
+排查启动延迟时，用 `setInterval(…, 1)` 记录「某引擎何时可见」得到过**非物理结果**：
+所有引擎都报同一时刻（148ms），且**晚于** 76ms 就已落下的首个决策 —— 因为 boot 的同步块
+占满主线程时 `setInterval` 回调被推迟。**结论：主线程繁忙期的时刻只能用事件驱动打点**
+（`MutationObserver` / 在插桩语句内同步写入 `performance.now()`），轮询值只能当上界参考。
+
+### 3. 插桩要精确锚点，不要宽正则
+
+初次用 `/=\s*new\s+([A-Z]\w*)\(([^;]*?)\);/g` 全局替换来给引擎构造计时，**误匹配 66 处并破坏脚本**
+（`firstDecision` 直接变 null）。改用 9 行唯一的赋值语句做锚点，零风险且不改语义。
+
+### 4. 异步写入链的测试等待时长要留余量
+
+`test.js` 有两处同类断言**稳定失败**（非抖动），都是 `chrome.storage.sync` 异步 mock 的
+分片写入需要十余次 1ms 往返，而等待时长是临界值：
+
+| 断言 | 原等待 | 结果 | 改为 |
+|---|---|---|---|
+| `chunked write emits meta manifest` | 30ms | 稳定失败 | 300ms |
+| `chunked key has meta manifest`（分片删除回归） | 60ms | 稳定失败 | 300ms |
+
+定性方法（以第一处为例）：复制 `test.js` 仅把该处 `setTimeout(…, 30)` 改成 800ms
+→ **exit=0 全绿**，证明是**测试等待时长不足**而非产品缺陷。
+
+> 教训：这类「恰好够用」的等待时长在慢机器/高负载下必然翻车。改测试前**先用对照实验定性**
+> （是产品缺陷还是测试问题），再决定改产品还是改测试 —— 不要凭断言失败就动产品代码。
+> 另：定位可疑等待时，用括号配对从 `setTimeout(` 扫到匹配的 `}` 读其真实延迟值，
+> 比按行号猜更可靠（同一个测试块里往往有多个嵌套 `setTimeout`）。
+

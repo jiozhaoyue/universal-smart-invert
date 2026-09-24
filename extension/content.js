@@ -3,7 +3,7 @@
  * universal-smart-invert — browser extension content script
  * GENERATED FILE — DO NOT EDIT.
  * Built by scripts/build-extension.js from universal-smart-invert.user.js
- * Source version: 4.6.0
+ * Source version: 4.6.1
  *
  * Prelude contract (see scripts/build-extension.js header):
  *   - EXT_MODE (wrapper scope)   → core claims coexistence kind 'ext'
@@ -75,7 +75,7 @@
   // ==========================================
   // 1. 配置与常量定义
   // ==========================================
-  const SCRIPT_VERSION = '4.6.0';
+  const SCRIPT_VERSION = '4.6.1';
   const PREFS_KEY = 'universal_smart_invert_v4';   // v2.0 遗留偏好键 (迁移源, 迁移后原样保留以便回滚)
   const LEGACY_KEY = 'universal_smart_invert_v3';  // v1.x 旧键 (仅读取迁移, 保留不删以便回滚)
   const STATS_KEY = 'universal_smart_invert_stats_v1'; // v2.0 遗留统计键 (保留写入以兼容回滚)
@@ -1680,20 +1680,55 @@
     }
   }
 
-  // 鲁棒启动: body 未就绪时以 50ms 间隔有界重试 (最多 3s), 之后优雅放弃
+  // 鲁棒启动: body 未就绪时等待其出现 (最多 3s), 之后优雅放弃
+  //
+  // v4.6.1: 由 setInterval(50ms) 轮询改为 MutationObserver 事件驱动。
+  //   实测 (document_start 注入时序, 即扩展形态): 轮询使回调平均晚到 50ms 才起跑
+  //   (三次复现 50/52/53ms), 而引擎构造本身仅约 10ms —— 即首屏图片判定被这一项
+  //   推迟约 50ms, 是当时最大的单项可归因延迟。
+  //   MutationObserver 捕获 body 插入后立即触发 (实测 16ms), 无轮询粒度损失。
+  //   保留 50ms 间隔的轮询作为兜底: 覆盖 MutationObserver 不可用的环境;
+  //   并保留硬超时, 保证任何情况下都有界收敛。
   function whenBodyReady(cb, timeoutMs) {
     const timeout = timeoutMs || 3000;
     if (document.body) {
       cb();
       return;
     }
+    let done = false;
+    let timer = null;
+    let pollTimer = null;
+    let mo = null;
     const startedAt = Date.now();
-    const timer = setInterval(() => {
-      if (document.body || Date.now() - startedAt >= timeout) {
-        clearInterval(timer);
-        cb();
+    const finish = () => {
+      if (done) return;
+      done = true;
+      if (timer) { clearTimeout(timer); timer = null; }
+      if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+      if (mo) { try { mo.disconnect(); } catch (e) { /* ignore */ } mo = null; }
+      cb();
+    };
+    // 事件驱动主路径: body 出现即触发 (无轮询粒度损失)
+    //
+    // v4.6.1 关键细节: 必须 observe(document), 不能 observe(document.documentElement)。
+    //   实测 (document_start 时序): 此刻 document.documentElement 仍是 **null**
+    //   (document 处于 loading、html 元素尚未创建), observe(null) 会抛
+    //   "parameter 1 is not of type 'Node'" → 观察器静默失效 → 退化回 50ms 轮询
+    //   (这正是首次修复未生效的原因, 已由 dev/probe-diag-bodyready.js 证实)。
+    //   observe(document) 在该时刻合法, 实测 16ms 即捕获到 body 出现。
+    try {
+      if (typeof MutationObserver === 'function') {
+        mo = new MutationObserver(() => { if (document.body) finish(); });
+        mo.observe(document, { childList: true, subtree: true });
       }
+    } catch (e) { mo = null; }
+    // 轮询兜底: 仅当观察器不可用、或 body 在观察器启动前已插入 (时序竞争) 时命中
+    pollTimer = setInterval(() => {
+      if (document.body) { finish(); return; }
+      if (Date.now() - startedAt >= timeout) finish();
     }, 50);
+    // 硬超时: 与轮询的 timeout 判断互为兜底, 保证一定收敛
+    timer = setTimeout(finish, timeout + 100);
   }
 
   function manualOverrideKey(host, src) {

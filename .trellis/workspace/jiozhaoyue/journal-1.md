@@ -280,3 +280,74 @@ Session summary was not supplied.
 ### Status
 
 [OK] **Completed**
+
+## Session 11: v4.6.1 收尾与启动时序修复 (弱网审计 / 测试等待缺陷 / 规则固化)
+
+**Date**: 2026-09-24
+**Branch**: `main`
+
+### Summary
+
+承接 v4.6.0 归档后的收尾：补齐 README 双语 v4.6 章节、回填父 PRD 验收勾选、清理归档残留；
+按用户要求审计「是否全本地化 / 能否抢先识别」；定位并修复启动时序的真实性能缺陷；
+把「编排自主权」写入规则四件套。
+
+### Main Changes
+
+- `universal-smart-invert.user.js` — `whenBodyReady` 由 50ms 轮询改为 MutationObserver 事件驱动 (4.6.1)
+- `test.js` — 两处分片写入断言的等待时长 30ms/60ms → 300ms (修复稳定假失败)
+- `README.md` / `README_EN.md` — 补 v4.6 章节 + v4.6.1 说明 + 徽章 4.6.1
+- `.trellis/spec/guides/subagent-model-policy.md` — 新增第六节「编排自主权」
+- `.trellis/spec/frontend/quality-guidelines.md` — 新增 v4.6.1 Notes
+- `dev/` — 新增 3 个延迟分解/诊断探针
+
+### 关键结论
+
+**1. 审计：插件已完全本地化，判定与网络彻底解耦**
+- 运行时代码**不读取任何网络状态量**（`navigator.onLine` / `connection.effectiveType` / `downlink` 全部未发现），
+  不监听 online/offline 事件 → 反色行为不受网络好坏影响。
+- 网络通道仅两类：① 规则包链接导入（纯手动按钮）；② 跨域像素采样的 blob 回退
+  （同源图直接读像素不联网；仅跨域污染时取该图自身数据，失败即标记未决并保留原样）。
+- 无遥测、无更新检查、无统计上报；规则/预设/种子全内置。
+
+**2. 抢先识别：已实现且可量化**
+- 三档本地证据（A 像素 / B 布局盒 / C 待判）+ 规则结论先于字节 + pending 唤醒。
+- 弱网实测（300kbps/400ms）首屏 6/6 图全部落判；正常网 **152ms**、弱网 **569ms**。
+- 关键发现：两者差值 417ms ≈ 探针注入的 400ms RTT —— **插件可归因延迟恒定约 65~77ms**，
+  其余全是取回 HTML 文档本身的网络耗时（插件在拿到 DOM 前根本无法运行）。
+- 即「500ms AC 未达标」的 60ms 缺口，绝大部分不是插件开销。
+
+**3. 真实性能缺陷（v4.6.1 修复）**
+- 扩展形态 `run_at: document_start` 时 body 尚未创建，原 `setInterval(…, 50)` 使 boot 回调
+  平均晚 50ms 起跑（三次复现 50/52/53ms），而全部引擎构造仅 ~10ms。
+- 改为 MutationObserver 事件驱动。**坑**：必须 `observe(document)` 而非
+  `observe(document.documentElement)` —— document_start 时刻 documentElement 仍是 **null**，
+  `observe(null)` 抛错被 catch 吞掉后**静默退回轮询**（首次修复正是这样失效）。
+- A/B 实测：等待 body 51ms → **2ms**；首个决策 75/77/77ms → **44/46/49ms**（约 −40%）。
+
+### 教训（已入 spec）
+
+- **轮询打点在本项目不可信**：boot 同步块占满主线程时 `setInterval` 被推迟，
+  曾得到「所有引擎同一时刻、且晚于首个决策」的非物理结果。主线程繁忙期只能用事件驱动打点。
+- **插桩要精确锚点**：宽正则 `= new X(...)` 全局替换误匹配 66 处并破坏脚本；改用 9 行唯一赋值语句做锚点。
+- **改测试前先定性**：复制 test.js 只改等待时长做对照实验，区分「产品缺陷」与「测试等待不足」。
+- 本项目已有的 PowerShell 管道陷阱之外，新增：Git Bash heredoc 会吞反斜杠（Windows 路径），
+  写脚本一律用 Write 工具而非 heredoc。
+
+### 编排规则固化（用户 2026-09-24 明令）
+
+「这些不用问，你编排，这个写入规则，除非有冲突」→ 已写入四件套：
+`.trellis/spec/guides/subagent-model-policy.md` 第六节 + `AGENTS.md` + `.github/copilot-instructions.md`
++ `.trellis/spec/guides/index.md` 触发清单。要点：收尾类/可逆动作自行编排执行；
+**冲突、不可逆、环境变更、方向性取舍、需扩大改动面**五种情形必须停下询问；
+一次性做完再汇报，不逐条问。
+
+### Testing
+
+- [OK] 四绿门禁全绿：`node --check` 0 / `node test.js` 0 / `node test-browser.js` 24/24 100% / build+pack 0
+- [OK] A/B 对照实验（`dev/probe-boot-breakdown.js`，各 3 次复现）
+- [OK] 弱网/正常网/断网三态探针（`dev/probe-weaknet.js`）
+
+### Status
+
+[OK] **Completed**
