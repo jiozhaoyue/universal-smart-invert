@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 11
+- **Total Sessions**: 12
 - **Last Active**: 2026-09-24
 <!-- @@@/auto:current-status -->
 
@@ -19,8 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~353 | Active |
-| `handoff-2026-09-24-v461.md` | ~165 | **已结案**: v4.6.1 已提交推送；500ms AC 阈值待用户裁决 |
+| `journal-1.md` | ~394 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -30,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 12 | 2026-09-24 | v4.6.1 结案: 四绿复跑 + 提交推送 + 500ms AC 裁决 + 归档残留清理 | `149bbc2`, `5346b3a` | `main` |
 | 11 | 2026-09-24 | v4.6.1 收尾与启动时序修复 (弱网审计 / 测试等待缺陷 / 规则固化) | 见下条会话 | `main` |
 | 10 | 2026-09-24 | v4.6.0 四分支并行集成: 本地优先判定/Alt+点击/悬停开关/暗色遮罩/子代理规则 | `9308ece` | `main` |
 | 9 | 2026-09-13 | v3.3 设置面板全面改版：可停靠布局/规则文件/元素规则/全中文化 | `e3892f9`, `a898891` | `main` |

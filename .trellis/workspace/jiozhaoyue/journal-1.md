@@ -351,3 +351,44 @@ Session summary was not supplied.
 ### Status
 
 [OK] **Completed**
+
+
+## Session 12: v4.6.1 结案: 四绿复跑 + 提交推送 + 500ms AC 裁决 + 归档残留清理
+<!-- trellis-session: v=2 fp=fc49378e94cc47df -->
+
+**Date**: 2026-09-24
+**Task**: v4.6.1 结案: 四绿复跑 + 提交推送 + 500ms AC 裁决 + 归档残留清理
+**Branch**: `main`
+
+### Summary
+
+接手 2026-09-24 交接文档：复跑四绿门禁全绿后提交并推送 v4.6.1 全部改动；就弱网首屏 AC 阈值向用户取得裁决（保持 500ms、如实未达标）；清理已授权的未归档重复任务目录。
+
+### Main Changes
+
+- 复跑四绿门禁并全部通过；提交推送 v4.6.1（启动时序事件驱动修复 + 测试等待时长修复 + 文档规则）
+- 父 PRD 弱网首屏 AC 裁决：阈值保持 500ms，勾选留空，如实记为已知未达标遗留项
+- 清理 .trellis/tasks/09-19-v45-correctness-popup-rules/（与归档版逐字节相同的重复副本，经用户显式授权）
+- 交接文档补结案记录；workspace index 补 Session 11 行与状态
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `149bbc2` | perf(v4.6.1): event-driven body-ready (extension first-verdict −40%) + fix flaky chunked-store tests |
+| `5346b3a` | docs(task): record 500ms AC ruling (keep threshold, unmet) + drop unarchived duplicate task dir |
+
+### Testing
+
+- [OK] node --check universal-smart-invert.user.js → 0
+- [OK] node test.js → 0
+- [OK] node test-browser.js → 24 场景 100%
+- [OK] node scripts/build-extension.js && node scripts/pack.js → 0（重建产出与工作区逐字节一致）
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 无活动任务；如需继续压榨弱网首屏剩余延迟，需另开新任务（方向性取舍，收益递减）
