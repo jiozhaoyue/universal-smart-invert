@@ -57,3 +57,8 @@ dev/fixtures/
 
 # VS Code local history
 .history/
+
+# v6.5 签名私钥与 CRX 产物 (公开仓硬约束: 私钥绝不入库)
+*.pem
+crx-private-key.pem
+*.crx

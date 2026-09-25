@@ -143,3 +143,34 @@ openssl genrsa -out crx-private-key.pem 2048
 git tag v3.0.1 && git push origin v3.0.1
 # 3) Actions「Release」自动执行: 测试 → 构建 → zip → GitHub Release → (可选) CRX → (可选) CWS 上传 + 发布
 ```
+
+---
+
+## 5. 本地 CRX 打包与分发限制（v6.5 新增）
+
+### 5.1 打包
+
+```bash
+node scripts/build-extension.js          # 先生成 extension/ 产物
+node scripts/build-crx.js                # 用既有密钥签名打包 → dist/*.crx
+node scripts/build-crx.js --verify-only dist/universal-smart-invert-extension.crx
+```
+
+- 优先调用**本机 Chrome** 的 `--pack-extension`（与应用商店同源实现）；无 Chrome 时降级
+  `npx --yes crx3`（与 release CI 同路径）。
+- **首次**需要一对密钥：`node scripts/build-crx.js --generate-key`
+  —— 这是**一次性动作**，生成后请**立即离线备份** `crx-private-key.pem`：
+  它决定扩展 ID 与升级链，丢失后无法再给已安装用户推送升级。
+- 私钥永不入库（`.gitignore` 覆盖 `*.pem` / `crx-private-key.pem` / `*.crx`；
+  `node test.js` 里有「仓库内无 PEM」的断言把关）。
+
+### 5.2 **分发限制（必须如实告知）**
+
+**非商店来源的 CRX 在 Windows / macOS 的 Chrome 上默认被阻止安装**（Chrome 只信任来自
+Chrome 网上应用店的 CRX；绕过需要企业策略 `ExtensionInstallForcelist` / `ExtensionSettings`
+或启动参数，属于企业部署范畴）。
+
+因此 CRX 的适用场景是：**企业内部分发、离线部署、需要固定扩展 ID 的自动化环境**。
+- 普通用户请用「加载已解压的扩展程序」（`chrome://extensions` → 开发者模式）或从商店安装；
+- **不要**把 CRX 描述成「双击即可安装」——那在主流桌面 Chrome 上不成立。
+

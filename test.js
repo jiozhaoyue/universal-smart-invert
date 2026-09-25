@@ -4853,6 +4853,78 @@ setTimeout(() => {
   console.log('✓ v6.4 控件库单测 passed: 词汇表 20 项齐全 / 构造与 {row,sync} 协议正确 / 每个工厂只有一处实现(收口) / ui 垫片零节点构造 / 内联色策略(仅防闪光黑底例外)');
 })();
 
+// ============================================================
+// v6.5 单测 (CRX3 结构校验 + 密钥纪律)
+// 契约来源: .trellis/tasks/09-25-v6-ext-engineering/prd.md R7 / R8
+// ============================================================
+(function () {
+  const fs = require('fs');
+  const path = require('path');
+  const { verifyCrx3 } = require('./scripts/build-crx.js');
+  const { buildZip } = require('./scripts/lib/zip.js');
+
+  // 手工构造一个最小 CRX3 (只含结构, 不含真实签名) —— 校验函数只做结构自洽这一层
+  const mkCrx = (opts) => {
+    const o = opts || {};
+    const zip = buildZip(o.files || [{ name: 'manifest.json', data: Buffer.from('{}') }]);
+    const header = Buffer.from(o.header || 'SVI-TEST-HEADER');
+    const magic = Buffer.from(o.magic || 'Cr24', 'latin1');
+    const buf = Buffer.alloc(12 + header.length + zip.length);
+    magic.copy(buf, 0);
+    buf.writeUInt32LE(o.version == null ? 3 : o.version, 4);
+    buf.writeUInt32LE(o.headerSize == null ? header.length : o.headerSize, 8);
+    header.copy(buf, 12);
+    zip.copy(buf, 12 + header.length);
+    return buf;
+  };
+
+  // ---- 1. 正例: Cr24 / CRX3 / 内嵌 ZIP 中央目录可解析 ----
+  {
+    const ok = verifyCrx3(mkCrx());
+    assert.strictEqual(ok.ok, true, 'R7: 结构正确的 CRX3 必须通过校验, got ' + JSON.stringify(ok.errors));
+    assert.strictEqual(ok.version, 3, 'R7: 版本识别为 3');
+    assert.deepStrictEqual(ok.entries, ['manifest.json'], 'R7: 内嵌 ZIP 条目可枚举');
+    const two = verifyCrx3(mkCrx({ files: [{ name: 'manifest.json', data: Buffer.from('{}') }, { name: 'content.js', data: Buffer.from('//x') }] }));
+    assert.strictEqual(two.count, 2, 'R7: 多条目也能解析');
+  }
+
+  // ---- 2. 反例: 魔数 / 版本 / 头长 / 截断 各自报错且 ok=false ----
+  {
+    assert.strictEqual(verifyCrx3(mkCrx({ magic: 'XX24' })).ok, false, 'R7: 魔数错 → 拒绝');
+    assert.ok(/Cr24/.test(verifyCrx3(mkCrx({ magic: 'XX24' })).errors.join(';')), 'R7: 魔数错的报错可读');
+    assert.strictEqual(verifyCrx3(mkCrx({ version: 2 })).ok, false, 'R7: 版本不是 3 → 拒绝');
+    assert.strictEqual(verifyCrx3(mkCrx({ headerSize: 1e9 })).ok, false, 'R7: 头长越界 → 拒绝');
+    assert.strictEqual(verifyCrx3(mkCrx().slice(0, 10)).ok, false, 'R7: 截断 → 拒绝');
+    assert.strictEqual(verifyCrx3(null).ok, false, 'R7: 空输入 → 拒绝');
+    // 内嵌不是 ZIP (头长指向的位置不是 PK)
+    const notZip = mkCrx();
+    notZip.write('ZZ', 12 + 'SVI-TEST-HEADER'.length, 'latin1');
+    const res = verifyCrx3(notZip);
+    assert.strictEqual(res.ok, false, 'R7: 内嵌不是 ZIP → 拒绝');
+  }
+
+  // ---- 3. 密钥纪律 (R8): 仓库内不得有 PEM, .gitignore 必须覆盖 ----
+  {
+    const gi = fs.readFileSync(path.join(__dirname, '.gitignore'), 'utf8');
+    for (const pat of ['*.pem', 'crx-private-key.pem', '*.crx']) {
+      assert.ok(gi.indexOf(pat) >= 0, 'R8: .gitignore 必须覆盖 ' + pat);
+    }
+    // 扫描仓库根目录下的文本类文件, 确认没有 PEM 内容 (私钥绝不入库)
+    const roots = ['AGENTS.md', 'PUBLISHING.md', 'README.md', 'README_EN.md',
+      'universal-smart-invert.user.js', 'test.js', 'test-browser.js', 'scripts/build-crx.js'];
+    const pemRe = /-----BEGIN [A-Z ]*PRIVATE KEY-----/;
+    for (const f of roots) {
+      const text = fs.readFileSync(path.join(__dirname, f), 'utf8');
+      assert.strictEqual(pemRe.test(text), false, 'R8: ' + f + ' 里不得出现 PEM 私钥');
+    }
+    assert.strictEqual(fs.existsSync(path.join(__dirname, 'crx-private-key.pem')), false,
+      'R8: 仓库根目录不得存在签名私钥 (它应只存在于本地并离线备份)');
+  }
+
+  console.log('✓ v6.5 单测 passed: CRX3 结构校验(正例 + 魔数/版本/头长/截断/非ZIP 五个反例) / 密钥纪律(gitignore 三重覆盖 + 无 PEM 入库 + 无私钥文件)');
+})();
+
+
 
 })();
 
