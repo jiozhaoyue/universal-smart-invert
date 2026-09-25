@@ -1,0 +1,32 @@
+{
+  "id": "v6-partial-and-ui",
+  "name": "v6-partial-and-ui",
+  "title": "v6 自动部分反色 + UI 同源重构 + 扩展工程",
+  "description": "把整图反色扩展为「按连通区域自动判定」的部分反色（无用户绘制入口）；同时把扩展 popup 与用户脚本内嵌面板做全量同源重构（参考 Dark Reader，清零 emoji）；并补齐真扩展自动化测试与 CRX 打包。",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P1",
+  "creator": "jiozhaoyue",
+  "assignee": "jiozhaoyue",
+  "createdAt": "2026-09-25",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "09-25-v6-auto-region",
+    "09-25-v6-partial-render",
+    "09-25-v6-region-correction",
+    "09-25-v6-ui-rebuild",
+    "09-25-v6-ext-engineering"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}
