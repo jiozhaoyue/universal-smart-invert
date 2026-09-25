@@ -1,0 +1,8 @@
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "检查项: 新增纯函数是否挂 __svi 且被单测断言; 面板是否用 textContent 而非 innerHTML; svi:shapes 是否有容量与体积上限; 是否引入逐元素 getComputedStyle 到热路径。并复验 v5.2 Additions 的撤销契约未被破坏。"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "检查项: svi:shapes / svi:calibrations / 站点覆盖三字段是否在档案解析、决策、面板、导出、导入每一层都被处理; 旧数据缺失时是否优雅降级。"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "检查项: 是否出现了第二套统计/第二套规则合并实现; sourceDistribution 是否复用了 processedLog 而非重新扫描页面。"}
+{"file": ".trellis/tasks/09-25-v5-media-governance/prd.md", "reason": "检查项: AC-4 采集有消费需给出可验证路径 (哪条数据改变了哪个决策); AC-7 零遥测需有 grep 证据。"}
+{"file": ".trellis/tasks/09-25-v5-data-loop/prd.md", "reason": "逐条核对 R1-R7, 并**重点核对两处 PRD 自述与实测不符之处是否已如实修正而非静默实现**: R1 的「(现状语义)」(design D-1) 与 R4 的「仅像素缺失时生效」(design D-4)。"}
+{"file": ".trellis/tasks/09-25-v5-data-loop/design.md", "reason": "检查项: (1) learnGrading 关闭时 SOURCES 是否与 v5-1 逐项一致 (零回归); (2) 是否只自动收紧、放松必须手动 (D-3); (3) 合并是否取大不累加 (D-5, 幂等性必须实测); (4) 形状先验是否默认关且档位正确 (D-4); (5) 是否新增了未记录的属性门 (D-1 只允许 data-svi-rule-stem)。"}
+{"file": ".trellis/tasks/09-25-v5-data-loop/implement.md", "reason": "检查项: 五个回滚点 (R1-R5) 的验证是否真实跑过; 阶段 F 的隐私 grep 是否有留档; 合并幂等性是否实测 (重复导入两次权重不变); 复选框是否随执行实时勾选; 偏离项是否留痕。"}
+{"file": ".trellis/tasks/09-25-v5-review-undo/design.md", "reason": "检查项: corrections 的字段语义是否被本片改动 (不允许); 读取方向是否搞反 (falseInvert = 误反, 越高越该收紧)。"}

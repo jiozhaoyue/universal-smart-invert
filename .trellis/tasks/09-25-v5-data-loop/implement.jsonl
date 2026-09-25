@@ -1,0 +1,9 @@
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "编码纪律权威来源。本片重点: 纯逻辑 (ruleStrength/demote/shapeSignature/calibrate.suggest/mergeRulePack/sourceDistribution) 必须挂 window.__svi 并被单测断言真代码; 禁止 innerHTML 插值 (面板展示的 stem/host 来自存储); 存储写入必须有界。另见 v5.2 Additions「撤销栈契约」——本片复用 corrections 记录点。"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "本片新增四份聚合/合并纯函数, 极易写成第五份与第六份重复统计。该指南用于确认统计口径复用 StatsManager 与 processedLog, 不另起一套采集。"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "本片新增 svi:shapes / svi:calibrations 两个存储键 + 导出字段 + 站点覆盖三字段透传, 会穿透「存储 → 档案解析 → 决策 → 面板 → 导出 → 导入」六层。用于逐层校验消费方。"}
+{"file": ".trellis/tasks/09-25-v5-media-governance/prd.md", "reason": "父任务 AC-4「采集有消费: learned 数据至少有一条路径真实改变决策」为本片的核心验收; AC-7 零遥测不被破坏为本片的隐私底线。"}
+{"file": ".trellis/tasks/09-25-v5-data-loop/prd.md", "reason": "本片需求 R1-R7。注意 R1 的「(现状语义)」注释经核查不成立 (见 design D-1), R4 的「仅像素缺失时生效」在现有管线上无法表达 (见 design D-4) —— 两处均已如实修正。"}
+{"file": ".trellis/tasks/09-25-v5-data-loop/design.md", "reason": "本片技术设计。D-1 分级必须默认关 (否则是行为变更); D-3 只自动收紧 (两侧风险不对称); D-4 形状先验档位在规则段末尾且默认关; D-5 合并取大不累加 (防权重放大器); D-1 新增 data-svi-rule-stem 属性是本片唯一新增属性门。"}
+{"file": ".trellis/tasks/09-25-v5-review-undo/design.md", "reason": "上游契约: svi:corrections 的形状 (falseInvert/falseKeep + perSrc/perStem) 由 v5-2 落地, 本片阈值自校准直接读它, 不得改其字段语义。"}
+{"file": ".trellis/tasks/09-25-v5-action-registry/prd.md", "reason": "上游契约: SOURCES 顺序即优先级, 新增来源只改表不改调用点。本片要加 learnedStrong/learnedWeak/shapePrior 三条, 必须按此契约做, 且关时表内容与 v5-1 逐项一致。"}
+{"file": ".trellis/tasks/09-25-v5-mask-guard/prd.md", "reason": "下游消费方: v5-5 的「本站历史反色率」门 (svi:siteMedia) 与本片的数据闭环同源, 面板展示口径需一致。"}

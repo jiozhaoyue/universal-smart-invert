@@ -171,6 +171,33 @@ automatically**, because that would magnify one click into a permanent decision.
 - **Only verdicts with visible state**: elements decided as "keep as-is" or "skipped" are not
   stacked (there is nothing to revert).
 
+### 10. 📊 Data loop (collected data actually gets used)
+
+Four kinds of data were being collected with almost no read-back path. v5.0 closes the loop:
+
+| Data | How it is now used |
+| :--- | :--- |
+| **Learned-rule hit counts** | **Grading**: hits ≥ the strong-rule gate (default 5) = a *strong* rule (keeps current priority); active-but-below-gate = a *weak* rule that may only override the pixel verdict and **no longer beats built-in seed rules**. The rule list shows "strong / weak / demoted-disabled" |
+| **Your manual corrections** | **Negative-feedback demotion**: if a rule-matched element is then overridden by you, that rule's hit count drops to 1; two consecutive overrides disable it (restorable from the rule list) |
+| **False-invert / false-keep counts** | **Threshold self-calibration**: when the false-invert share crosses the threshold with enough samples, the site's thresholds are **tightened automatically** (fewer wrong inversions); loosening is only *suggested* and needs your click. One-click "restore site defaults" in the panel |
+| **Element shape** | **Cross-site prior**: when one "element look" agrees across ≥N different sites, newly-seen same-shaped elements get the weakest possible prior. **Off by default** |
+| **Verdict sources** | The panel shows "Verdict sources on this page: 12 · pixel×9 / learned×2 / …" — you can see which path is doing the work |
+| **Corrections → CI** | `node scripts/export-fixtures.js <exported-backup.json>` turns your verdicts into `dev/fixtures/verdicts.jsonl`; `node test.js` then runs an extra assertion group — if a code change breaks the judgements you accumulated, the test fails immediately |
+
+**Why "hit grading" is off by default**: enabling it changes the priority of existing learned rules
+(weak rules no longer beat seed rules). That is a behaviour change, so it is your explicit choice.
+
+**Why "tighten only" is automatic**: the risks are asymmetric — tightening wrongly only means a few
+images stay original (you can still Alt+click), while loosening wrongly inverts things you never
+asked for. This project consistently avoids the latter.
+
+### 11. 🔒 Privacy bottom line (the data loop did not break it)
+
+- **Zero new network egress**: the network-egress code is **line-for-line identical** to v4.6.1
+  (`fetch` × 3, no `XMLHttpRequest`, no `navigator.onLine`); every new data path runs locally;
+- **Export stays an explicit action**: rule packs / backups / fixtures only happen when you click;
+- **Fixtures never enter the repo**: `dev/fixtures/` is gitignored — it contains your own image URLs.
+
 ---
 
 ## 🆕 What's New in v4.6 (Local-First Decisions · Interaction Fixes · Dark-Veil Awareness)

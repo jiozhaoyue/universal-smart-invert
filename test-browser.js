@@ -2781,6 +2781,83 @@ async function main() {
     assert.ok(rev2.allRows > 0, '「全部媒体」视图必须仍然可用 (v3.1 行为不回归), got ' + rev2.allRows);
     assert.ok(rev2.allSummary.indexOf('共 ') >= 0, '「全部媒体」摘要格式不回归, got ' + rev2.allSummary);
 
+    // ============================================================
+    // Scenario 27 (v5.3): 数据闭环
+    //   - 判定来源分布与真实会话日志一致 (面板数字 == 实际决策)
+    //   - hits 分级开关的"生效集合"回退语义 (关 = v5-1 集合)
+    //   - 阈值校准建议计算 + 只收紧 + 恢复默认
+    // ============================================================
+    console.log('[Test] Scenario 27: v5.3 data loop (distribution / grading / calibration) ...');
+
+    const dl1 = await evalInPageAsync(`(async () => {
+      const svi = window.__svi;
+      const ui = svi.ui;
+      ui.openSettingsModal();
+      await new Promise((r) => setTimeout(r, 120));
+      const dist = svi.sourceDistribution(svi.processedLog.items);
+      const diagText = ui.dataLoopDiag ? ui.dataLoopDiag.el.textContent : '';
+      const calibText = ui.calibDiag ? ui.calibDiag.el.textContent : '';
+      const ruleSrcOff = svi.effectiveSourceIds('rule').join(',');
+      svi.prefs.learnGrading = true;
+      ui.modalControls && ui.modalControls.syncAll();
+      const ruleSrcOn = svi.effectiveSourceIds('rule').join(',');
+      svi.prefs.learnGrading = false;
+      const back = svi.effectiveSourceIds('rule').join(',');
+      ui.closeSettingsModal();
+      return {
+        total: dist.total, byReason: dist.byReason, diagText, calibText,
+        ruleSrcOff, ruleSrcOn, back,
+        logLen: svi.processedLog.items.length,
+      };
+    })()`);
+    assert.ok(dl1.diagText.indexOf('本页判定来源') >= 0, '面板必须有判定来源行, got ' + dl1.diagText);
+    assert.ok(dl1.total === dl1.logLen, '分布总数必须等于会话日志长度 (' + dl1.total + ' vs ' + dl1.logLen + ')');
+    assert.ok(dl1.diagText.indexOf(String(dl1.total) + ' 项') >= 0, '面板数字必须与分布一致, got ' + dl1.diagText);
+    assert.strictEqual(dl1.ruleSrcOff, 'learned,seedProtect,faviconSkip,seedForceInvert',
+      '分级关时生效来源集合必须与 v5-1 逐项一致 (零回归)');
+    assert.strictEqual(dl1.ruleSrcOn, 'learnedStrong,seedProtect,faviconSkip,seedForceInvert,learnedWeak',
+      '分级开时弱规则必须排在所有种子之后 (即"只能覆盖像素结论")');
+    assert.strictEqual(dl1.back, dl1.ruleSrcOff, '关回来必须精确还原生效集合');
+    assert.ok(dl1.calibText.indexOf('阈值校准') >= 0, '面板必须有校准行, got ' + dl1.calibText);
+
+    const dl2 = await evalInPageAsync(`(async () => {
+      const svi = window.__svi;
+      const host = svi.profileKey();
+      svi.corrections.data = null;
+      const hd = svi.corrections.host(host);
+      hd.falseInvert = 0; hd.falseKeep = 0;
+      const before = svi.calibrate.suggest(host);
+      const baseLum = Number(svi.prefs.imgLumCutoff) || 180;
+      hd.falseInvert = 8; hd.falseKeep = 1;
+      const tight = svi.calibrate.suggest(host);
+      const applied = svi.calibrate.apply(host, 'tighten');
+      // 注意: 必须**即时取值** —— ov 是引用, 后面的 reset() 会把字段删掉,
+      // 等到 returnByValue 序列化时读到的就是已删除状态 (这是测试写法的坑, 不是产品缺陷)。
+      const ov = svi.prefs.siteOverrides[host] || {};
+      const ovLum = ov.imgLumCutoff;
+      const ovArea = ov.imgAreaThreshold;
+      const profileLum = svi.resolveSiteProfile(host).imgLumCutoff;
+      hd.falseInvert = 0; hd.falseKeep = 8;
+      const loose = svi.calibrate.suggest(host);
+      const resetOk = svi.calibrate.reset(host);
+      const after = svi.prefs.siteOverrides[host] && svi.prefs.siteOverrides[host].imgLumCutoff;
+      return {
+        beforeDir: before.direction, tightDir: tight.direction, looseDir: loose.direction,
+        applied, ovLum, ovArea, baseLum, resetOk, profileLum,
+        afterReset: typeof after === 'number',
+        calibratedFlag: svi.calibrate.calibrated(host),
+      };
+    })()`);
+    assert.strictEqual(dl2.beforeDir, null, '样本不足时不给方向 (不瞎调)');
+    assert.strictEqual(dl2.tightDir, 'tighten', '误反占优 → 建议收紧');
+    assert.strictEqual(dl2.looseDir, 'loosen', '误保占优 → 只是"建议"放松');
+    assert.strictEqual(dl2.applied, true, 'apply 返回 true');
+    assert.ok(dl2.ovLum > dl2.baseLum, '收紧必须抬高明度线 (' + dl2.baseLum + ' → ' + dl2.ovLum + ')');
+    assert.ok(typeof dl2.ovArea === 'number', '收紧同时写面积门 imgAreaThreshold (图片侧另一个关键阈值)');
+    assert.strictEqual(dl2.profileLum, dl2.ovLum, '站点档案必须透传校准后的阈值 (否则写了也不生效)');
+    assert.strictEqual(dl2.resetOk, true, '恢复默认返回 true');
+    assert.strictEqual(dl2.afterReset, false, '恢复后站点覆盖里不再有 imgLumCutoff');
+
     console.log('\n🎉 ALL BROWSER AUTOMATION TESTS PASSED 100% SUCCESFULLY!\n');
 
     await new Promise((r) => setTimeout(r, 400)); // Windows 重定向: 等待 stdout 刷盘再退出

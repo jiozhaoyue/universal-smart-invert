@@ -568,4 +568,63 @@ stage 'rule'     : learned → seedProtect → faviconSkip → seedForceInvert
 （解释"为什么它不再反色" —— 该结论本就已由 `manualOverrides` 持久化），
 同 `stem` 重复还原时提示"可一键固化"，由用户在列表里显式选择。
 
+---
+
+## v5.3 Additions (数据闭环契约)
+
+### 1. 新增可选来源一律靠 `enabled()` 退场，**不要从表里删条目**
+
+`SOURCES` 现在有 10 条，其中 `learnedStrong` / `learnedWeak` / `shapePrior` 是**可选**的
+（各带 `enabled()`）。做法是：条目**常量存在**，由 `enabled()` 决定是否参与。
+
+理由：表的结构是"优先级链的完整形状"，删条目会让 `effectiveSourceIds()` 与结构断言无法
+分离"结构"与"生效集合"两件事。**零回归的断言方式是断言 `effectiveSourceIds(stage)`**：
+
+```js
+// 默认（分级关、先验关）时必须逐项等于 v5-1
+assert.deepStrictEqual(svi.effectiveSourceIds('rule'),
+  ['learned', 'seedProtect', 'faviconSkip', 'seedForceInvert']);
+```
+
+### 2. 两条路径的阈值**不是同一组**（本片踩到的坑）
+
+| 路径 | 阈值字段 | 默认 |
+| :--- | :--- | :--- |
+| **图片**浅色判定 | `imgLumCutoff` / `imgAreaThreshold` / `imgTolerance` | 180 / 48 / 35 |
+| **视频**白底判定 | `whiteThreshold` / `lumThreshold` | 60 / 210 |
+
+`whiteThreshold` / `lumThreshold` **只影响视频**。写阈值相关功能前先确认字段属于哪条路径 ——
+本片初版把图片侧的校准写成了视频侧字段，靠"站点档案透传"的断言才暴露出来。
+
+站点级阈值覆盖经 `resolveSiteProfile()` 透传 → `getEvalPrefs()`（图片路径）/
+`LuminanceDetector`（视频路径）消费。**透了才生效** —— 只写 `siteOverrides` 不接透传
+等于静默无效。
+
+### 3. 校准只自动收紧（风险不对称）
+
+- **收紧**（抬高阈值 = 更少东西被判为浅色 = 更少误反）→ 可自动；
+- **放松**（更多反色）→ 只计算与展示，必须用户点。
+
+理由：收紧错了只是少反几张（用户还能 Alt+点击），放松错了会在用户没要求时把东西反过来。
+
+### 4. 规则合并取**大**不累加
+
+`mergeRulesInto` —— 一致取 `max(hits)`，冲突保留 hits 高者，相等留本地。
+
+**累加会让一份分享的规则包变成权重放大器**：反复导入同一文件即可把某条规则刷成强规则，
+这是可被利用的污染。**幂等性是这条契约的验收方式**（重复导入同一文件权重不变）。
+
+### 5. 测试写法：`returnByValue` 前的引用陷阱
+
+`Runtime.evaluate(returnByValue: true)` 是**在 return 时**序列化的。若在返回对象里放了
+一个"稍后会被别处改动的对象引用"（例：先捕获 `const ov = state.siteOverrides[host]`，
+之后调用 `reset()` 删掉了字段，最后才 `return { ovLum: ov.imgLumCutoff }`），
+读到的是**删除后的状态**。必须**即时取值**（`const ovLum = ov.imgLumCutoff` 紧跟在
+赋值/应用动作之后）。本片据此误判过一次"收紧没生效"。
+
+### 6. 诊断行必须在打开面板时刷新
+
+`refreshActionsSection()` 由 `openSettingsModal` 调用。诊断/统计类文案若只在构建时渲染，
+会停留在旧值 —— 与 v4.5 修过的"设置行不回显"是同一类缺陷，**每次新增诊断行都要接进刷新链**。
+
 

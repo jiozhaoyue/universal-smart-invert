@@ -1769,14 +1769,29 @@ setTimeout(() => {
   // ---- 1. 来源表结构与顺序 (AC-1 唯一性: 顺序必须逐字等于现行 decideImage 优先级链) ----
   assert.deepStrictEqual(
     SOURCES.map((s) => s.id),
-    ['manualElement', 'manual', 'elementRule', 'learned', 'seedProtect', 'faviconSkip', 'seedForceInvert'],
-    'SOURCES 顺序必须与现行优先级链一致 (favicon 夹在 protect 与 forceInvert 之间; manualElement 是 A13 新增的元素属性来源)'
+    ['manualElement', 'manual', 'elementRule',
+      'learned', 'learnedStrong', 'seedProtect', 'faviconSkip', 'seedForceInvert',
+      'learnedWeak', 'shapePrior'],
+    'SOURCES 结构顺序 (v5.3 加入分级的 strong/weak 与 shapePrior 三条可选来源)'
   );
   assert.deepStrictEqual(
     SOURCES.map((s) => s.stage),
-    ['override', 'override', 'override', 'rule', 'rule', 'rule', 'rule'],
-    'stage: 前三条属决策快照之前 (override), 后四条属快照之后 (rule)'
+    ['override', 'override', 'override', 'rule', 'rule', 'rule', 'rule', 'rule', 'rule', 'rule'],
+    'stage: 前三条属决策快照之前 (override), 后七条属快照之后 (rule)'
   );
+  // v5.3 关键零回归断言: 默认设置下「生效集合」必须与 v5-1 逐项一致。
+  // 分级与形状先验都靠 enabled() 退场 (而不是从表里删条目), 这样新增来源不会改变默认行为。
+  assert.deepStrictEqual(
+    svi.effectiveSourceIds('override'),
+    ['manualElement', 'manual', 'elementRule'],
+    'default: override 段生效集合'
+  );
+  assert.deepStrictEqual(
+    svi.effectiveSourceIds('rule'),
+    ['learned', 'seedProtect', 'faviconSkip', 'seedForceInvert'],
+    'default: rule 段生效集合必须与 v5-1 逐项一致 (favicon 仍夹在 protect 与 forceInvert 之间)'
+  );
+  assert.strictEqual(svi.learnGradingOn(), false, 'hits 分级默认关 (开启会改变既有规则行为)');
   assert.strictEqual(new Set(SOURCES.map((s) => s.id)).size, SOURCES.length, '来源 id 必须唯一');
   assert.ok(SOURCES.every((s) => typeof s.resolve === 'function'), '每条来源必须有 resolve');
 
@@ -2297,6 +2312,297 @@ setTimeout(() => {
   try { svi.Store.remove('corrections'); } catch (e) { /* ignore */ }
 
   console.log('✓ v5.2 unit tests passed: 撤销栈回卷与来源过滤 / 反事实回退与手动占优 / 误反哨兵计数与 24h 窗 / 已处理日志 prune');
+})();
+
+// ============================================================
+// v5.3 单测 (hits 分级 / 负反馈降级 / 判定来源分布 / 形状先验 / 阈值校准 / 规则合并)
+// 契约来源: .trellis/tasks/09-25-v5-data-loop/design.md §D-1 / §D-2 / §D-3 / §D-4 / §D-5
+// ============================================================
+(function () {
+  const { effectiveSourceIds, sourceDistribution, shapeSignature, shapeStore,
+          calibrate, mergeRulesInto, corrections } = svi;
+  const RL = svi.RuleLearner;
+
+  function mkEl(opts) {
+    const o = opts || {};
+    const attrs = Object.assign({}, o.attrs);
+    return {
+      tagName: o.tagName || 'IMG', id: o.id || '', className: o.className || '',
+      clientWidth: o.clientWidth || 0, clientHeight: o.clientHeight || 0,
+      isConnected: true,
+      getAttribute(k) { return Object.prototype.hasOwnProperty.call(attrs, k) ? attrs[k] : null; },
+      setAttribute(k, v) { attrs[k] = String(v); },
+      removeAttribute(k) { delete attrs[k]; },
+      matches() { return false; },
+    };
+  }
+
+  const host = svi.profileKey();
+
+  // ---- 1. hits 分级 (design D-1) ----
+  assert.strictEqual(RL.ruleStrength({ hits: 1 }), 'disabled', '未达 learnHits 门 → disabled');
+  assert.strictEqual(RL.ruleStrength({ hits: 2 }), 'weak', 'hits=2 → weak (learnHits 默认 2)');
+  assert.strictEqual(RL.ruleStrength({ hits: 4 }), 'weak', 'hits=4 → weak (强门默认 5)');
+  assert.strictEqual(RL.ruleStrength({ hits: 5 }), 'strong', 'hits=5 → strong');
+  assert.strictEqual(RL.ruleStrength({ hits: 99 }), 'strong', 'hits=99 → strong');
+  assert.strictEqual(RL.ruleStrength({ hits: 9, disabled: true }), 'disabled', 'disabled 标记优先');
+  assert.strictEqual(RL.ruleStrength(null), 'disabled', 'null 规则 → disabled');
+
+  // 强门可调
+  svi.prefs.learnStrongHits = 3;
+  assert.strictEqual(RL.ruleStrength({ hits: 3 }), 'strong', '强门调到 3 后 hits=3 即为强');
+  assert.strictEqual(RL.ruleStrength({ hits: 2 }), 'weak', '仍为 weak');
+  svi.prefs.learnStrongHits = 5;
+
+  // ---- 2. 负反馈降级 (design D-2) ----
+  RL.data = { [host]: { rules: [{ stem: 'img.demo', action: 'invert', hits: 8, lastAt: Date.now() }] } };
+  const r0 = RL.data[host].rules[0];
+  assert.strictEqual(RL.ruleStrength(r0), 'strong', '初始为强规则');
+  RL.demote(host, 'img.demo');
+  assert.strictEqual(r0.hits, 1, '第一次降级: hits 归 1');
+  assert.strictEqual(r0.demotes, 1, '记一次 demote');
+  assert.strictEqual(RL.ruleStrength(r0), 'disabled', 'hits 归 1 后不再生效');
+  assert.strictEqual(r0.disabled, undefined, '第一次降级还不算禁用 (需连续 2 次)');
+  RL.demote(host, 'img.demo');
+  assert.strictEqual(r0.disabled, true, '第二次降级 → 禁用');
+  assert.strictEqual(RL.demote(host, 'no-such-stem'), false, '不存在的 stem 返回 false');
+  // 恢复
+  assert.strictEqual(RL.restore(host, 'img.demo'), true, '恢复返回 true');
+  assert.strictEqual(r0.disabled, false, '恢复后不禁用');
+  assert.strictEqual(r0.demotes, 0, '恢复后降级计数清零');
+  assert.strictEqual(RL.ruleStrength(r0), 'strong', '恢复后还原降级前的命中数 (8 → 仍是强规则), got ' + r0.hits);
+
+  // ---- 3. 生效集合随分级开关变化 (零回归的机制) ----
+  svi.prefs.learnGrading = false;
+  assert.deepStrictEqual(effectiveSourceIds('rule'),
+    ['learned', 'seedProtect', 'faviconSkip', 'seedForceInvert'],
+    '分级关: rule 段仍是 v5-1 的四条');
+  svi.prefs.learnGrading = true;
+  assert.deepStrictEqual(effectiveSourceIds('rule'),
+    ['learnedStrong', 'seedProtect', 'faviconSkip', 'seedForceInvert', 'learnedWeak'],
+    '分级开: 强规则在种子前, 弱规则在种子后 (即"弱规则只能覆盖像素结论")');
+  svi.prefs.learnGrading = false;
+
+  // 形状先验开关
+  assert.strictEqual(effectiveSourceIds('rule').indexOf('shapePrior'), -1, '形状先验默认不参与');
+  svi.prefs.shapePrior = true;
+  assert.strictEqual(effectiveSourceIds('rule').indexOf('shapePrior') >= 0, true, '开启后参与');
+  svi.prefs.shapePrior = false;
+
+  // ---- 4. 判定来源分布 (纯函数) ----
+  const d0 = sourceDistribution([]);
+  assert.strictEqual(d0.total, 0, '空输入 total=0');
+  const d1 = sourceDistribution([
+    { reason: 'pixel', actionId: 'invert' },
+    { reason: 'pixel', actionId: 'invert' },
+    { reason: 'learned', actionId: 'invert' },
+    { reason: 'manual', actionId: 'hide' },
+    null,
+  ]);
+  assert.strictEqual(d1.total, 4, 'null 条目被跳过');
+  assert.strictEqual(d1.byReason.pixel, 2, '按原因聚合');
+  assert.strictEqual(d1.byReason.learned, 1, '按原因聚合 (学习规则)');
+  assert.strictEqual(d1.byAction.hide, 1, '按动作聚合');
+  assert.strictEqual(d1.byAction.invert, 3, '按动作聚合 (反色)');
+
+  // ---- 5. 形状签名稳定性 (design D-4) ----
+  const elA = mkEl({ tagName: 'IMG', className: 'beta alpha', clientWidth: 200, clientHeight: 150 });
+  const elB = mkEl({ tagName: 'IMG', className: 'alpha beta', clientWidth: 200, clientHeight: 150 });
+  assert.strictEqual(shapeSignature(elA), shapeSignature(elA), '同元素多次调用签名一致');
+  assert.strictEqual(shapeSignature(elA), shapeSignature(elB), 'class 顺序不影响签名 (先排序)');
+  const elC = mkEl({ tagName: 'IMG', className: 'alpha beta', clientWidth: 900, clientHeight: 700 });
+  assert.notStrictEqual(shapeSignature(elA), shapeSignature(elC), '不同尺寸桶 → 不同签名');
+  assert.ok(shapeSignature(elA).indexOf('img|alpha.beta|') === 0, '签名格式: tag|排序后class|尺寸桶|上下文, got ' + shapeSignature(elA));
+  assert.strictEqual(shapeSignature(null), '', 'null → 空签名');
+  const noTag = mkEl({});
+  noTag.tagName = '';
+  assert.strictEqual(shapeSignature(noTag), '', '无 tagName → 空签名');
+
+  // ---- 6. 形状先验门 (design D-4) ----
+  shapeStore.data = {};
+  const sig = shapeSignature(elA);
+  shapeStore.bump(sig, 'invert', 'a.example');
+  shapeStore.bump(sig, 'invert', 'b.example');
+  const rec = shapeStore.get(sig);
+  assert.strictEqual(rec.invert, 2, '形状计数累加');
+  assert.strictEqual(Object.keys(rec.hosts).length, 2, 'host 去重计数');
+  // 同一 host 重复只算一个 host
+  shapeStore.bump(sig, 'invert', 'a.example');
+  assert.strictEqual(Object.keys(shapeStore.get(sig).hosts).length, 2, '同 host 重复不增加 host 数');
+  // 门未达 (默认 3 host) → null
+  assert.strictEqual(svi.shapePriorResolve(elA), null, 'host 数未达先验门 → 不生效');
+  shapeStore.bump(sig, 'invert', 'c.example');
+  const prior = svi.shapePriorResolve(elA);
+  assert.ok(prior && prior.verdict === 'invert', '达门且方向一致 → 给 invert 先验, got ' + JSON.stringify(prior));
+  assert.strictEqual(prior.reason, 'shape-prior', '原因码 shape-prior');
+  // 方向打平 → null
+  shapeStore.bump(sig, 'keep', 'd.example');
+  shapeStore.bump(sig, 'keep', 'e.example');
+  shapeStore.bump(sig, 'keep', 'f.example');
+  shapeStore.bump(sig, 'keep', 'g.example');
+  assert.strictEqual(svi.shapePriorResolve(elA), null, '方向打平 → 不给先验 (不猜)');
+
+  // ---- 7. 阈值校准 (design D-3: 只自动收紧) ----
+  corrections.data = null;
+  const cs0 = calibrate.suggest(host);
+  assert.strictEqual(cs0.direction, null, '样本不足 → 不给方向');
+  assert.ok(/样本不足/.test(cs0.reason), '原因文案');
+
+  corrections.data = null;
+  corrections.host(host).falseInvert = 8;
+  corrections.host(host).falseKeep = 1;
+  const cs1 = calibrate.suggest(host);
+  assert.strictEqual(cs1.direction, 'tighten', '误反占优 → 建议收紧');
+  assert.strictEqual(cs1.samples, 9, '样本数 = 误反 + 误保');
+
+  corrections.data = null;
+  corrections.host(host).falseInvert = 0;
+  corrections.host(host).falseKeep = 8;
+  const cs2 = calibrate.suggest(host);
+  assert.strictEqual(cs2.direction, 'loosen', '误保占优 → 建议放松 (但不会自动应用)');
+
+  // apply: 写站点覆盖 + 重置样本窗
+  corrections.data = null;
+  corrections.host(host).falseInvert = 8;
+  corrections.host(host).falseKeep = 1;
+  const before = Number(svi.prefs.siteOverrides[host] && svi.prefs.siteOverrides[host].imgLumCutoff);
+  assert.strictEqual(calibrate.apply(host, 'tighten'), true, 'apply 返回 true');
+  const ovr = svi.prefs.siteOverrides[host];
+  assert.ok(ovr && typeof ovr.imgLumCutoff === 'number', '写入图片侧阈值 imgLumCutoff (图片浅色判定用的是它)');
+  assert.ok(typeof ovr.imgAreaThreshold === 'number', '写入 imgAreaThreshold');
+  assert.ok(typeof ovr.whiteThreshold === 'number', '写入视频侧 whiteThreshold');
+  assert.ok(typeof ovr.lumThreshold === 'number', '写入视频侧 lumThreshold');
+  assert.ok(ovr.imgLumCutoff > (isNaN(before) ? (Number(svi.prefs.imgLumCutoff) || 180) : before) - 0.001, '收紧 = 抬高明度线');
+  assert.strictEqual(corrections.stats(host).falseInvert, 0, 'apply 后重置误反样本窗 (防震荡)');
+  assert.strictEqual(calibrate.calibrated(host), true, '标记本站已校准');
+  assert.strictEqual(calibrate.apply(host, 'bogus'), false, '非法方向返回 false');
+  // 上限钳制: 连续收紧不会越界
+  for (let i = 0; i < 40; i++) calibrate.apply(host, 'tighten');
+  const ovr2 = svi.prefs.siteOverrides[host];
+  assert.ok(ovr2.imgLumCutoff <= 215, '收紧不得越过上限 (imgLumCutoff ≤ 215), got ' + ovr2.imgLumCutoff);
+  assert.ok(ovr2.lumThreshold <= 230, '收紧不得越过上限 (lumThreshold ≤ 230), got ' + ovr2.lumThreshold);
+  assert.strictEqual(calibrate.reset(host), true, '恢复默认返回 true');
+  assert.strictEqual(calibrate.calibrated(host), false, '恢复后不再标记已校准');
+
+  // ---- 8. 规则合并 (design D-5: 取大不累加) ----
+  const m1 = mergeRulesInto(
+    [{ stem: 'img.a', action: 'invert', hits: 5, lastAt: 1 }],
+    [{ stem: 'img.a', action: 'invert', hits: 5, lastAt: 2 }]
+  );
+  assert.strictEqual(m1.rules.length, 1, '同 stem 合并为一条');
+  assert.strictEqual(m1.rules[0].hits, 5, '一致时取 max 而**不是累加** (否则规则包会变成权重放大器)');
+  assert.strictEqual(m1.conflicts, 0, '无冲突');
+
+  const m2 = mergeRulesInto(
+    [{ stem: 'img.b', action: 'invert', hits: 3, lastAt: 1 }],
+    [{ stem: 'img.b', action: 'protect', hits: 7, lastAt: 2 }]
+  );
+  assert.strictEqual(m2.conflicts, 1, '方向不一致记一次冲突');
+  assert.strictEqual(m2.rules[0].action, 'protect', '冲突保留 hits 高者');
+  assert.strictEqual(m2.rules[0].hits, 7, '连 hits 一起采用');
+
+  const m3 = mergeRulesInto(
+    [{ stem: 'img.c', action: 'protect', hits: 9, lastAt: 1 }],
+    [{ stem: 'img.c', action: 'invert', hits: 2, lastAt: 2 }]
+  );
+  assert.strictEqual(m3.rules[0].action, 'protect', '冲突时 hits 低者不覆盖本地');
+  const m4 = mergeRulesInto(
+    [{ stem: 'img.d', action: 'invert', hits: 4, lastAt: 1 }],
+    [{ stem: 'img.d', action: 'protect', hits: 4, lastAt: 2 }]
+  );
+  assert.strictEqual(m4.rules[0].action, 'invert', '冲突且 hits 相等 → 保留本地');
+
+  const m5 = mergeRulesInto([], [{ stem: 'img.e', action: 'hide', hits: 6 }]);
+  assert.strictEqual(m5.added, 1, '新条目计入 added');
+  assert.strictEqual(m5.rules[0].action, 'hide', 'hide 动作同样可合并');
+  assert.deepStrictEqual(mergeRulesInto([], []).rules, [], '空 + 空 = 空');
+  // 幂等性: 同一份文件导入两次, 权重不得变化 (这是"取大不累加"的直接验收)
+  const once = mergeRulesInto([{ stem: 'img.f', action: 'invert', hits: 5 }],
+    [{ stem: 'img.f', action: 'invert', hits: 5 }]);
+  const twice = mergeRulesInto(once.rules, [{ stem: 'img.f', action: 'invert', hits: 5 }]);
+  assert.strictEqual(twice.rules[0].hits, once.rules[0].hits, '重复导入同一文件权重不变 (幂等)');
+
+  // ---- 清理 ----
+  RL.data = {};
+  shapeStore.data = null;
+  corrections.data = null;
+  try { svi.Store.remove('shapes'); } catch (e) { /* ignore */ }
+  try { svi.Store.remove('corrections'); } catch (e) { /* ignore */ }
+  delete svi.prefs.siteOverrides[host];
+
+  console.log('✓ v5.3 unit tests passed: hits 分级与降级/恢复 / 生效集合随开关变化 / 来源分布 / 形状签名与先验门 / 阈值校准只收紧与钳制 / 规则合并取大不累加且幂等');
+})();
+
+// ============================================================
+// v5.3 fixture 回归 (用户教过的结论 → CI 保护网)
+// 产出: node scripts/export-fixtures.js <导出的备份.json>
+// 文件缺失时跳过并打印提示 (CI 上通常没有 —— 它含用户个人的图片 URL, 已 gitignore)
+// ============================================================
+(function () {
+  const FIXTURE = path.join(__dirname, 'dev', 'fixtures', 'verdicts.jsonl');
+  if (!fs.existsSync(FIXTURE)) {
+    console.log('· v5.3 fixture 回归: 跳过 (未找到 dev/fixtures/verdicts.jsonl)');
+    console.log('  生成方式: 设置 → 💾 数据与备份 → 导出全量备份, 然后');
+    console.log('            node scripts/export-fixtures.js <那个.json>');
+    return;
+  }
+
+  const raw = fs.readFileSync(FIXTURE, 'utf8').trim();
+  if (!raw) {
+    console.log('· v5.3 fixture 回归: 跳过 (fixture 文件为空)');
+    return;
+  }
+
+  const ACTION_OF = { invert: 'invert', keep: 'protect', hide: 'hide', mask: 'mask' };
+  // stem 形如 img.foo / img#bar / img —— 与 selectorStem 的产出一一对应
+  function elFromStem(stem) {
+    const el = { tagName: 'IMG', id: '', className: '', isConnected: true };
+    const m = /^([a-z0-9-]+)(?:([.#])(.*))?$/.exec(String(stem || '').toLowerCase());
+    if (!m) return null;
+    el.tagName = m[1].toUpperCase();
+    if (m[2] === '.') el.className = m[3];
+    else if (m[2] === '#') el.id = m[3];
+    return el;
+  }
+
+  let checked = 0;
+  let skipped = 0;
+  const lines = raw.split('\n').filter(Boolean);
+  for (const line of lines) {
+    let f = null;
+    try { f = JSON.parse(line); } catch (e) { continue; }
+    if (!f || !f.expected) continue;
+    const want = ACTION_OF[f.expected];
+    if (!want) { skipped++; continue; }
+
+    if (f.origin === 'learned' && f.stem) {
+      const el = elFromStem(f.stem);
+      if (!el) { skipped++; continue; }
+      // 直接注入该 host 的规则并断言 RuleLearner 复现出同一个动作
+      svi.RuleLearner.data = { [f.host]: { rules: [{ stem: f.stem, action: want, hits: 99, lastAt: Date.now() }] } };
+      const got = svi.RuleLearner.decideFor(f.host, el);
+      assert.strictEqual(got, want, 'fixture(' + f.origin + '): ' + f.host + ' ' + f.stem + ' 期望 ' + want + ', 实得 ' + got);
+      checked++;
+    } else if (f.origin === 'manual' && f.src) {
+      // 元素级手动结论经 resolveStage 的 manual 源读取 —— 但该源用的是**当前页 host**,
+      // 因此只有与 shim host 相同的条目可在此复现; 其余跳过 (如实计数, 不假装覆盖)。
+      if (f.host !== svi.profileKey()) { skipped++; continue; }
+      const key = svi.manualOverrideKey(f.host, f.src);
+      svi.prefs.manualOverrides[key] = (f.expected === 'invert') ? 'invert' : 'restore';
+      const got = svi.resolveStage({ tagName: 'IMG', className: '', id: '', getAttribute: () => null, setAttribute() {}, removeAttribute() {}, matches: () => false },
+        { src: f.src }, 'override');
+      assert.ok(got, 'fixture(manual): ' + f.src + ' 必须能被 override 段解析出来');
+      assert.strictEqual(got.verdict, (f.expected === 'invert' ? 'invert' : 'keep'),
+        'fixture(manual): ' + f.src + ' 期望 ' + f.expected + ', 实得 ' + got.verdict);
+      delete svi.prefs.manualOverrides[key];
+      checked++;
+    } else {
+      skipped++;
+    }
+  }
+
+  svi.RuleLearner.data = {};
+  console.log('✓ v5.3 fixture 回归通过: ' + checked + ' 条用户教过的结论被当前代码复现 (跳过 ' + skipped + ' 条, 其中跨 host 的手动条目无法在 Node 桩中复现)');
 })();
 
 

@@ -264,6 +264,17 @@
     undoStackSize: 30,         // 撤销栈容量 (1 ~ 100; 仅内存)
     actionToast: true,         // 可交互提示: 批量操作时给一个带「撤销」按钮的 toast
     errorSentinel: true,       // 误反哨兵: 记录用户修正并在 24h 内重复还原时提示
+
+    // ===== v5.3 新增偏好: 数据闭环 (任务 v5-3) =====
+    learnGrading: false,       // hits 分级: 弱规则(hits<5)只能在种子之后出结论。**默认关** ——
+                               //   开启会改变既有学习规则的行为(见 design D-1), 故需用户显式选择
+    learnStrongHits: 5,        // 强规则门 (2 ~ 50)
+    learnDemote: true,         // 负反馈降级: 规则命中后被用户覆盖 → 降级; 连续 2 次禁用
+    shapePrior: false,         // 形状跨站先验: 最弱兜底来源, 默认关
+    shapeMinHosts: 3,          // 形状先验门: 至少几个不同 host (2 ~ 20)
+    calibrateAuto: true,       // 阈值自校准**自动收紧** (只收紧; 放松需手动点)
+    calibrateMinSamples: 5,    // 触发校准所需的最少修正样本 (1 ~ 50)
+    falseInvertRate: 0.3,      // 误反占比阈值 (0.1 ~ 0.9)
   };
 
   // 运行时状态 (仅存于内存, 每个标签页独立, 绝不写入存储 —— 标签页隔离)
@@ -1001,6 +1012,15 @@
     merged.undoStackSize = Math.round(clampNumber(merged.undoStackSize, 1, 100, 30));
     merged.actionToast = merged.actionToast !== false;
     merged.errorSentinel = merged.errorSentinel !== false;
+    // v5.3 字段规范化: 数据闭环 (分级/降级默认关; 阈值与样本门钳制)
+    merged.learnGrading = merged.learnGrading === true;
+    merged.learnStrongHits = Math.round(clampNumber(merged.learnStrongHits, 2, 50, 5));
+    merged.learnDemote = merged.learnDemote !== false;
+    merged.shapePrior = merged.shapePrior === true;
+    merged.shapeMinHosts = Math.round(clampNumber(merged.shapeMinHosts, 2, 20, 3));
+    merged.calibrateAuto = merged.calibrateAuto !== false;
+    merged.calibrateMinSamples = Math.round(clampNumber(merged.calibrateMinSamples, 1, 50, 5));
+    merged.falseInvertRate = clampNumber(merged.falseInvertRate, 0.1, 0.9, 0.3);
     // 标签页隔离: 运行时状态绝不入库
     delete merged.invertActive;
 
@@ -2130,12 +2150,84 @@
       if (cand.verdict === 'invert') act.apply(el, cand.params, cand.reason);
       else act.revert(el);
     } catch (e) { /* ignore */ }
+    // v5.3: 记下是哪条学习规则命中的 —— 用户随后覆盖它时用于负反馈降级 (design D-2)
+    if (el && typeof el.setAttribute === 'function' && cand.stem && state.learnDemote !== false) {
+      try { el.setAttribute('data-svi-rule-stem', cand.stem); } catch (e2) { /* ignore */ }
+    }
+    // v5.3: 形状先验的学习来源 —— 规则命中的结论同样是"跨站可泛化"的证据 (design D-4)
+    if (cand.reason === 'learned' && el) {
+      try {
+        const sig = shapeSignature(el);
+        if (sig) shapeStore.bump(sig, cand.verdict === 'invert' ? 'invert' : 'keep', profileKey());
+      } catch (e2) { /* ignore */ }
+    }
     // v5.2: 元素级动作被施加时同样进会话日志与撤销栈
     if (cand.verdict === 'invert' && (aid === 'hide' || aid === 'mask')) {
       recordProcessed(el, aid, cand.reason, '');
       pushUndo({ el: el, src: '', actionId: aid, reason: cand.reason, at: Date.now() });
     }
     return true;
+  }
+
+  // v5.3 自动收紧 (design D-3): 只朝"减少误反"的方向自动动作; 放松必须用户点。
+  function maybeAutoCalibrate() {
+    try {
+      if (state.calibrateAuto === false) return;
+      const host = profileKey();
+      const s = calibrate.suggest(host);
+      if (s.direction !== 'tighten') return;
+      if (calibrate.apply(host, 'tighten')) {
+        showToast('已按你的修正自动收紧本站判定（' + s.reason + '）· 可在 元素动作 里恢复默认');
+      }
+    } catch (e) { /* ignore */ }
+  }
+
+  // v5.3 判定来源分布 (纯函数, 单测契约): 从会话日志聚合, 不重新扫描页面
+  function sourceDistribution(entries) {
+    const out = { byReason: {}, byAction: {}, total: 0 };
+    try {
+      for (const e of (entries || [])) {
+        if (!e) continue;
+        const r = e.reason || 'unknown';
+        const a = e.actionId || 'invert';
+        out.byReason[r] = (out.byReason[r] || 0) + 1;
+        out.byAction[a] = (out.byAction[a] || 0) + 1;
+        out.total += 1;
+      }
+    } catch (e) { /* ignore */ }
+    return out;
+  }
+
+  // v5.3 规则合并 (纯函数, 单测契约; design D-5)
+  //   一致 → hits 取**大**(不累加); 冲突 → 保留 hits 高者 (相等留本地); 新条目 → 追加。
+  //   取大而非累加的理由: 累加会让一份分享的规则包变成**权重放大器** ——
+  //   反复导入同一文件即可把某条规则刷成强规则, 这是可被利用的污染。
+  function mergeRulesInto(localRules, incomingRules) {
+    const map = new Map();
+    for (const r of (localRules || [])) {
+      if (r && r.stem) map.set(r.stem, { stem: r.stem, action: r.action, hits: r.hits || 0, lastAt: r.lastAt || 0 });
+    }
+    let conflicts = 0;
+    let added = 0;
+    for (const r of (incomingRules || [])) {
+      if (!r || !r.stem) continue;
+      const prev = map.get(r.stem);
+      if (!prev) {
+        map.set(r.stem, { stem: r.stem, action: r.action, hits: r.hits || 0, lastAt: r.lastAt || 0 });
+        added += 1;
+        continue;
+      }
+      if (prev.action === r.action) {
+        prev.hits = Math.max(prev.hits, r.hits || 0);
+        prev.lastAt = Math.max(prev.lastAt, r.lastAt || 0);
+      } else {
+        conflicts += 1;
+        if ((r.hits || 0) > (prev.hits || 0)) {
+          map.set(r.stem, { stem: r.stem, action: r.action, hits: r.hits || 0, lastAt: r.lastAt || 0 });
+        }
+      }
+    }
+    return { rules: Array.from(map.values()), conflicts: conflicts, added: added };
   }
 
   // ===== 页级动作的 DOM 载体 (v5.0 阶段 B) =====
@@ -2236,19 +2328,20 @@
       },
     },
 
-    // —— stage 'rule' (决策快照之后; 顺序严格 learned → seedProtect → faviconSkip → seedForceInvert) ——
+    // —— stage 'rule' (决策快照之后; 顺序 learned → seedProtect → faviconSkip → seedForceInvert) ——
     //   注意 favicon 判定夹在 protect 与 forceInvert 之间, 是现行代码的实际顺序, 不得合并或重排。
+    //   v5.3 分级: learnGrading 关时只有 `learned` 生效 (表内容与 v5-1 生效集合一致, 零回归);
+    //   开时换成 learnedStrong (种子之前) + learnedWeak (种子之后、像素门之前) ——
+    //   恰好实现"弱规则只能覆盖像素结论, 不能压过种子"。
     {
       id: 'learned', stage: 'rule',
-      resolve(el, ctx) {
-        const r = ruleLearner.decideFor(profileKey(), el);
-        if (r === 'invert') return { verdict: 'invert', reason: 'learned', actionId: 'invert' };
-        if (r === 'protect') return { verdict: 'keep', reason: 'learned', actionId: 'invert' };
-        // v5.0 阶段 B: 学习规则可承载元素级动作 (由『永久屏蔽』Alt+Shift+点击 / 『遮罩』Alt+M 写入)
-        if (r === 'hide') return { verdict: 'invert', reason: 'learned', actionId: 'hide' };
-        if (r === 'mask') return { verdict: 'invert', reason: 'learned', actionId: 'mask' };
-        return null;
-      },
+      enabled: () => !learnGradingOn(),
+      resolve(el) { return learnedResolve(el); },
+    },
+    {
+      id: 'learnedStrong', stage: 'rule',
+      enabled: () => learnGradingOn(),
+      resolve(el) { return learnedResolve(el, 'strong'); },
     },
     {
       id: 'seedProtect', stage: 'rule',
@@ -2272,12 +2365,33 @@
         return null;
       },
     },
+    {
+      // v5.3 (design D-1): 弱学习规则 —— 只能在所有种子之后、像素门之前出结论。
+      // 语义提示: 这**不是** PRD R4 写的"仅像素证据缺失时生效"(现有管线上无法表达,
+      // 该段必然抢在像素之前), 面板与 README 如实写明, 不假装等价。
+      id: 'learnedWeak', stage: 'rule',
+      enabled: () => learnGradingOn(),
+      resolve(el) { return learnedResolve(el, 'weak'); },
+    },
+    {
+      // v5.3 (design D-4): 形状先验 —— 最弱兜底, 位置在所有规则之后; 默认关。
+      id: 'shapePrior', stage: 'rule',
+      enabled: () => state.shapePrior === true,
+      resolve(el, ctx) { return shapePriorResolve(el, ctx); },
+    },
   ];
 
   function resolveStage(el, ctx, stage) {
     for (let i = 0; i < SOURCES.length; i++) {
       const s = SOURCES[i];
       if (s.stage !== stage) continue;
+      // v5.3: 来源可按开关参与或退场 (enabled() 缺省 = 恒参与)。
+      //   分级/形状先验都靠这一点做到"关时不改变生效集合"。
+      if (typeof s.enabled === 'function') {
+        let on = false;
+        try { on = !!s.enabled(); } catch (e) { on = false; }
+        if (!on) continue;
+      }
       let r = null;
       try { r = s.resolve(el, ctx || {}); } catch (e) { r = null; }
       if (r) {
@@ -2286,6 +2400,56 @@
       }
     }
     return null;
+  }
+
+  // 当前生效的来源 id 列表 (按 stage 分组) —— 单测与面板用它核验"关时集合不变"。
+  function effectiveSourceIds(stage) {
+    const out = [];
+    for (const s of SOURCES) {
+      if (stage && s.stage !== stage) continue;
+      if (typeof s.enabled === 'function') {
+        let on = false;
+        try { on = !!s.enabled(); } catch (e) { on = false; }
+        if (!on) continue;
+      }
+      out.push(s.id);
+    }
+    return out;
+  }
+
+  function learnGradingOn() {
+    return state.learnGrading === true;
+  }
+
+  // 学习规则来源的统一解析 (design D-1): strength 缺省表示"不分级"(即 v5-1 语义)
+  function learnedResolve(el, strength) {
+    const rule = ruleLearner.decideRuleFor(profileKey(), el, strength);
+    if (!rule) return null;
+    const a = rule.action;
+    if (a === 'invert') return { verdict: 'invert', reason: 'learned', actionId: 'invert', stem: rule.stem };
+    if (a === 'protect') return { verdict: 'keep', reason: 'learned', actionId: 'invert', stem: rule.stem };
+    // v5.0 阶段 B: 学习规则可承载元素级动作 (由『永久屏蔽』/『遮罩』写入)
+    if (a === 'hide') return { verdict: 'invert', reason: 'learned', actionId: 'hide', stem: rule.stem };
+    if (a === 'mask') return { verdict: 'invert', reason: 'learned', actionId: 'mask', stem: rule.stem };
+    return null;
+  }
+
+  // 形状先验来源 (design D-4; 默认关)。命中条件: 该形状在 >= shapeMinHosts 个不同 host 上
+  // 方向一致, 且当前 host 没有更具体的规则命中。
+  function shapePriorResolve(el) {
+    try {
+      const sig = shapeSignature(el);
+      if (!sig) return null;
+      const rec = shapeStore.get(sig);
+      if (!rec) return null;
+      const minHosts = Math.max(2, Math.min(20, Number(state.shapeMinHosts) || 3));
+      if ((rec.hosts ? Object.keys(rec.hosts).length : 0) < minHosts) return null;
+      if (rec.invert > rec.keep) return { verdict: 'invert', reason: 'shape-prior' };
+      if (rec.keep > rec.invert) return { verdict: 'keep', reason: 'shape-prior' };
+      return null;
+    } catch (e) {
+      return null;
+    }
   }
 
   // 反色状态写点唯一收口 (v4.6 C3): 所有决策来源的 data-svi-inverted 写入/摘除一律经此门。
@@ -2590,6 +2754,204 @@
     'hidden-rule': '学习规则 · 屏蔽',
     'mask-rule': '学习规则 · 遮罩',
     skip: '跳过',
+  };
+
+  // ===== v5.3 形状签名与跨站先验 (design D-4) =====
+  //   形状 = 与 host 解耦的元素"长相": tag + 排序后前 3 个 class 词元 + 尺寸桶 + 上下文词元。
+  //   目的: 让"某个 host 上学到的结论"对新 host 上的同形元素形成**最弱先验** (冷启动加速)。
+  //   刻意不用 getBoundingClientRect (只读 clientWidth/Height, 不触发强制布局)。
+  const SHAPE_KEY = 'shapes';
+  const SHAPE_MAX = 500;
+  const SHAPE_MAX_HOSTS = 20;
+
+  function shapeSizeBucket(el) {
+    try {
+      const w = (el && (el.clientWidth || 0)) || 0;
+      const h = (el && (el.clientHeight || 0)) || 0;
+      const max = Math.max(w, h);
+      if (!max) return '0';
+      if (max < 32) return 'xs';
+      if (max < 96) return 's';
+      if (max < 240) return 'm';
+      if (max < 640) return 'l';
+      return 'xl';
+    } catch (e) { return '0'; }
+  }
+
+  function shapeCtxToken(el) {
+    try {
+      if (closestContextHit(el, CONTENT_CONTEXT_SELECTOR)) return 'content';
+      if (closestContextHit(el, CHROME_CONTEXT_SELECTOR)) return 'chrome';
+    } catch (e) { /* ignore */ }
+    return 'unknown';
+  }
+
+  // 稳定签名: 同元素多次调用必须得到同一字符串 (class 先排序, 取前 3)
+  function shapeSignature(el) {
+    try {
+      if (!el) return '';
+      const tag = String(el.tagName || '').toLowerCase();
+      if (!tag) return '';
+      let cls = [];
+      if (el.className && typeof el.className === 'object' && el.className.baseVal !== undefined) {
+        cls = String(el.className.baseVal || '').trim().split(/\s+/).filter(Boolean);
+      } else if (typeof el.className === 'string') {
+        cls = el.className.trim().split(/\s+/).filter(Boolean);
+      }
+      cls = cls.slice().sort().slice(0, 3);
+      return tag + '|' + cls.join('.') + '|' + shapeSizeBucket(el) + '|' + shapeCtxToken(el);
+    } catch (e) { return ''; }
+  }
+
+  const shapeStore = {
+    data: null,
+    load() {
+      if (this.data) return this.data;
+      let d = null;
+      try { d = Store.get(SHAPE_KEY, null); } catch (e) { d = null; }
+      if (!d || typeof d !== 'object' || Array.isArray(d)) d = {};
+      this.data = d;
+      return d;
+    },
+    get(sig) { try { return this.load()[sig] || null; } catch (e) { return null; } },
+    // action: 'invert' | 'keep'。host 只做去重计数 (先验门要求"不同 host 数")
+    bump(sig, action, host) {
+      if (!sig) return null;
+      try {
+        const d = this.load();
+        let rec = d[sig];
+        if (!rec || typeof rec !== 'object' || Array.isArray(rec)) rec = { invert: 0, keep: 0, hosts: {} };
+        if (!rec.hosts || typeof rec.hosts !== 'object' || Array.isArray(rec.hosts)) rec.hosts = {};
+        if (action === 'invert') rec.invert = (rec.invert || 0) + 1;
+        else if (action === 'keep') rec.keep = (rec.keep || 0) + 1;
+        if (host) rec.hosts[String(host)] = Date.now();
+        rec.at = Date.now();
+        d[sig] = rec;
+        // 有界: 条目 LRU 500, 每条 host 表上限 20 (防无界增长)
+        const keys = Object.keys(d);
+        if (keys.length > SHAPE_MAX) {
+          keys.sort((a, b) => (d[a].at || 0) - (d[b].at || 0));
+          for (const k of keys.slice(0, keys.length - SHAPE_MAX)) delete d[k];
+        }
+        const hk = Object.keys(rec.hosts);
+        if (hk.length > SHAPE_MAX_HOSTS) {
+          hk.sort((a, b) => (rec.hosts[a] || 0) - (rec.hosts[b] || 0));
+          for (const k of hk.slice(0, hk.length - SHAPE_MAX_HOSTS)) delete rec.hosts[k];
+        }
+        this.persist();
+        return rec;
+      } catch (e) { return null; }
+    },
+    list() {
+      const d = this.load();
+      return Object.keys(d).map((sig) => {
+        const r = d[sig] || {};
+        return {
+          sig: sig,
+          invert: r.invert || 0,
+          keep: r.keep || 0,
+          hostCount: Object.keys(r.hosts || {}).length,
+        };
+      });
+    },
+    remove(sig) {
+      const d = this.load();
+      if (d[sig]) { delete d[sig]; this.persist(); return true; }
+      return false;
+    },
+    persist() { try { Store.set(SHAPE_KEY, this.load()); } catch (e) { /* ignore */ } },
+  };
+
+  // ===== v5.3 阈值自校准建议 (design D-3: **只自动收紧**, 放松需手动) =====
+  const calibrate = {
+    // 返回 { direction: 'tighten'|'loosen'|null, step, samples, rate, reason }
+    suggest(host) {
+      try {
+        const st = corrections.stats(host);
+        const total = (st.falseInvert || 0) + (st.falseKeep || 0);
+        const min = Math.max(1, Math.min(50, Number(state.calibrateMinSamples) || 5));
+        if (total < min) return { direction: null, step: 0, samples: total, rate: 0, reason: '样本不足' };
+        const rate = (st.falseInvert || 0) / total;
+        const th = typeof state.falseInvertRate === 'number' ? state.falseInvertRate : 0.3;
+        if (rate > th) {
+          return { direction: 'tighten', step: 3, samples: total, rate: rate, reason: '误反占比 ' + Math.round(rate * 100) + '% > ' + Math.round(th * 100) + '%' };
+        }
+        if (rate < (1 - th) && st.falseKeep >= min) {
+          return { direction: 'loosen', step: 3, samples: total, rate: rate, reason: '误保占比 ' + Math.round((1 - rate) * 100) + '% > ' + Math.round(th * 100) + '%' };
+        }
+        return { direction: null, step: 0, samples: total, rate: rate, reason: '无需调整' };
+      } catch (e) {
+        return { direction: null, step: 0, samples: 0, rate: 0, reason: '计算失败' };
+      }
+    },
+    // 应用一次校准: 写站点覆盖的阈值字段。
+    //
+    // **必须区分两条路径的阈值** —— 图片浅色判定用的是 imgLumCutoff / imgAreaThreshold / imgTolerance,
+    // 而 whiteThreshold / lumThreshold 是**视频**的。误反计数不区分来源, 所以两侧一起收紧。
+    apply(host, direction) {
+      try {
+        if (direction !== 'tighten' && direction !== 'loosen') return false;
+        const sign = direction === 'tighten' ? 1 : -1;
+        const ov = (state.siteOverrides = state.siteOverrides || {});
+        const cur = (ov[host] && typeof ov[host] === 'object') ? ov[host] : {};
+        const step = (v, def, lo, hi) => {
+          const base = typeof v === 'number' ? v : def;
+          return Math.round(Math.max(lo, Math.min(hi, base + sign * 3)) * 10) / 10;
+        };
+        // 图片侧: 抬高明度线 + 抬高面积门 = 更少图片被判"浅色" (收紧)
+        cur.imgLumCutoff = step(cur.imgLumCutoff, Number(state.imgLumCutoff) || 180, 150, 215);
+        cur.imgAreaThreshold = step(cur.imgAreaThreshold, Number(state.imgAreaThreshold) || 48, 30, 75);
+        // 视频侧
+        cur.whiteThreshold = step(cur.whiteThreshold, Number(state.whiteThreshold) || 60, 45, 80);
+        cur.lumThreshold = step(cur.lumThreshold, Number(state.lumThreshold) || 210, 190, 230);
+        cur.calibratedAt = Date.now();
+        ov[host] = cur;
+        savePrefs();
+        // 触发后重置样本窗 (防震荡): 清掉本 host 的误反/误保计数, 保留 perSrc/perStem 供哨兵用
+        try {
+          const hd = corrections.host(host);
+          hd.falseInvert = 0;
+          hd.falseKeep = 0;
+          corrections.persist();
+        } catch (e2) { /* ignore */ }
+        try { invalidateProfileCache(); } catch (e2) { /* ignore */ }
+        try {
+          const eng = window.__svi && window.__svi.engines ? window.__svi.engines.image : null;
+          if (eng && typeof eng.clearCacheAndRescan === 'function') eng.clearCacheAndRescan();
+        } catch (e2) { /* ignore */ }
+        return true;
+      } catch (e) {
+        return false;
+      }
+    },
+    // 恢复默认 (清掉站点级阈值覆盖)
+    reset(host) {
+      try {
+        const ov = state.siteOverrides || {};
+        const cur = ov[host];
+        if (!cur || typeof cur !== 'object') return false;
+        delete cur.imgLumCutoff;
+        delete cur.imgAreaThreshold;
+        delete cur.whiteThreshold;
+        delete cur.lumThreshold;
+        delete cur.calibratedAt;
+        if (!Object.keys(cur).length) delete ov[host];
+        savePrefs();
+        try { invalidateProfileCache(); } catch (e2) { /* ignore */ }
+        try {
+          const eng = window.__svi && window.__svi.engines ? window.__svi.engines.image : null;
+          if (eng && typeof eng.clearCacheAndRescan === 'function') eng.clearCacheAndRescan();
+        } catch (e2) { /* ignore */ }
+        return true;
+      } catch (e) { return false; }
+    },
+    // 本 host 是否已被校准过 (面板展示)
+    calibrated(host) {
+      try {
+        const cur = (state.siteOverrides || {})[host];
+        return !!(cur && typeof cur.calibratedAt === 'number');
+      } catch (e) { return false; }
+    },
   };
 
   // 记一条"本页已处理" (同时供撤销栈与列表使用)
@@ -2989,6 +3351,18 @@
       if (override.imgFxMode !== undefined && override.imgFxMode !== null) profile.imgFxMode = override.imgFxMode;
       if (Array.isArray(override.excludeSelectors)) profile.excludeSelectors.push(...override.excludeSelectors);
       if (Array.isArray(override.shieldColors)) profile.shieldColors.push(...override.shieldColors);
+      // v5.3: 站点级阈值覆盖 (阈值自校准写入这里) —— 只接受有限范围内的数值, 其余忽略
+      const numOrNull = (v, lo, hi) => (typeof v === 'number' && isFinite(v) && v >= lo && v <= hi) ? v : null;
+      const t1 = numOrNull(override.imgLumCutoff, 120, 240);
+      if (t1 !== null) profile.imgLumCutoff = t1;
+      const t2 = numOrNull(override.imgAreaThreshold, 20, 90);
+      if (t2 !== null) profile.imgAreaThreshold = t2;
+      const t3 = numOrNull(override.imgTolerance, 10, 80);
+      if (t3 !== null) profile.imgTolerance = t3;
+      const t4 = numOrNull(override.whiteThreshold, 35, 90);
+      if (t4 !== null) profile.whiteThreshold = t4;
+      const t5 = numOrNull(override.lumThreshold, 180, 240);
+      if (t5 !== null) profile.lumThreshold = t5;
     }
 
     return profile;
@@ -4584,9 +4958,15 @@
         let nonWhiteCount = 0;
         let totalSaturation = 0;
 
-        const thresholdRatio = (state.whiteThreshold || 60) / 100;
-        const lumCutoff = state.lumThreshold || 210;
-        const maxNonWhiteAllowed = Math.floor(totalPixels * (1 - thresholdRatio));
+        // v5.3: 站点级阈值优先 (阈值自校准写入 siteOverrides → 档案透传);
+        // getSiteProfile() 是按 (host, 偏好版本) 的 Map 命中, 单帧开销可忽略。
+        let thresholdRatio = (state.whiteThreshold || 60) / 100;
+        let lumCutoff = state.lumThreshold || 210;
+        try {
+          const prof = getSiteProfile();
+          if (typeof prof.whiteThreshold === 'number') thresholdRatio = prof.whiteThreshold / 100;
+          if (typeof prof.lumThreshold === 'number') lumCutoff = prof.lumThreshold;
+        } catch (e) { /* ignore */ }        const maxNonWhiteAllowed = Math.floor(totalPixels * (1 - thresholdRatio));
 
         for (let i = 0; i < data.length; i += 4) {
           const r = data[i];
@@ -5603,10 +5983,20 @@
   // 合并站点级原色屏蔽后的求值偏好快照
   function getEvalPrefs() {
     const profile = getSiteProfile();
+    let out = state;
     if (profile.shieldColors && profile.shieldColors.length) {
-      return Object.assign({}, state, { shieldColors: profile.shieldColors });
+      out = Object.assign({}, out, { shieldColors: profile.shieldColors });
     }
-    return state;
+    // v5.3: 站点级阈值覆盖 (阈值自校准写入) —— 缺省时保持全局值, 不额外分配
+    if (typeof profile.imgLumCutoff === 'number' || typeof profile.imgAreaThreshold === 'number'
+      || typeof profile.imgTolerance === 'number') {
+      out = Object.assign({}, out, {
+        imgLumCutoff: typeof profile.imgLumCutoff === 'number' ? profile.imgLumCutoff : out.imgLumCutoff,
+        imgAreaThreshold: typeof profile.imgAreaThreshold === 'number' ? profile.imgAreaThreshold : out.imgAreaThreshold,
+        imgTolerance: typeof profile.imgTolerance === 'number' ? profile.imgTolerance : out.imgTolerance,
+      });
+    }
+    return out;
   }
 
   // ==========================================
@@ -5814,21 +6204,72 @@
       return rule;
     }
 
-    // 命中次数达 learnHits 的规则才生效
-    activeRules(host) {
+    // 命中次数达 learnHits 的规则才生效 (未达门 / 被降级禁用 → 不生效)
+    // v5.3: 增加 strength 过滤 —— 'strong' | 'weak' | undefined(全部生效规则)
+    activeRules(host, strength) {
       const hd = this.data[host];
       if (!hd || !Array.isArray(hd.rules)) return [];
-      const min = Math.max(2, Number(state.learnHits) || 2);
-      return hd.rules.filter((r) => (r.hits || 0) >= min);
+      const out = hd.rules.filter((r) => this.ruleStrength(r) !== 'disabled');
+      if (!strength) return out;
+      return out.filter((r) => this.ruleStrength(r) === strength);
     }
 
-    // 消费接口: 返回 'invert' | 'protect' | null
-    decideFor(host, el) {
+    // v5.3 分级 (design D-1): 强 = hits >= learnStrongHits (默认 5)
+    //   'disabled' 有两个来源: 未达 learnHits 门 (从未生效) 与被负反馈降级禁用 (曾经生效)
+    ruleStrength(rule) {
+      if (!rule) return 'disabled';
+      if (rule.disabled) return 'disabled';
+      const min = Math.max(2, Number(state.learnHits) || 2);
+      if ((rule.hits || 0) < min) return 'disabled';
+      const strongMin = Math.max(min, Math.min(50, Number(state.learnStrongHits) || 5));
+      return (rule.hits || 0) >= strongMin ? 'strong' : 'weak';
+    }
+
+    // v5.3 负反馈降级 (design D-2): 规则命中后被用户手动覆盖 → hits 归 1;
+    // 连续 2 次 → disabled (保留在列表里可见, 可手动恢复)。
+    demote(host, stem) {
+      const hd = this.data[host];
+      if (!hd || !Array.isArray(hd.rules)) return false;
+      const rule = hd.rules.find((r) => r.stem === stem);
+      if (!rule) return false;
+      // 记住降级前的命中数 (只记一次) —— 「恢复」要还原它, 而不是把规则重置成最低强度
+      if (typeof rule.hitsBeforeDemote !== 'number') rule.hitsBeforeDemote = rule.hits || 0;
+      rule.demotes = (rule.demotes || 0) + 1;
+      rule.hits = 1;
+      rule.demotedAt = Date.now();
+      if (rule.demotes >= 2) rule.disabled = true;
+      this.persist();
+      return true;
+    }
+
+    // 恢复被降级的规则 (面板按钮): 还原降级前的命中数, 而不是重置为最低值
+    restore(host, stem) {
+      const hd = this.data[host];
+      if (!hd || !Array.isArray(hd.rules)) return false;
+      const rule = hd.rules.find((r) => r.stem === stem);
+      if (!rule) return false;
+      rule.disabled = false;
+      rule.demotes = 0;
+      const min = Math.max(2, Number(state.learnHits) || 2);
+      rule.hits = Math.max(min, typeof rule.hitsBeforeDemote === 'number' ? rule.hitsBeforeDemote : min);
+      delete rule.hitsBeforeDemote;
+      this.persist();
+      return true;
+    }
+
+    // 消费接口: 返回 'invert' | 'protect' | 'hide' | 'mask' | null
+    decideFor(host, el, strength) {
+      const rule = this.decideRuleFor(host, el, strength);
+      return rule ? rule.action : null;
+    }
+
+    // v5.3: 同样返回命中的规则对象 (调用方需要 stem 才能记负反馈)
+    decideRuleFor(host, el, strength) {
       const stem = selectorStem(el);
       if (!stem) return null;
-      const rules = this.activeRules(host);
+      const rules = this.activeRules(host, strength);
       for (const r of rules) {
-        if (r.stem === stem) return r.action;
+        if (r.stem === stem) return r;
       }
       return null;
     }
@@ -6342,6 +6783,22 @@
           corrections.bump(profileKey(), 'falseKeep', src, stem);
         }
       } catch (err) { /* ignore */ }
+      // v5.3 负反馈: 该元素若是被某条学习规则命中的, 用户的手动覆盖就是对该规则的否决 (design D-2)
+      try {
+        const rs = el.getAttribute && el.getAttribute('data-svi-rule-stem');
+        if (rs && state.learnDemote !== false) {
+          ruleLearner.demote(profileKey(), rs);
+          el.removeAttribute('data-svi-rule-stem');
+          showToast('已按你的修正下调该规则（' + rs + '）');
+        }
+      } catch (err) { /* ignore */ }
+      // v5.3 形状先验来源: 手动结论是最可靠的跨站证据 (design D-4)
+      try {
+        const sig = shapeSignature(el);
+        if (sig) shapeStore.bump(sig, overrideValue === 'invert' ? 'invert' : 'keep', profileKey());
+      } catch (err) { /* ignore */ }
+      // v5.3 自动收紧: 只在"用户还原"这一方向上考虑
+      if (overrideValue === 'restore') maybeAutoCalibrate();
     }
 
     // v4.6: 同 src 兄弟元素同帧继承手动结论 (有界 24 个; fx 兄弟只切 fx-off, 不写滤镜标记)
@@ -8746,12 +9203,23 @@
     // 开发者导出 (纯本地数据, 手动触发; 含 manualOverrides, 不做任何删改)
     exportJson() {
       this.flush();
+      // v5.3: 判定来源分布并入导出 (字段新增, 向后兼容 —— 旧文件仍可读)
+      let reasonDistribution = { byReason: {}, byAction: {}, total: 0 };
+      try {
+        reasonDistribution = sourceDistribution(processedLog.items);
+        // 全站维度: 把累积 log 的原因码也一并聚合 (log 条目形如 { type, reason, at })
+        for (const entry of (this.log || [])) {
+          const r = (entry && (entry.reason || entry.type)) || 'unknown';
+          reasonDistribution.byReason[r] = (reasonDistribution.byReason[r] || 0) + 1;
+        }
+      } catch (e) { /* ignore */ }
       return {
         schema: 1,
         exportedAt: new Date().toISOString(),
         version: SCRIPT_VERSION,
         counters: JSON.parse(JSON.stringify(this.counters || {})),
         log: this.log.slice(),
+        reasonDistribution: reasonDistribution,
         prefs: JSON.parse(JSON.stringify(state)),
       };
     },
@@ -9803,7 +10271,10 @@
         action.textContent = rule.action === 'protect' ? '保护' : '反色';
         const hits = document.createElement('span');
         hits.className = 'svi-learned-hits';
-        hits.textContent = rule.hits + ' 次' + (active.has(rule.stem) ? ' · 已生效' : ' · 未达阈值');
+        // v5.3: 显示分级 (强/弱/未生效) 与降级状态 —— 让 hits 真的"看得见"
+        const strength = ruleLearner.ruleStrength(rule);
+        const STR_ZH = { strong: '强规则', weak: '弱规则', disabled: rule.disabled ? '已降级禁用' : '未达阈值' };
+        hits.textContent = rule.hits + ' 次 · ' + (STR_ZH[strength] || strength);
         const del = document.createElement('button');
         del.className = 'svi-mini-btn danger';
         del.textContent = '删除';
@@ -9813,7 +10284,20 @@
           this.refreshSmartSection();
           window.__svi_image_engine?.clearCacheAndRescan();
         });
-        row.append(stem, action, hits, del);
+        if (rule.disabled) {
+          const rst = document.createElement('button');
+          rst.className = 'svi-mini-btn';
+          rst.textContent = '恢复';
+          rst.addEventListener('click', (e) => {
+            e.stopPropagation();
+            ruleLearner.restore(host, rule.stem);
+            this.refreshSmartSection();
+            window.__svi_image_engine?.clearCacheAndRescan();
+          });
+          row.append(stem, action, hits, rst, del);
+        } else {
+          row.append(stem, action, hits, del);
+        }
         this.smartRulesBox.appendChild(row);
       }
       // 时间线记忆概览
@@ -9841,6 +10325,15 @@
       const refresh = () => {
         try { syncMaskVars(); } catch (e) { /* ignore */ }
         if (this.actionsDiag) this.actionsDiag.setText('当前启用动作：' + enabledActions().join(' / '));
+        // v5.3: 判定来源分布与校准建议随开关/规则变化实时刷新
+        const d = sourceDistribution(processedLog.items);
+        if (this.dataLoopDiag) {
+          this.dataLoopDiag.setText('本页判定来源：' + (d.total
+            ? (d.total + ' 项 · ' + Object.keys(d.byReason)
+              .map((k) => (REASON_ZH[k] || k) + '×' + d.byReason[k]).join(' / '))
+            : '本页尚未处理任何元素'));
+        }
+        if (this.calibDiag) this.calibDiag.setText(this.calibText());
         if (this.modalControls) this.modalControls.syncAll();
       };
       // 关闭某动作时拆除本页全部对应标记 (「开关即回滚」, 与 applyResolvedAction 语义一致)
@@ -10014,14 +10507,209 @@
       sec.add(sentinelRow);
       this.rowSyncs.push(() => sentinelRow.sync());
 
+      // —— v5.3 数据闭环：判定来源分布 / hits 分级 / 负反馈 / 形状先验 / 阈值校准 ——
+      const dist = sourceDistribution(processedLog.items);
+      this.dataLoopDiag = ui.infoLine('本页判定来源：' + (dist.total
+        ? (dist.total + ' 项 · ' + Object.keys(dist.byReason)
+          .map((k) => (REASON_ZH[k] || k) + '×' + dist.byReason[k]).join(' / '))
+        : '本页尚未处理任何元素'));
+      sec.add(this.dataLoopDiag);
+
+      const gradingRow = ui.toggleRow('hits 分级（强 / 弱规则）',
+        '**默认关**。开启后：命中 ≥ 强规则门 的学习规则保持现有优先级；已生效但未达强门的规则降为「弱规则」，只能覆盖像素判定、不再压过内置种子规则。开启会改变既有学习规则的行为，故默认关',
+        () => state.learnGrading === true,
+        (on) => {
+          state.learnGrading = !!on;
+          savePrefs();
+          try { window.__svi_image_engine && window.__svi_image_engine.clearCacheAndRescan(); } catch (e) { /* ignore */ }
+          showToast(on ? 'hits 分级已开启（弱规则不再压过种子规则）' : 'hits 分级已关闭（回到原优先级）');
+          refresh();
+        });
+      sec.add(gradingRow);
+      this.rowSyncs.push(() => gradingRow.sync());
+
+      const strongRow = ui.sliderRow('强规则门', '命中多少次算「强规则」（仅分级开启时有效）',
+        () => state.learnStrongHits,
+        (v) => { state.learnStrongHits = Math.round(v); savePrefs(); },
+        2, 20, 1, '次');
+      sec.add(strongRow);
+      this.rowSyncs.push(() => strongRow.sync());
+
+      const demoteRow = ui.toggleRow('负反馈降级',
+        '规则命中后若你手动覆盖该元素：该规则命中数归 1；连续 2 次被覆盖则自动禁用（可在 本站规则 列表里点「恢复」）。只减少错误自动化',
+        () => state.learnDemote !== false,
+        (on) => { state.learnDemote = !!on; savePrefs(); showToast(on ? '负反馈降级已开启' : '负反馈降级已关闭'); });
+      sec.add(demoteRow);
+      this.rowSyncs.push(() => demoteRow.sync());
+
+      const shapeRow = ui.toggleRow('形状跨站先验',
+        '最弱兜底来源（**默认关**）：某「元素长相」在 ≥N 个不同站点上结论一致时，对新站同形元素直接给出结论。位置在所有种子规则之后、像素判定之前 —— 不是「像素缺失时才生效」，此处如实标注',
+        () => state.shapePrior === true,
+        (on) => {
+          state.shapePrior = !!on;
+          savePrefs();
+          try { window.__svi_image_engine && window.__svi_image_engine.clearCacheAndRescan(); } catch (e) { /* ignore */ }
+          showToast(on ? '形状先验已开启' : '形状先验已关闭');
+          refresh();
+        });
+      sec.add(shapeRow);
+      this.rowSyncs.push(() => shapeRow.sync());
+
+      const shapeMinRow = ui.sliderRow('形状先验门', '至少几个不同站点结论一致才采用',
+        () => state.shapeMinHosts,
+        (v) => { state.shapeMinHosts = Math.round(v); savePrefs(); },
+        2, 20, 1, '站');
+      sec.add(shapeMinRow);
+      this.rowSyncs.push(() => shapeMinRow.sync());
+
+      this.calibDiag = ui.infoLine(this.calibText());
+      sec.add(this.calibDiag);
+      sec.add(ui.btnRow([
+        { label: '应用校准建议', onClick: () => this.applyCalibration() },
+        { label: '恢复本站默认阈值', onClick: () => {
+            if (calibrate.reset(profileKey())) { showToast('已恢复本站默认阈值'); refresh(); }
+            else showToast('本站没有被校准过');
+          } },
+      ]));
+
+      const calibRow = ui.toggleRow('阈值自校准（自动收紧）',
+        '按你的手动修正自动收紧本站判定阈值 —— **只会收紧**（减少误反）；放松只在面板给建议、需你点按钮。可用上方「恢复本站默认阈值」撤销',
+        () => state.calibrateAuto !== false,
+        (on) => { state.calibrateAuto = !!on; savePrefs(); showToast(on ? '已开启自动收紧' : '已关闭自动收紧（仅展示建议）'); });
+      sec.add(calibRow);
+      this.rowSyncs.push(() => calibRow.sync());
+
+      // v5.3: 全站维度累积 + 形状先验表
+      this.siteDistDiag = ui.infoLine(this.siteDistText());
+      sec.add(this.siteDistDiag);
+      this.shapeBox = document.createElement('div');
+      sec.el.appendChild(this.shapeBox);
+      this.refreshShapeTable();
+
       this.actionsDiag = ui.infoLine('当前启用动作：' + enabledActions().join(' / '));
       sec.add(this.actionsDiag);
 
       return sec.el;
     }
 
-    buildDataSection() {
-      const sec = document.createElement('div');
+    // v5.3 校准建议文案 (面板)
+    calibText() {
+      try {
+        const host = profileKey();
+        const s = calibrate.suggest(host);
+        const st = corrections.stats(host);
+        const DIR = { tighten: '建议收紧', loosen: '建议放松（需手动）' };
+        return '阈值校准：误反 ' + st.falseInvert + ' 次 / 误保 ' + st.falseKeep + ' 次'
+          + (s.direction
+            ? ' · ' + (DIR[s.direction] || s.direction) + '（' + s.reason + '）'
+            : ' · 无需调整（' + s.reason + '）')
+          + (calibrate.calibrated(host) ? ' · 本站已校准过' : '');
+      } catch (e) {
+        return '阈值校准：不可用';
+      }
+    }
+
+    applyCalibration() {
+      try {
+        const host = profileKey();
+        const s = calibrate.suggest(host);
+        if (!s.direction) { showToast('当前无需校准（' + s.reason + '）'); return; }
+        if (calibrate.apply(host, s.direction)) {
+          showToast(s.direction === 'tighten' ? '已收紧本站判定阈值' : '已放松本站判定阈值');
+          if (this.calibDiag) this.calibDiag.setText(this.calibText());
+        } else {
+          showToast('校准失败');
+        }
+      } catch (e) {
+        showToast('校准失败');
+      }
+    }
+
+    // v5.3: 元素动作区块的诊断行刷新 (判定来源分布 / 阈值校准 / 启用动作)。
+    // 由 openSettingsModal 调用 —— 诊断行必须随打开刷新, 不得停留在构建时的旧值。
+    refreshActionsSection() {
+      try {
+        const d = sourceDistribution(processedLog.items);
+        if (this.dataLoopDiag) {
+          this.dataLoopDiag.setText('本页判定来源：' + (d.total
+            ? (d.total + ' 项 · ' + Object.keys(d.byReason)
+              .map((k) => (REASON_ZH[k] || k) + '×' + d.byReason[k]).join(' / '))
+            : '本页尚未处理任何元素'));
+        }
+        if (this.calibDiag) this.calibDiag.setText(this.calibText());
+        if (this.actionsDiag) this.actionsDiag.setText('当前启用动作：' + enabledActions().join(' / '));
+        if (this.siteDistDiag) this.siteDistDiag.setText(this.siteDistText());
+        this.refreshShapeTable();
+      } catch (e) { /* ignore */ }
+    }
+
+    // v5.3 全站维度累积 (只读聚合 stats 计数器 + 累积 log, 不重新采集)
+    siteDistText() {
+      try {
+        const c = StatsManager.counters || {};
+        const byReason = {};
+        for (const e of (StatsManager.log || [])) {
+          const r = (e && (e.reason || e.type)) || 'unknown';
+          byReason[r] = (byReason[r] || 0) + 1;
+        }
+        const top = Object.keys(byReason)
+          .sort((a, b) => byReason[b] - byReason[a])
+          .slice(0, 5)
+          .map((k) => (REASON_ZH[k] || SKIP_REASON_ZH[k] || k) + '×' + byReason[k])
+          .join(' / ');
+        const st = corrections.stats(profileKey());
+        return '全站累积：已分析 ' + (c.imagesAnalyzed || 0)
+          + ' · 已反色 ' + (c.imagesInverted || 0)
+          + ' · 本站误反还原 ' + (st.falseInvert || 0)
+          + (top ? ' · 累积原因 top: ' + top : '');
+      } catch (e) {
+        return '全站累积：不可用';
+      }
+    }
+
+    // v5.3 形状先验表 (面板): 展示计数与涉及站点数, 支持逐个移除
+    refreshShapeTable() {
+      try {
+        if (!this.shapeBox) return;
+        this.shapeBox.textContent = '';
+        const head = document.createElement('div');
+        head.className = 'svi-hint-line';
+        head.textContent = (state.shapePrior === true)
+          ? ('形状先验表（**已启用** · 门槛 ' + state.shapeMinHosts + ' 站）：')
+          : ('形状先验表（未启用，仅记录 —— 开关在上方）：');
+        this.shapeBox.appendChild(head);
+        const shapes = shapeStore.list().sort((a, b) => (b.invert + b.keep) - (a.invert + a.keep)).slice(0, 12);
+        if (!shapes.length) {
+          const empty = document.createElement('div');
+          empty.className = 'svi-hint-line';
+          empty.textContent = '暂无形状记录 —— 手动修正或学习规则命中时会自动积累。';
+          this.shapeBox.appendChild(empty);
+          return;
+        }
+        for (const s of shapes) {
+          const row = document.createElement('div');
+          row.className = 'svi-learned-row';
+          const sig = document.createElement('span');
+          sig.className = 'svi-learned-stem';
+          sig.textContent = s.sig; // 存储层字符串 → textContent (XSS 加固)
+          const cnt = document.createElement('span');
+          cnt.className = 'svi-learned-hits';
+          cnt.textContent = '反色 ' + s.invert + ' / 原样 ' + s.keep + ' · ' + s.hostCount + ' 站';
+          const del = document.createElement('button');
+          del.className = 'svi-mini-btn danger';
+          del.textContent = '移除';
+          del.addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            shapeStore.remove(s.sig);
+            this.refreshShapeTable();
+          });
+          row.append(sig, cnt, del);
+          this.shapeBox.appendChild(row);
+        }
+      } catch (e) { /* ignore */ }
+    }
+
+    buildDataSection() {      const sec = document.createElement('div');
       sec.className = 'svi-modal-section';
       sec.id = 'svi-sec-stats';
 
@@ -10238,6 +10926,8 @@
             shieldColors: (state.shieldColors || []).slice(),
             bgExcludeSelectors: (state.bgExcludeSelectors || []).slice(),
             learned: JSON.parse(JSON.stringify(ruleLearner.data || {})),
+            // v5.3: 形状先验一并导出, 但**只带计数不带 host 名**(脱敏: host 名属浏览痕迹)
+            shapes: shapeStore.list().map((s) => ({ sig: s.sig, invert: s.invert, keep: s.keep, hostCount: s.hostCount })),
           },
         };
         if (downloadJsonFile('svi-rules-' + new Date().toISOString().slice(0, 10) + '.json', payload)) {
@@ -10304,7 +10994,27 @@
           const msg = replace
             ? '确认用文件中的规则整体替换当前规则吗？\n(文件中包含的各类规则将被覆盖, 文件中未包含的保持不变)'
             : '确认将文件中的规则合并进当前规则吗？\n(重复条目自动去重, 站点设置以文件为准, 学习规则保留命中更高者)';
-          if (!confirm(msg)) return;
+          // v5.3: 合并预览 —— 先干跑一次算出"将合并多少条 / 其中多少条与本机冲突"
+          let preview = '';
+          try {
+            if (!replace && rules && rules.learned && typeof rules.learned === 'object') {
+              let conflicts = 0;
+              let total = 0;
+              for (const h of Object.keys(rules.learned)) {
+                const inc = rules.learned[h];
+                if (!inc || !Array.isArray(inc.rules)) continue;
+                const local = (ruleLearner.data[h] && ruleLearner.data[h].rules) || [];
+                const dry = mergeRulesInto(local, inc.rules);
+                conflicts += dry.conflicts;
+                total += inc.rules.length;
+              }
+              if (total) {
+                preview = '\n\n将合并 ' + total + ' 条学习规则，其中 ' + conflicts
+                  + ' 条与本机方向冲突（冲突时保留命中数更高的一方，不累加）。';
+              }
+            }
+          } catch (e) { /* ignore */ }
+          if (!confirm(msg + preview)) return;
           this.applyRulesPayload(rules, replace === true);
           showToast(replace ? '规则已替换导入' : '规则已合并导入');
         } catch (e) {
@@ -10346,25 +11056,42 @@
         }
         return out;
       };
-      const mergeLearned = (inc) => {
-        for (const host of Object.keys(inc)) {
+      const mergeLearned = (inc) => {        for (const host of Object.keys(inc)) {
           const hd = ruleLearner._hostData(host);
-          for (const r of inc[host].rules) {
-            const found = hd.rules.find((x) => x.stem === r.stem);
-            if (!found) {
-              hd.rules.push({ stem: r.stem, action: r.action, hits: r.hits, lastAt: r.lastAt || Date.now() });
-            } else if (r.hits > (found.hits || 0)) {
-              found.action = r.action;
-              found.hits = r.hits;
-              found.lastAt = r.lastAt || found.lastAt;
-            }
-          }
+          // v5.3: 合并逻辑抽为纯函数 mergeRulesInto (单测契约) —— 语义与 v4.5 一致:
+          // 一致取 hits 大者(不累加), 冲突保留 hits 高者, 相等留本地。行为零变化。
+          hd.rules = mergeRulesInto(hd.rules, inc[host].rules).rules;
           if (hd.rules.length > 100) {
             hd.rules.sort((a, b) => (a.lastAt || 0) - (b.lastAt || 0));
             hd.rules = hd.rules.slice(-100);
           }
         }
         ruleLearner.persist();
+      };
+
+      // v5.3: 形状先验合并 —— 计数取 **max**(不累加), 理由与规则合并相同:
+      // 累加会让一份分享的规则包变成权重放大器 (反复导入即可刷高先验强度)。
+      // 导出侧已脱敏 (不带 host 名), 因此导入侧不还原 host 集合, 只取计数。
+      const mergeShapes = (inc) => {
+        if (!Array.isArray(inc)) return;
+        try {
+          const d = shapeStore.load();
+          for (const s of inc) {
+            if (!s || !s.sig) continue;
+            const rec = (d[s.sig] && typeof d[s.sig] === 'object') ? d[s.sig] : { invert: 0, keep: 0, hosts: {} };
+            if (!rec.hosts || typeof rec.hosts !== 'object') rec.hosts = {};
+            rec.invert = Math.max(rec.invert || 0, Number(s.invert) || 0);
+            rec.keep = Math.max(rec.keep || 0, Number(s.keep) || 0);
+            rec.at = Date.now();
+            d[s.sig] = rec;
+          }
+          const keys = Object.keys(d);
+          if (keys.length > SHAPE_MAX) {
+            keys.sort((a, b) => (d[a].at || 0) - (d[b].at || 0));
+            for (const k of keys.slice(0, keys.length - SHAPE_MAX)) delete d[k];
+          }
+          shapeStore.persist();
+        } catch (e) { /* ignore */ }
       };
 
       if (replace) {
@@ -10400,6 +11127,7 @@
         state.shieldColors = uniq((state.shieldColors || []).concat((strList(rules.shieldColors) || []).filter((c) => /^#[0-9a-fA-F]{6}$/.test(c))));
         state.bgExcludeSelectors = uniq((state.bgExcludeSelectors || []).concat(strList(rules.bgExcludeSelectors) || []));
         mergeLearned(sanitizeLearned(rules.learned));
+        mergeShapes(rules.shapes); // v5.3: 形状先验合并 (计数取 max, 理由与规则同 —— 累加即权重放大器)
       }
 
       savePrefs();
@@ -11163,6 +11891,9 @@
       this.refreshShieldSection();
       this.refreshDataSection();
       this.refreshSmartSection();
+      // v5.3: 元素动作区块的诊断行必须在打开时刷新 —— 否则会停留在构建时的旧值
+      // (与 v4.5 修过的"设置行不回显"是同一类缺陷)
+      this.refreshActionsSection();
       // 当前页媒体列表保持惰性 (设计: 点击「采集/刷新列表」按钮才全页扫描, 打开面板零开销)
       this.updateStatusBadge();
     }
@@ -11925,6 +12656,18 @@
     recordProcessed,
     showActionToast,
     hideActionToast,
+    // v5.3 数据闭环契约 (单测契约)
+    effectiveSourceIds,
+    learnGradingOn,
+    learnedResolve,
+    shapePriorResolve,
+    shapeSignature,
+    shapeSizeBucket,
+    shapeStore,
+    calibrate,
+    sourceDistribution,
+    mergeRulesInto,
+    maybeAutoCalibrate,
     ImageInvertEngine,
     // v3.2 纯函数导出 (单测契约): 视频画面调节滤镜链构建
     buildVideoTuneFilter,
