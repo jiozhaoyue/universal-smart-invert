@@ -1,0 +1,9 @@
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "编码纪律唯一权威来源。本片重点核对: 禁止把运行时状态落盘 (撤销栈必须仅内存)、禁止 innerHTML 插值 (列表项的 stem/原因码来自存储与 DOM, 必须经 textContent)、MutationObserver 必须合并+预算、纯逻辑挂 window.__svi 供单测。另见 v5.0 Additions「Action Registry 契约」——本片是 Registry 的纯消费方, 不得改其契约。"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "本片大量复用既有设施: collectMediaItems / buildMediaRow / locateMedia / data-svi-mi 索引化 / showToast / RuleLearner.record(immediate)。该指南用于确认没有把「已处理视图」另写成第二套媒体采集或第二套定位实现。"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "本片新增 corrections 存储形状与四处开关, 会穿透「存储 → 决策落点 → 列表 UI → 导出」四层。用于校验新增字段在每个消费方都被处理, 且 UI 不直接读原始 payload。"}
+{"file": ".trellis/tasks/09-25-v5-media-governance/prd.md", "reason": "父任务 AC-5「错误可逆: 任何自动反色结论在 30 步内可撤销; 本页已处理媒体可在列表内逐项还原」——本片的直接验收来源。AC-2 全量可开关 / AC-3 默认零回归同样适用。"}
+{"file": ".trellis/tasks/09-25-v5-review-undo/prd.md", "reason": "本片需求与验收: R1 撤销栈 (仅自动结论) / R2 可交互 toast (仅 reason==='pixel' 弹) / R3 双视图 (全部媒体视图不得回归) / R4 四型固化 / R5 哨兵 / R6 开关。"}
+{"file": ".trellis/tasks/09-25-v5-review-undo/design.md", "reason": "本片技术设计: D-2「撤销 = 反事实回退」是核心语义 (摘属性 + 删快照 + 重扫, 不是改成 keep); D-3 toast 用独立节点不碰既有 showToast; D-4 双视图不替换; D-6 corrections 与 v5-3 共用记录点; D-7 开关清单。"}
+{"file": ".trellis/tasks/09-25-v5-action-registry/design.md", "reason": "上游契约: registry.arbitrate / actionEnabled / applyResolvedAction / ACTIONS 的 apply-revert-isActive。本片的撤销与固化必须经这些入口, 不得直接 setAttribute 或另读 state.actions。"}
+{"file": ".trellis/tasks/09-25-v5-action-registry/research/stage-a-baseline-evidence.md", "reason": "上游取证方法: 基线比对与归一化规则 (行号/计时/UUID/时间戳属噪音)。本片的 bench 回归比对沿用同一方法, 且需知道「新增场景会使场景 diff 出现一行」是预期的。"}
+{"file": ".trellis/tasks/09-25-v5-data-loop/prd.md", "reason": "下游消费方: v5-3 的阈值自校准直接读本片落地的 svi:corrections (falseInvert/falseKeep), 形状不可私自更改。"}

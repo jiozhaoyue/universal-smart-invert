@@ -258,6 +258,12 @@
     maskHoverOpacity: 0.15,    // 悬停揭开后的不透明度 (0 ~ 1) —— 「可移动鼠标解除」的力度
     maskBlur: 8,               // 毛玻璃模糊半径 px (0 ~ 40)
     pageDimOpacity: 0.35,      // 全页压暗不透明度 (0 ~ 0.9)
+
+    // ===== v5.2 新增偏好: 复查与撤销 (任务 v5-2) =====
+    undoEnabled: true,         // 撤销栈总开关 (关闭后不入栈, Alt+Z 无效)
+    undoStackSize: 30,         // 撤销栈容量 (1 ~ 100; 仅内存)
+    actionToast: true,         // 可交互提示: 批量操作时给一个带「撤销」按钮的 toast
+    errorSentinel: true,       // 误反哨兵: 记录用户修正并在 24h 内重复还原时提示
   };
 
   // 运行时状态 (仅存于内存, 每个标签页独立, 绝不写入存储 —— 标签页隔离)
@@ -990,6 +996,11 @@
       merged.maskBlur = clampNumber(merged.maskBlur, 0, 40, 8);
       merged.pageDimOpacity = clampNumber(merged.pageDimOpacity, 0, 0.9, 0.35);
     }
+    // v5.2 字段规范化: 复查与撤销 (默认全开, 但都不改判定结果, 只提供可逆与可观测)
+    merged.undoEnabled = merged.undoEnabled !== false;
+    merged.undoStackSize = Math.round(clampNumber(merged.undoStackSize, 1, 100, 30));
+    merged.actionToast = merged.actionToast !== false;
+    merged.errorSentinel = merged.errorSentinel !== false;
     // 标签页隔离: 运行时状态绝不入库
     delete merged.invertActive;
 
@@ -2119,6 +2130,11 @@
       if (cand.verdict === 'invert') act.apply(el, cand.params, cand.reason);
       else act.revert(el);
     } catch (e) { /* ignore */ }
+    // v5.2: 元素级动作被施加时同样进会话日志与撤销栈
+    if (cand.verdict === 'invert' && (aid === 'hide' || aid === 'mask')) {
+      recordProcessed(el, aid, cand.reason, '');
+      pushUndo({ el: el, src: '', actionId: aid, reason: cand.reason, at: Date.now() });
+    }
     return true;
   }
 
@@ -2302,6 +2318,296 @@
   }
   // v4.6 baseline 原实现见 git 历史 (commit 3dcbb1a 的 applyInvertState) —— 未以注释保留:
   // 其内部的 `/* ignore */` 会提前闭合外层块注释, 属已知语法陷阱。
+
+  // ==========================================
+  // 4.8 v5.0 撤销栈 / 可交互提示 / 误反哨兵 (任务 v5-2)
+  //   设计: .trellis/tasks/09-25-v5-review-undo/design.md §D-1 / §D-2 / §D-3 / §D-6
+  //   撤销栈**仅内存** (标签页隔离, 与 runtime 同纪律), 且只收"脚本自动做出的"结论 ——
+  //   手动 (manual) 与用户显式元素规则 (element-rule) 是用户意志, 提供"撤销用户自己"没有语义。
+  // ==========================================
+
+  // 非自动来源 (不入撤销栈)。本项目的 reason 码同时充当来源标签 (v5.1 SOURCES 的设计)。
+  const NON_AUTO_REASONS = { manual: 1, 'element-rule': 1 };
+
+  function isAutoReason(reason) {
+    return !NON_AUTO_REASONS[reason];
+  }
+
+  const undoStack = { items: [] };
+
+  function undoMax() {
+    return Math.max(1, Math.min(100, Number(state.undoStackSize) || 30));
+  }
+
+  // 入栈 (仅自动结论; 手动动作与 keep/skip 不入栈 —— 后者没有可见状态可回退)
+  function pushUndo(entry) {
+    try {
+      if (state.undoEnabled === false) return;
+      if (!entry || !isAutoReason(entry.reason)) return;
+      undoStack.items.push(entry);
+      const m = undoMax();
+      if (undoStack.items.length > m) undoStack.items.splice(0, undoStack.items.length - m);
+      scheduleUndoToast();
+    } catch (e) { /* ignore */ }
+  }
+
+  // 撤销 = **反事实回退** (design §D-2): 摘除标记 + 删除决策快照 + 清 checked 标记并重扫。
+  // 刻意不写成"改成 keep" —— 那会把一个从未被脚本判定的元素错误地钉成 keep。
+  // 撤销 = **反事实回退 + 持久化用户否决** (§D-2 的修正, 见 implement.md「与计划的偏离」)。
+  //
+  // 只摘属性 + 删快照是**不够**的: 像素证据没变, 下一次扫描会得到完全相同的结论, 撤销随即被
+  // 撤销掉 —— 那就等于没撤销 (正是用户抱怨的"错了只能手动点")。因此默认还写一条"用户否决"
+  // 结论 (与 Alt+点击还原同语义), 使其真正持久。
+  //   remember=false → 只做机械回退 (不写结论), 供内部工具使用; 用户可见路径一律 true。
+  function undoEntry(e, remember) {
+    if (!e) return false;
+    const act = ACTIONS[e.actionId || 'invert'];
+    try { if (act && e.el && typeof e.el.getAttribute === 'function') act.revert(e.el); } catch (err) { /* ignore */ }
+    // 清掉 checked 标记 —— 纯 DOM 操作, 不得依赖引擎在场 (测试桩里没有引擎)
+    try { if (e.el && typeof e.el.removeAttribute === 'function') e.el.removeAttribute('data-svi-checked-src'); } catch (err) { /* ignore */ }
+
+    if (remember !== false) {
+      try {
+        if (e.actionId === 'invert' || e.actionId === 'bgInvert' || !e.actionId) {
+          if (e.src) addManualOverride(state.manualOverrides, manualOverrideKey(profileKey(), e.src), 'restore', 400);
+          if (e.el && typeof e.el.setAttribute === 'function') e.el.setAttribute('data-svi-manual', 'restore');
+          savePrefs();
+        } else if (e.actionId === 'hide' && e.el) {
+          e.el.setAttribute('data-svi-manual-hide', 'show');
+        } else if (e.actionId === 'mask' && e.el) {
+          e.el.setAttribute('data-svi-manual-mask', 'clear');
+        }
+      } catch (err) { /* ignore */ }
+    }
+
+    const eng = (window.__svi && window.__svi.engines) ? window.__svi.engines.image : null;
+    if (eng) {
+      try { if (e.src) eng.decisionBySrc.delete(e.src); } catch (err) { /* ignore */ }
+      try { if (e.el) eng.observe(e.el); } catch (err) { /* ignore */ }
+    }
+    return true;
+  }
+
+  // 撤销最近 n 条 (LIFO 逆序)。返回实际撤销条数。
+  function undoLast(n) {
+    const want = Math.max(1, Number(n) || 1);
+    let done = 0;
+    for (let i = 0; i < want; i++) {
+      const e = undoStack.items.pop();
+      if (!e) break;
+      if (undoEntry(e)) done++;
+    }
+    return done;
+  }
+
+  // ===== 可交互提示 (独立节点, 刻意不复用 showToast —— 后者 pointer-events:none 且被 v4.6 断言覆盖) =====
+  function hideActionToast() {
+    try {
+      const box = document.getElementById('svi-action-toast');
+      if (box) { box.style.opacity = '0'; box.style.pointerEvents = 'none'; }
+    } catch (e) { /* ignore */ }
+  }
+
+  function showActionToast(msg, actionLabel, onAction, timeoutMs) {
+    if (state.actionToast === false) return null;
+    try {
+      let box = document.getElementById('svi-action-toast');
+      if (!box) {
+        box = document.createElement('div');
+        box.id = 'svi-action-toast';
+        box.style.cssText = `
+          position: fixed;
+          bottom: 30px;
+          left: 50%;
+          transform: translateX(-50%);
+          background: rgba(15, 23, 42, 0.94);
+          color: #e2e8f0;
+          padding: 7px 10px 7px 14px;
+          border-radius: 20px;
+          font-size: 12px;
+          font-weight: 500;
+          border: 1px solid rgba(56, 189, 248, 0.35);
+          box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+          z-index: 2147483647;
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          transition: opacity 0.2s ease;
+          opacity: 0;
+          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        `;
+        (document.body || document.documentElement).appendChild(box);
+      }
+      box.textContent = '';
+      const span = document.createElement('span');
+      span.textContent = String(msg == null ? '' : msg);
+      box.appendChild(span);
+      if (actionLabel && typeof onAction === 'function') {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.textContent = String(actionLabel);
+        btn.style.cssText = 'background:rgba(56,189,248,0.18);color:#38bdf8;border:1px solid rgba(56,189,248,0.45);'
+          + 'border-radius:12px;padding:3px 10px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;';
+        btn.addEventListener('click', (ev) => {
+          ev.preventDefault();
+          ev.stopPropagation();
+          try { onAction(); } catch (err) { /* ignore */ }
+          hideActionToast();
+        });
+        box.appendChild(btn);
+      }
+      box.style.pointerEvents = 'auto';
+      box.style.opacity = '1';
+      clearTimeout(box._timer);
+      box._timer = setTimeout(() => hideActionToast(), timeoutMs || 4000);
+      return box;
+    } catch (e) {
+      try { showToast(msg); } catch (e2) { /* ignore */ }
+      return null;
+    }
+  }
+
+  // 批量提示: **只在批量发生时提示** (单张自动反色不弹 —— 现状本就不弹, 每张都弹会变成噪音)。
+  // 阈值 3; 收集窗口 150ms (跨 flush 的相邻决策也能合并进同一条)。
+  const undoBatch = { n: 0, timer: null };
+  function scheduleUndoToast() {
+    if (state.actionToast === false) return;
+    undoBatch.n += 1;
+    if (undoBatch.timer) return;
+    undoBatch.timer = setTimeout(() => {
+      undoBatch.timer = null;
+      const n = undoBatch.n;
+      undoBatch.n = 0;
+      if (n < 3) return;
+      showActionToast('已自动处理 ' + n + ' 个元素', '撤销', () => {
+        const done = undoLast(n);
+        showToast(done ? ('已撤销 ' + done + ' 个') : '没有可撤销的记录');
+      });
+    }, 150);
+  }
+
+  // ===== 误反/误保哨兵记录器 (design §D-6; v5-3 阈值自校准读同一份数据) =====
+  const CORRECTIONS_KEY = 'corrections';
+  const SENTINEL_WINDOW_MS = 24 * 3600 * 1000;
+
+  const corrections = {
+    data: null,
+    load() {
+      if (this.data) return this.data;
+      let d = null;
+      try { d = Store.get(CORRECTIONS_KEY, null); } catch (e) { d = null; }
+      if (!d || typeof d !== 'object' || Array.isArray(d)) d = {};
+      this.data = d;
+      return d;
+    },
+    host(h) {
+      const d = this.load();
+      const k = String(h == null ? '' : h);
+      let hd = d[k];
+      if (!hd || typeof hd !== 'object' || Array.isArray(hd)) hd = {};
+      if (typeof hd.falseInvert !== 'number') hd.falseInvert = 0;
+      if (typeof hd.falseKeep !== 'number') hd.falseKeep = 0;
+      if (!hd.perSrc || typeof hd.perSrc !== 'object' || Array.isArray(hd.perSrc)) hd.perSrc = {};
+      if (!hd.perStem || typeof hd.perStem !== 'object' || Array.isArray(hd.perStem)) hd.perStem = {};
+      d[k] = hd;
+      return hd;
+    },
+    // kind: 'falseInvert' (被判反色但用户还原) | 'falseKeep' (被判不反但用户强制反色)
+    // 返回 { srcHits, stemHits } —— 供哨兵判阈 (窗口内命中数)
+    bump(h, kind, src, stem) {
+      if (state.errorSentinel === false) return null;
+      try {
+        const hd = this.host(h);
+        const now = Date.now();
+        if (kind === 'falseKeep') hd.falseKeep = (hd.falseKeep || 0) + 1;
+        else hd.falseInvert = (hd.falseInvert || 0) + 1;
+        hd.at = now;
+        const tick = (bag, key) => {
+          if (!key) return 0;
+          const prev = bag[key];
+          const rec = (prev && now - (prev.at || 0) < SENTINEL_WINDOW_MS) ? { n: (prev.n || 0) + 1, at: now } : { n: 1, at: now };
+          bag[key] = rec;
+          return rec.n;
+        };
+        const srcHits = tick(hd.perSrc, src);
+        const stemHits = tick(hd.perStem, stem);
+        // perSrc / perStem 各自有界 (LRU 200), 防无界增长
+        const cap = (bag) => {
+          const keys = Object.keys(bag);
+          if (keys.length <= 200) return;
+          keys.sort((a, b) => (bag[a].at || 0) - (bag[b].at || 0));
+          for (const k of keys.slice(0, keys.length - 200)) delete bag[k];
+        };
+        cap(hd.perSrc);
+        cap(hd.perStem);
+        this.persist();
+        return { srcHits: srcHits, stemHits: stemHits };
+      } catch (e) {
+        return null;
+      }
+    },
+    // 只读访问 (面板展示 / v5-3 自校准)
+    stats(h) {
+      try {
+        const hd = this.host(h);
+        return { falseInvert: hd.falseInvert || 0, falseKeep: hd.falseKeep || 0, at: hd.at || 0 };
+      } catch (e) {
+        return { falseInvert: 0, falseKeep: 0, at: 0 };
+      }
+    },
+    persist() {
+      try { Store.set(CORRECTIONS_KEY, this.load()); } catch (e) { /* ignore */ }
+    },
+  };
+
+  // ===== v5.2「本页已处理」会话日志 =====
+  //   与「全部媒体」视图的区别: 前者是"脚本这次改了什么", 后者是"页面上有什么"。
+  //   仅内存; 持元素引用但**每次入栈先 prune 掉已脱离文档的**, 且容量 300 —— 有界且随标签页释放。
+  const processedLog = {
+    items: [],
+    MAX: 300,
+    prune() {
+      this.items = this.items.filter((x) => { try { return !!(x.el && x.el.isConnected); } catch (e) { return false; } });
+    },
+    push(e) {
+      this.items.push(e);
+      if (this.items.length > this.MAX) this.items.splice(0, this.items.length - this.MAX);
+    },
+    clear() { this.items.length = 0; },
+  };
+
+  // 反色侧原因码中文映射 (刻意**不合并**进 SKIP_REASON_ZH —— 那张表的键是"跳过原因", 语义不同)
+  const REASON_ZH = {
+    pixel: '像素判定',
+    learned: '学习规则',
+    protected: '种子保护',
+    'seed-force': '种子强制反色',
+    favicon: 'favicon',
+    'element-rule': '本站元素规则',
+    manual: '手动结论',
+    'masked-dark': '暗色遮罩否决（保持原样）',
+    'transparent-light': '透明底（保持原样）',
+    'hidden-rule': '学习规则 · 屏蔽',
+    'mask-rule': '学习规则 · 遮罩',
+    skip: '跳过',
+  };
+
+  // 记一条"本页已处理" (同时供撤销栈与列表使用)
+  function recordProcessed(el, actionId, reason, src) {
+    try {
+      processedLog.prune();
+      let stem = '';
+      try { stem = selectorStem(el); } catch (e) { stem = ''; }
+      processedLog.push({
+        el: el,
+        actionId: actionId,
+        reason: reason || '',
+        at: Date.now(),
+        stem: stem,
+        src: src || '',
+      });
+    } catch (e) { /* ignore */ }
+  }
 
   function showToast(msg) {
     let toast = null;
@@ -6016,6 +6322,26 @@
       try {
         ruleLearner.record(profileKey(), el, overrideValue === 'invert' ? 'invert' : 'protect');
       } catch (err) { /* ignore */ }
+      // v5.2: 手动反色结论也进「本页已处理」列表 (让用户能看到"我点过什么"), 但不进撤销栈
+      recordProcessed(el, 'invert', 'manual', src);
+      // v5.2 误反哨兵: 用户手动"还原" = 一次误反证据; "强制反色" = 一次误保证据。
+      // 仅记录 + 提示, **不自动写规则**（自动写规则会放大一次点击的意图; 规则固化是用户在
+      // 「本页已处理」列表里的显式选择）。同 src 24h 内还原 ≥2 次时给出一次说明性提示 ——
+      // 该 src 的还原结论本就已由上面的 manualOverrides 持久化, 提示是为了让用户知道"为什么它不再反色"。
+      try {
+        let stem = '';
+        try { stem = selectorStem(el); } catch (e2) { stem = ''; }
+        if (overrideValue === 'restore') {
+          const r = corrections.bump(profileKey(), 'falseInvert', src, stem);
+          if (r && r.srcHits === 2) {
+            showToast('这张图已按你的历史修正保持原色（24h 内已还原 2 次）');
+          } else if (r && r.stemHits === 3) {
+            showToast('这类元素你已还原 3 次 · 可在「本页已处理」里一键固化');
+          }
+        } else if (overrideValue === 'invert') {
+          corrections.bump(profileKey(), 'falseKeep', src, stem);
+        }
+      } catch (err) { /* ignore */ }
     }
 
     // v4.6: 同 src 兄弟元素同帧继承手动结论 (有界 24 个; fx 兄弟只切 fx-off, 不写滤镜标记)
@@ -6109,6 +6435,7 @@
         const scope = target.getAttribute('data-svi-manual-hide') === 'show' ? 'rule' : 'session';
         ACTIONS.hide.apply(target, { scope: scope }, 'manual');
         target.setAttribute('data-svi-manual-hide', 'hide');
+        recordProcessed(target, 'hide', 'manual'); // v5.2: 手动动作也进「本页已处理」列表 (但不入撤销栈)
         if (scope === 'rule') {
           try { ruleLearner.record(profileKey(), target, 'hide', true); } catch (e) { /* ignore */ }
           showToast('已永久屏蔽 (规则已记录，同结构元素后续自动屏蔽)');
@@ -6153,6 +6480,7 @@
         }
         ACTIONS.mask.apply(target, { style: state.maskStyle }, 'manual');
         target.setAttribute('data-svi-manual-mask', 'mask');
+        recordProcessed(target, 'mask', 'manual'); // v5.2: 手动动作也进「本页已处理」列表 (但不入撤销栈)
         showToast('已加遮罩 · 悬停揭开 · Shift+悬停永久解除');
         return true;
       } catch (e) { return false; }
@@ -6308,6 +6636,11 @@
         el.removeAttribute('data-svi-failed');
       } catch (e) { /* ignore */ }
       this.finalizeInvert(el, src, d.verdict === 'invert');
+      // v5.2: 会话处理日志 + 撤销栈 —— 仅记"动作确实被施加"的结论 (keep / skip 无可见状态可回退)
+      if (d.verdict === 'invert') {
+        recordProcessed(el, 'invert', d.reason, src);
+        pushUndo({ el: el, src: src, actionId: 'invert', reason: d.reason, at: Date.now() });
+      }
     }
 
     // 分析失败登记: 60s TTL 内不重试; 累计 3 次后由 decideImage 落为永久跳过决策
@@ -6547,6 +6880,13 @@
         // 判定翻转: 改写缓存, 作废旧快照 (下次进入管线重判), 摘标记让引擎重扫该元素
         this.cache.set(src, false);
         this.decisionBySrc.delete(src);
+        // v5.2: 在「本页已处理」列表上标记这次复检改判 (面板置顶 5s 显示, 让"脚本自己发现自己反错了"可见)
+        try {
+          const now = Date.now();
+          for (const h of processedLog.items) {
+            if (h.src === src) { h.rechecked = true; h.recheckedAt = now; }
+          }
+        } catch (e2) { /* ignore */ }
         let n = 0;
         try {
           document.querySelectorAll('[data-svi-checked-src]').forEach((el) => {
@@ -9630,6 +9970,50 @@
         { label: '恢复本页临时屏蔽', onClick: () => { this.restoreAllHidden(); refresh(); } },
       ]));
 
+      // —— v5.2 复查与撤销 ——
+      const undoRow = ui.toggleRow('撤销 (Alt+Z)',
+        '把脚本自动做出的结论入「撤销栈」，Alt+Z 逐个回退；批量处理时给一个带「撤销」按钮的提示。仅内存、只记自动结论（手动点击与元素规则不入栈）。作用域：全页 · 生效时机：立即',
+        () => state.undoEnabled !== false,
+        (on) => {
+          state.undoEnabled = !!on;
+          savePrefs();
+          if (!on) undoStack.items.length = 0;
+          showToast(on ? '撤销已启用' : '撤销已关闭（撤销栈已清空）');
+          refresh();
+        });
+      sec.add(undoRow);
+      this.rowSyncs.push(() => undoRow.sync());
+
+      const undoSizeRow = ui.sliderRow('撤销栈容量', '可回退的最大步数（仅内存，不落盘）',
+        () => state.undoStackSize,
+        (v) => { state.undoStackSize = Math.round(v); savePrefs(); },
+        1, 100, 1, '步');
+      sec.add(undoSizeRow);
+      this.rowSyncs.push(() => undoSizeRow.sync());
+
+      const toastRow = ui.toggleRow('操作提示条',
+        '批量处理 ≥3 个元素时弹一条带「撤销」按钮的提示（单张不弹，避免噪音）。作用域：全页 · 生效时机：立即',
+        () => state.actionToast !== false,
+        (on) => {
+          state.actionToast = !!on;
+          savePrefs();
+          if (!on) hideActionToast();
+          showToast(on ? '操作提示条已开启' : '操作提示条已关闭');
+        });
+      sec.add(toastRow);
+      this.rowSyncs.push(() => toastRow.sync());
+
+      const sentinelRow = ui.toggleRow('误反哨兵',
+        '记录你的手动修正：同一张图 24 小时内被还原 2 次给出说明，同一类元素被还原 3 次提示可一键固化。只记录与提示，不自动写规则。作用域：本站 · 生效时机：立即',
+        () => state.errorSentinel !== false,
+        (on) => {
+          state.errorSentinel = !!on;
+          savePrefs();
+          showToast(on ? '误反哨兵已开启' : '误反哨兵已关闭');
+        });
+      sec.add(sentinelRow);
+      this.rowSyncs.push(() => sentinelRow.sync());
+
       this.actionsDiag = ui.infoLine('当前启用动作：' + enabledActions().join(' / '));
       sec.add(this.actionsDiag);
 
@@ -10380,8 +10764,15 @@
     // 列表按需采集 (点击按钮触发, 启动零开销); 行内数据一律 textContent (XSS 加固)
     // ==========================================
     buildMediaSection() {
-      const sec = ui.section('🖼️ 当前页媒体', '排查被遮挡/无法 Alt+点击 的媒体', 'svi-sec-media');
+      const sec = ui.section('🖼️ 当前页媒体 / 已处理', '排查被改动的媒体，并逐项还原或固化规则', 'svi-sec-media');
       this.mediaShownCount = 200;
+      this.mediaView = this.mediaView || 'processed'; // v5.2: 默认「已处理」视图
+
+      // v5.2 双视图切换 (「全部媒体」= v3.1 原行为, 原样保留不回归)
+      sec.add(ui.btnRow([
+        { label: '📋 已处理', onClick: () => { this.mediaView = 'processed'; this.mediaShownCount = 200; this.refreshMediaSection(); } },
+        { label: '🗂 全部媒体', onClick: () => { this.mediaView = 'all'; this.mediaShownCount = 200; this.refreshMediaSection(); } },
+      ]));
 
       sec.add(ui.btnRow([
         {
@@ -10389,7 +10780,29 @@
           onClick: () => {
             this.mediaShownCount = 200;
             this.refreshMediaSection();
-            showToast('已采集当前页媒体');
+            showToast(this.mediaView === 'all' ? '已采集当前页媒体' : '已刷新已处理列表');
+          },
+        },
+        {
+          label: '↩ 全部还原',
+          onClick: () => {
+            // v5.2: 撤销栈内全部回退 (不触碰手动结论 —— undoEntry 经仲裁, 手动仍占优)
+            const n = undoLast(undoMax());
+            this.refreshMediaSection();
+            showToast(n ? ('已还原 ' + n + ' 项') : '没有可还原的记录');
+          },
+        },
+        {
+          label: '🚫 本站不自动反色图片',
+          onClick: () => {
+            const ov = (state.siteOverrides = state.siteOverrides || {});
+            const key = profileKey();
+            const cur = ov[key] && typeof ov[key] === 'object' ? ov[key] : {};
+            cur.imageInvert = false;
+            ov[key] = cur;
+            savePrefs();
+            try { window.__svi_image_engine && window.__svi_image_engine.clearCacheAndRescan(); } catch (e) { /* ignore */ }
+            showToast('本站已不再自动反色图片（仍可 Alt+点击单独反色）');
           },
         },
       ]));
@@ -10403,7 +10816,8 @@
       // 首次构建只渲染空态 (惰性采集, 避免启动时全页样式扫描)
       const empty = document.createElement('div');
       empty.className = 'svi-hint-line';
-      empty.textContent = '尚未采集 —— 点击上方按钮列出当前页全部媒体 (图片/画布/视频/背景图)。';
+      empty.textContent = '尚未刷新 —— 点上方「🔄 采集/刷新列表」列出内容。'
+        + '「已处理」= 脚本本次会话改过什么（含原因与一键固化）；「全部媒体」= 页面上有什么。';
       this.mediaListBox.appendChild(empty);
       return sec.el;
     }
@@ -10536,6 +10950,8 @@
 
     refreshMediaSection() {
       if (!this.mediaListBox) return;
+      // v5.2: 双视图路由 —— 「已处理」(默认) / 「全部媒体」(v3.1 原行为)
+      if (this.mediaView === 'processed') { this.refreshProcessedSection(); return; }
       this.mediaListBox.textContent = '';
       const items = this.collectPageMedia(400);
       if (!items.length) {
@@ -10562,6 +10978,133 @@
       }
       if (this.mediaSummary) {
         this.mediaSummary.setText('共 ' + items.length + ' 个媒体' + (items.length > shown.length ? ' (已显示前 ' + shown.length + ' 个)' : '') + ' · 状态随决策实时变化');
+      }
+    }
+
+    // ==========================================
+    // v5.2「已处理」视图 (任务 v5-2 R3 / R4)
+    //   与「全部媒体」的本质区别: 这里列的是"脚本本次会话改了什么", 不是"页面上有什么"。
+    //   每项可 切换(反退) / 定位 / 固化规则 —— 用户不必回到页面上寻找出问题的那张图。
+    // ==========================================
+    refreshProcessedSection() {
+      if (!this.mediaListBox) return;
+      this.mediaListBox.textContent = '';
+      processedLog.prune();
+      // v5.2: 复检改判的条目在 5s 内置顶 (让"脚本自己发现反错了"这件事可见)
+      const now = Date.now();
+      const items = processedLog.items.slice().reverse(); // 时间倒序 (最新在上)
+      items.sort((a, b) => {
+        const ra = (a.rechecked && now - (a.recheckedAt || 0) < 5000) ? 1 : 0;
+        const rb = (b.rechecked && now - (b.recheckedAt || 0) < 5000) ? 1 : 0;
+        return rb - ra; // 稳定排序: 同组保持时间倒序
+      });
+      if (!items.length) {
+        const empty = document.createElement('div');
+        empty.className = 'svi-hint-line';
+        empty.textContent = '本次会话尚未处理任何元素。脚本自动处理、Alt+点击、Alt+Shift+点击（屏蔽）、Alt+M（遮罩）都会出现在这里。';
+        this.mediaListBox.appendChild(empty);
+        if (this.mediaSummary) this.mediaSummary.setText('已处理 0 项 · 可撤销 ' + undoStack.items.length + ' 项');
+        return;
+      }
+      const shown = items.slice(0, Math.max(1, this.mediaShownCount || 200));
+      for (const e of shown) this.mediaListBox.appendChild(this.buildProcessedRow(e));
+      if (items.length > shown.length) {
+        const moreBtn = document.createElement('button');
+        moreBtn.className = 'svi-mini-btn';
+        moreBtn.textContent = '加载更多 (剩余 ' + (items.length - shown.length) + ' 项)';
+        moreBtn.addEventListener('click', () => {
+          this.mediaShownCount += 200;
+          this.refreshProcessedSection();
+        });
+        this.mediaListBox.appendChild(moreBtn);
+      }
+      if (this.mediaSummary) {
+        this.mediaSummary.setText('已处理 ' + items.length + ' 项 · 可撤销 ' + undoStack.items.length + ' 项'
+          + (items.length > shown.length ? ' (已显示前 ' + shown.length + ' 项)' : '')
+          + ' · 「固化」= 写成本站规则立即生效');
+      }
+    }
+
+    buildProcessedRow(entry) {
+      const el = entry.el;
+      const row = document.createElement('div');
+      row.className = 'svi-media-row';
+
+      const ACT_ZH = {
+        invert: '反色', bgInvert: '背景反色', hide: '屏蔽', mask: '遮罩', dim: '压暗',
+        keep: '保持', peek: '悬停复原',
+      };
+      const type = document.createElement('span');
+      type.className = 'svi-media-type';
+      type.textContent = ACT_ZH[entry.actionId] || entry.actionId || '—';
+
+      let src = String(entry.src || '').replace(/^data:[^,]*/, 'data:…');
+      if (src.length > 26) src = src.slice(0, 26) + '…';
+      let when = '';
+      try { when = new Date(entry.at).toLocaleTimeString(); } catch (e) { when = ''; }
+
+      const meta = document.createElement('span');
+      meta.className = 'svi-media-meta';
+      // 选择器与 URL 均来自页面 → textContent (XSS 加固, 绝不 innerHTML)
+      meta.textContent = (entry.stem || '(无可用选择器)') + ' · ' + when + (src ? ' · ' + src : '');
+
+      const state = document.createElement('span');
+      state.className = 'svi-media-state';
+      const rzh = REASON_ZH[entry.reason] || entry.reason || '未知';
+      const rechecked = entry.rechecked && (Date.now() - (entry.recheckedAt || 0)) < 5000;
+      state.textContent = rechecked ? ('已复检改判 · 原为 ' + rzh) : rzh;
+
+      const actions = document.createElement('span');
+      actions.className = 'svi-media-actions';
+
+      const undoBtn = document.createElement('button');
+      undoBtn.className = 'svi-mini-btn';
+      undoBtn.textContent = '还原';
+      undoBtn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        undoEntry(entry); // 与 Alt+Z 同一路径 (反事实回退, 手动结论仍占优)
+        const i = processedLog.items.indexOf(entry);
+        if (i >= 0) processedLog.items.splice(i, 1);
+        const j = undoStack.items.indexOf(entry);
+        if (j >= 0) undoStack.items.splice(j, 1);
+        this.refreshProcessedSection();
+      });
+
+      const locateBtn = document.createElement('button');
+      locateBtn.className = 'svi-mini-btn';
+      locateBtn.textContent = '定位';
+      locateBtn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        this.locateMedia(el);
+      });
+
+      const fixBtn = document.createElement('button');
+      fixBtn.className = 'svi-mini-btn';
+      fixBtn.textContent = '固化';
+      fixBtn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        this.fixRuleFor(entry);
+      });
+
+      actions.append(undoBtn, locateBtn, fixBtn);
+      row.append(type, meta, state, actions);
+      row._sviTarget = el;
+      return row;
+    }
+
+    // 固化: 把这次处理的结论写成本站规则并**立即生效** (hits 直接抬到 learnHits, 不必再点 2 次)
+    fixRuleFor(entry) {
+      try {
+        const el = entry.el;
+        if (!el || !el.isConnected) { showToast('该元素已不在页面上，无法固化'); return; }
+        const action = entry.actionId === 'hide' ? 'hide' : (entry.actionId === 'mask' ? 'mask' : 'protect');
+        const rule = ruleLearner.record(profileKey(), el, action, true);
+        if (!rule) { showToast('固化失败：该元素没有可用的选择器'); return; }
+        const label = { hide: '永久屏蔽', mask: '遮罩', protect: '永不反色' }[action] || action;
+        showToast('已固化「' + label + '」· 立即生效（可在 本站规则 里删除）');
+        this.refreshProcessedSection();
+      } catch (e) {
+        showToast('固化失败');
       }
     }
 
@@ -11119,6 +11662,12 @@
           // v5.0: Alt+Shift+Z = 恢复本页全部临时屏蔽元素
           e.preventDefault();
           this.restoreAllHidden();
+        } else if (e.altKey && !e.shiftKey && (e.key === 'z' || e.key === 'Z')) {
+          // v5.2: Alt+Z = 撤销最近一次自动结论 (逐个回退, 可连按)
+          e.preventDefault();
+          if (state.undoEnabled === false) { showToast('撤销已关闭（设置 → 🧩 元素动作）'); return; }
+          const done = undoLast(1);
+          showToast(done ? ('已撤销 1 项 · 还可撤销 ' + undoStack.items.length + ' 项') : '没有可撤销的记录');
         }
       });
     }
@@ -11364,6 +11913,18 @@
     applyPageDim,
     setPeekGate,
     syncMaskVars,
+    // v5.2 复查与撤销契约 (单测契约; 下游 v5-3 阈值自校准读 corrections)
+    undoStack,
+    undoLast,
+    undoEntry,
+    pushUndo,
+    isAutoReason,
+    corrections,
+    processedLog,
+    REASON_ZH,
+    recordProcessed,
+    showActionToast,
+    hideActionToast,
     ImageInvertEngine,
     // v3.2 纯函数导出 (单测契约): 视频画面调节滤镜链构建
     buildVideoTuneFilter,

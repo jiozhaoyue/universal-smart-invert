@@ -130,8 +130,46 @@ reveals temporarily.
 | `Alt+Shift+click` | Block / restore the element (three-state cycle, see above) |
 | `Alt+M` | Mask / unmask the hovered element |
 | `Alt+Shift+Z` | Restore every temporary block on the page |
+| `Alt+Z` | Undo the most recent **automatic** verdict (press repeatedly to keep going back) |
 | `Shift`+hover a mask | Remove that mask permanently |
 | `Esc` | Cancel the armed region-mask mode (does not change the existing "close panel" behaviour) |
+
+### 7. ↩️ Review and undo (no more hunting the page for the wrong one)
+
+**The pain**: automatic inversion can never be 100% right. Previously, one wrong inversion meant
+scrolling back, finding that image, and clicking it yourself.
+
+- **`Alt+Z` undoes one step at a time**: undoes the most recent **automatic** verdict (press
+  repeatedly to keep going back; 30 steps kept, memory only);
+- **Batch prompt bar**: when ≥3 elements are processed at once, a prompt with an "Undo" button
+  appears and rolls all of them back (single elements get no prompt — that would be noise; use
+  `Alt+Z` for those);
+- **"Processed on this page" list** (Settings → 🖼️ Current-page media / Processed): it lists
+  **what the script changed this session** — selector + **reason code** (pixel / learned rule /
+  seed protect / veil veto / …) + time, each with **Undo / Locate / Pin as rule**;
+  "Undo all" rolls back the whole undo stack. The adjacent "🗂 All media" tab is v3.1's original
+  view (what is on the page) and is unchanged;
+- **One-click rule pinning**: "Pin" writes this verdict as a site rule that takes effect
+  **immediately** (no need to click twice more). There is also a one-click
+  "Stop auto-inverting images on this site";
+- **Undo is durable**: undo = drop the marker + clear the cache + record a "user veto" verdict
+  (the same semantics as Alt+click-to-restore), so the next scan will not push the same wrong
+  verdict back. Manual verdicts always win; undo never overrides what you clicked yourself.
+
+### 8. 🩺 Wrong-inversion sentinel
+
+It records your manual corrections: the same image restored twice within 24h → a notice that it
+now stays original; the same class of element restored three times → a hint that you can pin a
+rule from the "Processed" list. **It only records and notifies — it never writes rules
+automatically**, because that would magnify one click into a permanent decision.
+
+### 9. 🔒 Undo-stack boundaries (deliberate)
+
+- **Memory only**: cleared on reload, never persisted (consistent with the tab-isolation rule);
+- **Automatic verdicts only**: your manual `Alt+click` / `Alt+Shift+click` / `Alt+M` results are
+  not stacked — "undoing yourself" has no meaning;
+- **Only verdicts with visible state**: elements decided as "keep as-is" or "skipped" are not
+  stacked (there is nothing to revert).
 
 ---
 

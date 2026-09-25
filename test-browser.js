@@ -1932,6 +1932,10 @@ async function main() {
         const sec = document.getElementById('svi-sec-media');
         if (!sec) return { section: false };
         const btns = Array.from(sec.querySelectorAll('button'));
+        // v5.2: 本场景守护的是 v3.1 的「全部媒体」视图 —— 该视图默认已不是首屏视图
+        // (默认改为「已处理」，见 Scenario 26), 但**视图本身行为不变**, 故此处显式切过去。
+        const allView = btns.find((b) => b.textContent.indexOf('全部媒体') !== -1);
+        if (allView) allView.click();
         const collect = btns.find((b) => b.textContent.indexOf('采集') !== -1);
         if (collect) collect.click();
         return { section: true, rows: sec.querySelectorAll('.svi-media-row').length };
@@ -2688,6 +2692,94 @@ async function main() {
     })()`);
     assert.strictEqual(rollbackRes.ret, false, '动作关闭时 applyResolvedAction 返回 false');
     assert.strictEqual(rollbackRes.attr, null, '动作关闭时必须清掉残留标记 (开关即回滚)');
+
+    // ============================================================
+    // Scenario 26 (v5.2): 复查与撤销
+    //   - 自动结论确实进撤销栈与「已处理」日志 (真实决策路径, 不是直接调栈)
+    //   - 撤销 = 反事实回退 (摘标记 + 清 checked, 元素回到"未处理")
+    //   - 「已处理」视图条目数 == 日志长度; 「全部媒体」视图不回归
+    // ============================================================
+    console.log('[Test] Scenario 26: v5.2 review & undo (Alt+Z) ...');
+    await sendCdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/` });
+    await new Promise((r) => setTimeout(r, 5000)); // 等首屏自动判定 + 空闲扫描落定
+
+    const rev1 = await evalInPageAsync(`(async () => {
+      const svi = window.__svi;
+      const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+      const out = {
+        logLen: svi.processedLog.items.length,
+        undoLen: svi.undoStack.items.length,
+      };
+      // 选一个"干净"的栈顶条目: 元素仍在文档、无手动结论、其 src 无持久化手动覆盖。
+      // (前序场景会通过 Alt+点击留下 manualOverrides —— 手动结论在撤销时仍然占优,
+      //  拿这类条目做断言会把"手动占优"错读成"撤销失效")
+      const stack = svi.undoStack.items;
+      let pick = null;
+      for (let i = stack.length - 1; i >= 0; i--) {
+        const e = stack[i];
+        if (!e || !e.el || !e.el.isConnected || typeof e.el.getAttribute !== 'function') continue;
+        if (e.el.getAttribute('data-svi-manual')) continue;
+        if (e.src && svi.prefs.manualOverrides[svi.manualOverrideKey(svi.profileKey(), e.src)]) continue;
+        pick = e;
+        break;
+      }
+      out.hasPick = !!pick;
+      if (pick) {
+        out.reason = pick.reason;
+        out.actIdBefore = pick.el.getAttribute('data-svi-inverted');
+        out.checkedBefore = pick.el.getAttribute('data-svi-checked-src');
+        out.ok = svi.undoEntry(pick);
+        // 撤销瞬间 (同步) 的清理状态 —— 此刻 checked 必须已摘
+        out.checkedImmediate = pick.el.getAttribute('data-svi-checked-src');
+        await wait(500);
+        // 500ms 后: 元素会被合法地重新判定一次, 并因"用户否决"结论落为原样。
+        // 因此这里断言的是"不再反色", 不是"checked 仍为空" (后者会误读成回归)。
+        out.actIdAfter = pick.el.getAttribute('data-svi-inverted');
+        out.settledChecked = pick.el.getAttribute('data-svi-checked-src');
+      }
+      // LIFO 语义单独验证 (不与上面那个元素绑定)
+      const n0 = svi.undoStack.items.length;
+      out.popped = svi.undoLast(1);
+      out.stackShrank = n0 - svi.undoStack.items.length;
+      return out;
+    })()`);
+    assert.ok(rev1.logLen > 0, '自动判定必须写入「已处理」日志 (实际 ' + rev1.logLen + ' 条)');
+    assert.ok(rev1.undoLen > 0, '自动结论必须进入撤销栈 (实际 ' + rev1.undoLen + ' 条)');
+    assert.ok(rev1.hasPick, '撤销栈中必须存在一个无手动结论的自动条目可供断言');
+    assert.strictEqual(rev1.actIdBefore, 'true', '撤销前该元素处于反色态 (reason=' + rev1.reason + ')');
+    assert.strictEqual(rev1.ok, true, 'undoEntry 返回 true');
+    assert.strictEqual(rev1.checkedImmediate, null, '撤销瞬间必须同步清掉 checked 标记 (反事实回退的第一步)');
+    assert.strictEqual(rev1.actIdAfter, null, '撤销 500ms 后必须仍不反色 (用户否决已持久化, 不是被下一次扫描翻回来)');
+    assert.strictEqual(rev1.popped, 1, 'undoLast(1) 必须撤销 1 项');
+    assert.strictEqual(rev1.stackShrank, 1, '撤销后栈长度必须减 1 (LIFO)');
+
+    const rev2 = await evalInPageAsync(`(async () => {
+      const svi = window.__svi;
+      const ui = svi.ui;
+      ui.openSettingsModal();
+      ui.mediaShownCount = 200;
+      ui.mediaView = 'processed';
+      ui.refreshMediaSection();
+      const processedRows = ui.mediaListBox.querySelectorAll('.svi-media-row').length;
+      const processedSummary = ui.mediaSummary ? ui.mediaSummary.el.textContent : '';
+      ui.mediaView = 'all';
+      ui.mediaShownCount = 200;
+      ui.refreshMediaSection();
+      const allRows = ui.mediaListBox.querySelectorAll('.svi-media-row').length;
+      const allSummary = ui.mediaSummary ? ui.mediaSummary.el.textContent : '';
+      ui.closeSettingsModal();
+      return {
+        processedRows, processedSummary, allRows, allSummary,
+        logLen: svi.processedLog.items.length,
+        sectionTitle: !!document.getElementById('svi-sec-media')
+      };
+    })()`);
+    assert.strictEqual(rev2.sectionTitle, true, '媒体区块仍然存在');
+    assert.ok(rev2.processedRows > 0, '「已处理」视图必须渲染出行, got ' + rev2.processedRows);
+    assert.ok(rev2.processedRows <= rev2.logLen, '「已处理」行数不得超过日志长度（避免凭空造行）');
+    assert.ok(rev2.processedSummary.indexOf('已处理') >= 0, '「已处理」视图摘要须标明已处理数, got ' + rev2.processedSummary);
+    assert.ok(rev2.allRows > 0, '「全部媒体」视图必须仍然可用 (v3.1 行为不回归), got ' + rev2.allRows);
+    assert.ok(rev2.allSummary.indexOf('共 ') >= 0, '「全部媒体」摘要格式不回归, got ' + rev2.allSummary);
 
     console.log('\n🎉 ALL BROWSER AUTOMATION TESTS PASSED 100% SUCCESFULLY!\n');
 

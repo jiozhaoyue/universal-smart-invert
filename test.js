@@ -2151,4 +2151,152 @@ setTimeout(() => {
   console.log('✓ v5.0 stage-B unit tests passed: 动作开关矩阵 / hide 作用域与动作级手动结论 / mask 三档预设 / applyResolvedAction 开关即回滚 / resolveElementAction 过滤');
 })();
 
+// ============================================================
+// v5.2 单测 (撤销栈 / 反事实回退 / 误反哨兵 / 已处理日志)
+// 契约来源: .trellis/tasks/09-25-v5-review-undo/design.md §D-1 / §D-2 / §D-6
+// ============================================================
+(function () {
+  const { undoStack, undoLast, undoEntry, pushUndo, isAutoReason,
+          corrections, processedLog, REASON_ZH, recordProcessed } = svi;
+
+  function mkEl(opts) {
+    const o = opts || {};
+    const attrs = Object.assign({}, o.attrs);
+    return {
+      tagName: o.tagName || 'IMG', id: '', className: o.className || '',
+      isConnected: true,
+      getAttribute(k) { return Object.prototype.hasOwnProperty.call(attrs, k) ? attrs[k] : null; },
+      setAttribute(k, v) { attrs[k] = String(v); },
+      removeAttribute(k) { delete attrs[k]; },
+      matches() { return false; },
+      _attrs: attrs,
+    };
+  }
+
+  const host = svi.profileKey();
+
+  // ---- 1. isAutoReason: 只认自动结论 ----
+  assert.strictEqual(isAutoReason('pixel'), true, 'pixel 是自动结论');
+  assert.strictEqual(isAutoReason('learned'), true, 'learned 是自动结论');
+  assert.strictEqual(isAutoReason('manual'), false, 'manual 是用户意志, 不入撤销栈');
+  assert.strictEqual(isAutoReason('element-rule'), false, 'element-rule 是用户显式配置, 不入撤销栈');
+  assert.strictEqual(isAutoReason(undefined), true, '缺省按自动处理 (reason 缺省为 pixel 语义)');
+
+  // ---- 2. 撤销栈: 环形回卷 / 只收自动结论 / 开关 ----
+  undoStack.items.length = 0;
+  const max = Math.max(1, Math.min(100, Number(svi.prefs.undoStackSize) || 30));
+  for (let i = 0; i < max + 5; i++) {
+    pushUndo({ el: mkEl({}), src: 's' + i, actionId: 'invert', reason: 'pixel', at: i });
+  }
+  assert.strictEqual(undoStack.items.length, max, '撤销栈必须回卷到容量上限, got ' + undoStack.items.length);
+  assert.strictEqual(undoStack.items[0].src, 's5', '回卷必须丢弃最旧的 (FIFO 淘汰)');
+
+  undoStack.items.length = 0;
+  pushUndo({ el: mkEl({}), src: 'm', actionId: 'invert', reason: 'manual', at: 1 });
+  assert.strictEqual(undoStack.items.length, 0, 'manual 结论不得入栈');
+  pushUndo({ el: mkEl({}), src: 'e', actionId: 'invert', reason: 'element-rule', at: 1 });
+  assert.strictEqual(undoStack.items.length, 0, 'element-rule 结论不得入栈');
+
+  svi.prefs.undoEnabled = false;
+  pushUndo({ el: mkEl({}), src: 'off', actionId: 'invert', reason: 'pixel', at: 1 });
+  assert.strictEqual(undoStack.items.length, 0, 'undoEnabled=false 时不得入栈');
+  svi.prefs.undoEnabled = true;
+
+  // ---- 3. undoLast: LIFO 逆序 ----
+  undoStack.items.length = 0;
+  for (let i = 1; i <= 5; i++) pushUndo({ el: mkEl({}), src: 'x' + i, actionId: 'invert', reason: 'pixel', at: i });
+  assert.strictEqual(undoStack.items.length, 5, '5 条入栈');
+  undoLast(2);
+  assert.strictEqual(undoStack.items.length, 3, '撤销 2 条后剩 3 条');
+  assert.strictEqual(undoStack.items[2].src, 'x3', '逆序回退: 保留的是最旧的 3 条');
+  assert.strictEqual(undoLast(99), 3, '撤销超过存量时返回实际条数');
+  assert.strictEqual(undoStack.items.length, 0, '全部撤销后栈空');
+  assert.strictEqual(undoLast(1), 0, '空栈撤销返回 0 (不得抛错)');
+
+  // ---- 4. undoEntry: 反事实回退 (摘标记, 而非写成 keep) + 持久化用户否决 ----
+  const elU = mkEl({ attrs: { 'data-svi-inverted': 'true', 'data-svi-checked-src': 'https://x/y.png' } });
+  const entry = { el: elU, src: 'https://x/y.png', actionId: 'invert', reason: 'pixel', at: 1 };
+  assert.strictEqual(undoEntry(entry, false), true, 'undoEntry 返回 true');
+  assert.strictEqual(elU.getAttribute('data-svi-inverted'), null, '回退必须摘除反色标记');
+  assert.strictEqual(elU.getAttribute('data-svi-checked-src'), null, '回退必须清掉 checked 标记以便重扫');
+  assert.strictEqual(elU.getAttribute('data-svi-manual'), null, 'remember=false 时不得写手动结论');
+
+  // remember=true (用户可见路径): 摘标记之外还落"用户否决", 否则下次扫描会得到同一结论、
+  // 撤销随即被撤销掉 (等于没撤销)。这一步是与 Alt+点击还原同语义的持久化。
+  const elUR = mkEl({ attrs: { 'data-svi-inverted': 'true' } });
+  const entryR = { el: elUR, src: 'https://undo/keep.png', actionId: 'invert', reason: 'pixel', at: 2 };
+  const ovKey = svi.manualOverrideKey(host, 'https://undo/keep.png');
+  delete svi.prefs.manualOverrides[ovKey];
+  undoEntry(entryR);
+  assert.strictEqual(elUR.getAttribute('data-svi-inverted'), null, 'remember=true 同样摘除反色标记');
+  assert.strictEqual(elUR.getAttribute('data-svi-manual'), 'restore', 'remember=true 必须写元素级手动结论');
+  assert.strictEqual(svi.prefs.manualOverrides[ovKey], 'restore', 'remember=true 必须写 src 级手动覆盖 (持久)');
+  // 手动结论占优: 再走一次 revert 不会把它翻回去
+  svi.ACTIONS.invert.apply(elUR, null, 'pixel');
+  assert.strictEqual(elUR.getAttribute('data-svi-inverted'), null, '手动 restore 占优: 后续自动结论不得把它翻回反色');
+
+  // 手动结论仍占优: 手动 invert 的元素被撤销时保持反色
+  const elM = mkEl({ attrs: { 'data-svi-inverted': 'true', 'data-svi-manual': 'invert' }, noAttr: true });
+  elM.getAttribute = (k) => (k === 'data-svi-inverted' ? 'true' : (k === 'data-svi-manual' ? 'invert' : null));
+  undoEntry({ el: elM, src: '', actionId: 'invert', reason: 'pixel', at: 1 }, false);
+  assert.strictEqual(elM.getAttribute('data-svi-inverted'), 'true', '手动结论占优: 撤销不得推翻用户的手动反色');
+
+  assert.strictEqual(undoEntry(null), false, 'undoEntry(null) 返回 false, 不抛错');
+  delete svi.prefs.manualOverrides[ovKey];
+
+  // ---- 5. 误反哨兵: 计数器 / 24h 窗 / src 维度 ----
+  corrections.data = null;
+  const c1 = corrections.bump(host, 'falseInvert', 'https://a/1.png', 'img.thumb');
+  assert.strictEqual(c1.srcHits, 1, '首次还原: srcHits=1');
+  assert.strictEqual(c1.stemHits, 1, '首次还原: stemHits=1');
+  const c2 = corrections.bump(host, 'falseInvert', 'https://a/1.png', 'img.thumb');
+  assert.strictEqual(c2.srcHits, 2, '同 src 第二次还原: srcHits=2 (哨兵降级阈值)');
+  assert.strictEqual(c2.stemHits, 2, '同 stem 第二次: stemHits=2');
+  corrections.bump(host, 'falseInvert', 'https://a/2.png', 'img.thumb');
+  const st = corrections.stats(host);
+  assert.strictEqual(st.falseInvert, 3, 'host 维度误反计数累加');
+  assert.strictEqual(st.falseKeep, 0, '误保计数独立');
+  corrections.bump(host, 'falseKeep', 'https://a/3.png', 'img.other');
+  assert.strictEqual(corrections.stats(host).falseKeep, 1, '误保计数单独累加');
+  assert.strictEqual(corrections.stats('other.example').falseInvert, 0, 'host 维度互相隔离');
+
+  // 窗口过期: 手工把时间戳推到 24h 之前 → 计数重置为 1
+  const hdC = corrections.host(host);
+  hdC.perSrc['https://a/1.png'] = { n: 9, at: Date.now() - 25 * 3600 * 1000 };
+  const c3 = corrections.bump(host, 'falseInvert', 'https://a/1.png', 'img.thumb');
+  assert.strictEqual(c3.srcHits, 1, '超 24h 窗后计数重置 (而不是继续累加到 10)');
+
+  // 关闭哨兵 → 不记录
+  svi.prefs.errorSentinel = false;
+  assert.strictEqual(corrections.bump(host, 'falseInvert', 'https://a/9.png', 'img.x'), null, '哨兵关闭时不记录');
+  svi.prefs.errorSentinel = true;
+
+  // ---- 6. 已处理日志 ----
+  processedLog.clear();
+  recordProcessed(mkEl({ className: 'thumb' }), 'invert', 'pixel', 'https://a/1.png');
+  const e1 = processedLog.items[processedLog.items.length - 1];
+  assert.strictEqual(e1.actionId, 'invert', '日志记录 actionId');
+  assert.strictEqual(e1.reason, 'pixel', '日志记录 reason');
+  assert.strictEqual(e1.stem, 'img.thumb', '日志记录 selectorStem');
+  // prune: 脱离文档的元素被剔除
+  const gone = mkEl({}); gone.isConnected = false;
+  processedLog.items.push({ el: gone, actionId: 'invert', reason: 'pixel', at: 0, stem: '', src: '' });
+  const before = processedLog.items.length;
+  recordProcessed(mkEl({}), 'invert', 'pixel', '');
+  assert.strictEqual(processedLog.items.length, before, 'prune 必须剔除已脱离文档的条目 (push 前先 prune)');
+
+  // ---- 7. 原因码中文映射覆盖关键路径 ----
+  for (const k of ['pixel', 'learned', 'protected', 'seed-force', 'element-rule', 'manual', 'masked-dark', 'hidden-rule', 'mask-rule']) {
+    assert.ok(REASON_ZH[k], 'REASON_ZH 必须覆盖原因码: ' + k);
+  }
+
+  // ---- 清理 ----
+  undoStack.items.length = 0;
+  processedLog.clear();
+  corrections.data = null;
+  try { svi.Store.remove('corrections'); } catch (e) { /* ignore */ }
+
+  console.log('✓ v5.2 unit tests passed: 撤销栈回卷与来源过滤 / 反事实回退与手动占优 / 误反哨兵计数与 24h 窗 / 已处理日志 prune');
+})();
+
 

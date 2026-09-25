@@ -1,0 +1,8 @@
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "检查项: 撤销栈是否被误落盘 (违反标签页隔离); 列表项是否用 innerHTML 插入了存储/DOM 派生的字符串; 新增 observer 是否合并+有预算; 新增纯逻辑 (环形栈、原因码映射、哨兵阈值) 是否挂 window.__svi 并被单测断言真代码。"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "检查项: svi:corrections 的字段是否在每个消费方都被处理; UI 是否直接读了原始 payload 而非经记录器的访问器; 旧的 svi:corrections 缺失/损坏时是否优雅降级。"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "检查项: 「已处理视图」是否复用了既有 collectMediaItems / locateMedia / data-svi-mi, 而没有另起第二套采集与定位实现; 固化是否复用 RuleLearner.record 而没有新写一套规则写入。"}
+{"file": ".trellis/tasks/09-25-v5-media-governance/prd.md", "reason": "检查项: AC-5 (30 步内可撤销 + 列表内逐项还原) 是否逐条可验证; AC-3 (全关时与 v5-1 行为一致) 是否有基线 diff 证据。"}
+{"file": ".trellis/tasks/09-25-v5-review-undo/prd.md", "reason": "逐条核对 R1-R6: 撤销栈仅记自动结论 / toast 仅 pixel 触发且合并计数正确 / 双视图 (全部媒体视图不回归) / 四型固化立即生效 / 哨兵阈值边界 (第 1 次不降级、第 2 次降级) / 四个开关可关且回退语义正确。"}
+{"file": ".trellis/tasks/09-25-v5-review-undo/design.md", "reason": "检查项: 实现是否偏离设计。重点 (1) 撤销是否为反事实回退 (删快照) 而非改成 keep (D-2); (2) 是否改动了既有 showToast (D-3 明确禁止); (3) 是否替换掉了「全部媒体」视图 (D-4 明确禁止回归); (4) corrections 形状是否与 v5-3 契约一致 (D-6)。"}
+{"file": ".trellis/tasks/09-25-v5-review-undo/implement.md", "reason": "检查项: 三个回滚点 (R1-R3) 的验证是否真实跑过; 阶段 D 的 bench Scenario 26 是否覆盖撤销正确性 (回原状 + 快照已删) 与视图不回归; 复选框是否随执行实时勾选; 偏离项是否留痕。"}
+{"file": ".trellis/tasks/09-25-v5-data-loop/prd.md", "reason": "检查项: corrections 的字段名与语义是否满足 v5-3 阈值自校准的需求 (falseInvert/falseKeep 方向不可搞反)。"}
