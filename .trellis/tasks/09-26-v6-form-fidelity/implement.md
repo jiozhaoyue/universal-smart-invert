@@ -102,7 +102,8 @@ bench 侧：`Scenario 32/33` 在修复版上通过；在 HEAD 版上的表现见
       并登记进 `frontend/index.md`
 - [x] `AGENTS.md` 硬规则补一条（唯一挂载入口 + 禁止裸挂载 + 失败不静默），bench gotchas 补「注入形态盲区」
 - [x] 四绿：`node --check` / `test.js` / `test-browser.js` / `gen-icons + build-extension + pack`
-- [ ] 提交（中文 message + `Co-Authored-By`）并**推送** `origin main`（AGENTS.md 硬规则：不得只提交）
+- [x] 提交（中文 message + `Co-Authored-By`）并**推送** `origin main`（AGENTS.md 硬规则：不得只提交）
+      —— 提交 `044e5dd`，已推 `7f2ada8..044e5dd  main -> main`
 
 **验证**：四绿全绿；`git status` 干净。
 
