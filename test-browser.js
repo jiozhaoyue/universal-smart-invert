@@ -3329,6 +3329,182 @@ async function main() {
     assert.strictEqual(rg6.attrs, 0, '关闭后零属性残留');
     assert.strictEqual(rg6.ledger, 0, '关闭后账本归零');
 
+    // ============================================================
+    // Scenario 31 (v6.3): 区域纠正与自校准
+    //   - 纠正模式: 可视化层 + 图例 (不引入任何绘制手势)
+    //   - **一次点击**翻转一个区域 → 渲染跟随 + 差分样本入库
+    //   - 再点一次 = 翻回原位 (不产样本)
+    //   - mousemove 不产生任何影响 (证明没有绘制型交互)
+    //   - 退出模式 → 可视化消失但纠正后的渲染保留
+    //   - 关开关 → 全清
+    // ============================================================
+    console.log('[Test] Scenario 31: v6.3 region correction (click-flip / diff sample / no-draw / rollback) ...');
+    await sendCdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/region-page` });
+    await new Promise((r) => setTimeout(r, 2500));
+
+    // 31a. 先挂区域层并采基线像素 (此时还没有可视化层 —— 着色会污染采样)
+    const rcBase = await evalInPageAsync(`(async () => {
+      const svi = window.__svi;
+      svi.regionCorrectionStore.clear();
+      svi.prefs.regionSegment = true;
+      svi.prefs.regionRender = true;
+      svi.prefs.regionCorrect = true;
+      svi.prefs.regionGridN = 16;
+      svi.prefs.regionKRects = 3;
+      svi.engines.image.clearCacheAndRescan();
+      await new Promise((r) => setTimeout(r, 1800));
+      const img = document.getElementById('r-img');
+      const b = img.getBoundingClientRect();
+      return {
+        overlays: document.querySelectorAll('.svi-region-overlay').length,
+        samples: svi.regionCorrectionStore.list().length,
+        box: [Math.round(b.left), Math.round(b.top), Math.round(b.width), Math.round(b.height)]
+      };
+    })()`);
+    assert.strictEqual(rcBase.samples, 0, '前置: 零样本');
+    assert.ok(rcBase.overlays >= 1, '前置: 区域层已挂载');
+    // 与场景 30 同一约定: [0] = 色块外的浅底 (会被反色), [1] = 色块 (自动结果里保持原色)
+    const rcPts = [[rcBase.box[0] + 10, rcBase.box[1] + 60], [rcBase.box[0] + 100, rcBase.box[1] + 60]];
+    const basePx = await captureSample(rcPts);
+    assert.ok(basePx[1][2] > 150, '前置: 色块保持原色 (蓝通道高), got ' + JSON.stringify(basePx[1]));
+
+    // 31a2. 进入纠正模式: 可视化层 + 图例 + 覆盖层仍在
+    const rc0 = await evalInPageAsync(`(async () => {
+      const svi = window.__svi;
+      const img = document.getElementById('r-img');
+      const entered = svi.RegionCorrection.enter(img);
+      const layer = document.querySelector('[data-svi-region-correct]');
+      const b = img.getBoundingClientRect();
+      const lb = layer ? layer.getBoundingClientRect() : null;
+      return {
+        entered: entered,
+        hasLayer: !!layer,
+        layerAligned: !!(layer && Math.abs(lb.left - b.left) < 2 && Math.abs(lb.top - b.top) < 2),
+        legend: layer ? String((layer.querySelector('.svi-region-correct-legend') || {}).textContent || '') : '',
+        cellRects: layer ? layer.querySelectorAll('rect').length : 0,
+        overlays: document.querySelectorAll('.svi-region-overlay').length
+      };
+    })()`);
+    assert.strictEqual(rc0.entered, true, '进入纠正模式');
+    assert.strictEqual(rc0.hasLayer, true, 'R1: 可视化层出现');
+    assert.strictEqual(rc0.layerAligned, true, '可视化层与元素盒对齐');
+    assert.ok(rc0.cellRects === 256, 'R1: 逐格着色 (16×16 = 256 个格子), got ' + rc0.cellRects);
+    assert.ok(/红=反色/.test(rc0.legend) && /点一下切换/.test(rc0.legend), 'R1: 图例可解释, got "' + rc0.legend + '"');
+    assert.ok(rc0.overlays >= 1, '纠正模式下覆盖层仍在 (可视化叠在它上面)');
+
+    // 31b. 一次点击翻转 = 区域判定取反 + 渲染跟随 + 差分样本入库
+    const rc1 = await evalInPageAsync(`(async () => {
+      const svi = window.__svi;
+      const img = document.getElementById('r-img');
+      const layer = document.querySelector('[data-svi-region-correct]');
+      const b = img.getBoundingClientRect();
+      // 点在色块中心 (元素盒坐标 100,60)
+      layer.dispatchEvent(new MouseEvent('click', {
+        bubbles: true, cancelable: true, clientX: b.left + 100, clientY: b.top + 60
+      }));
+      await new Promise((r) => setTimeout(r, 500));
+      return {
+        samples: svi.regionCorrectionStore.list().length,
+        last: svi.RegionRenderEngine.diagnostics().lastRecalcReason,
+        flip: svi.RegionCorrection.diagnostics().lastFlip,
+        marker: img.getAttribute('data-svi-region'),
+        layerStill: !!document.querySelector('[data-svi-region-correct]')
+      };
+    })()`);
+    assert.strictEqual(rc1.samples, 1, 'R2: 一次点击产出一份差分样本');
+    assert.ok(rc1.flip && rc1.flip.stats && rc1.flip.stats.toInvert > 0, 'R2: 差分记录了被翻转的格数, got ' + JSON.stringify(rc1.flip));
+    assert.strictEqual(rc1.last, 'correction', 'R2: 渲染按纠正结果重算 (recalc 原因 = correction)');
+    assert.strictEqual(rc1.layerStill, true, '可视化层随新网格重画');
+    const afterPx = await captureSample(rcPts);
+    // 用**相对变化**判定, 且用**红通道**做判别: 可视化层的半透明着色会叠一层色 (绝对值不可用),
+    //   而反色把蓝色块 (R=30) 变成偏红 (R≈120), 再叠红色着色 → R 显著上升, 蓝通道反而不降。
+    assert.ok(afterPx[1][0] > basePx[1][0] + 60,
+      'R1: 点击后色块被反色 (红通道相对基线显著上升), got ' + JSON.stringify(afterPx[1]) + ' vs 基线 ' + JSON.stringify(basePx[1]));
+
+    // 31c. 再点同一区域 = 翻回原位 (不产新样本)
+    const rc2 = await evalInPageAsync(`(async () => {
+      const svi = window.__svi;
+      const img = document.getElementById('r-img');
+      const layer = document.querySelector('[data-svi-region-correct]');
+      const b = img.getBoundingClientRect();
+      const before = svi.regionCorrectionStore.list().length;
+      layer.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: b.left + 100, clientY: b.top + 60 }));
+      await new Promise((r) => setTimeout(r, 500));
+      return { before: before, after: svi.regionCorrectionStore.list().length };
+    })()`);
+    // 翻回原位 = 撤销这次纠正: 不产新样本, 并且把刚才那条**噪声样本**一并删掉
+    //   (留着它, 下一次挂载会从样本里把纠正"粘"回来 —— 实测踩到)
+    assert.strictEqual(rc2.after, 0, 'R2: 翻回原位撤销该纠正 (样本清零, 不留噪声), got ' + rc2.after);
+    const revertPx = await captureSample(rcPts);
+    assert.ok(Math.abs(revertPx[1][0] - basePx[1][0]) <= 20,
+      'R1: 翻回原位后渲染也回到自动结果 (红通道回到基线量级), got ' + JSON.stringify(revertPx[1]) + ' vs 基线 ' + JSON.stringify(basePx[1]));
+
+    // 31d. 无绘制手势: mousemove/drag 不产生任何影响 (证明没有拖动式交互)
+    const rc3 = await evalInPageAsync(`(async () => {
+      const svi = window.__svi;
+      const img = document.getElementById('r-img');
+      const layer = document.querySelector('[data-svi-region-correct]');
+      const b = img.getBoundingClientRect();
+      const s0 = svi.regionCorrectionStore.list().length;
+      const o0 = svi.RegionRenderEngine.diagnostics().overlays;
+      for (let i = 0; i < 12; i++) {
+        layer.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: b.left + i * 12, clientY: b.top + 40 }));
+        layer.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, clientX: b.left + i * 12, clientY: b.top + 40 }));
+      }
+      layer.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, clientX: b.left + 180, clientY: b.top + 40 }));
+      await new Promise((r) => setTimeout(r, 300));
+      return { s0: s0, s1: svi.regionCorrectionStore.list().length, o0: o0, o1: svi.RegionRenderEngine.diagnostics().overlays };
+    })()`);
+    assert.strictEqual(rc3.s1, rc3.s0, 'R1: 拖动不产生任何纠正 (零绘制手势)');
+    assert.strictEqual(rc3.o1, rc3.o0, 'R1: 拖动不改变覆盖层');
+
+    // 31e. 退出模式: 可视化消失, 纠正后的渲染保留
+    const rc4 = await evalInPageAsync(`(async () => {
+      const svi = window.__svi;
+      const img = document.getElementById('r-img');
+      const layer = document.querySelector('[data-svi-region-correct]');
+      const b = img.getBoundingClientRect();
+      layer.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: b.left + 100, clientY: b.top + 60 }));
+      await new Promise((r) => setTimeout(r, 400));
+      const flipped = document.querySelector('.svi-region-overlay') !== null;
+      svi.RegionCorrection.exit();
+      await new Promise((r) => setTimeout(r, 200));
+      return {
+        active: svi.RegionCorrection.diagnostics().active,
+        layerGone: !document.querySelector('[data-svi-region-correct]'),
+        overlays: document.querySelectorAll('.svi-region-overlay').length,
+        flipped: flipped,
+        regionAttr: img.getAttribute('data-svi-region')
+      };
+    })()`);
+    assert.strictEqual(rc4.active, false, 'R1: 退出后模式关闭');
+    assert.strictEqual(rc4.layerGone, true, 'R1: 可视化层消失');
+    assert.strictEqual(rc4.regionAttr, 'true', 'R1: 退出模式后覆盖层仍在 (纠正结果保留渲染)');
+    const keptPx = await captureSample(rcPts);
+    assert.ok(keptPx[1][0] > basePx[1][0] + 60,
+      'R1: 退出模式后纠正结果仍在生效 (无着色层, 红通道仍显著高于基线), got ' + JSON.stringify(keptPx[1]));
+
+    // 31f. 关开关 → 全清; 清空纠正数据
+    const rc5 = await evalInPageAsync(`(async () => {
+      const svi = window.__svi;
+      svi.RegionCorrection.clearSamples();
+      const cleared = svi.regionCorrectionStore.list().length;
+      svi.prefs.regionCorrect = false;
+      svi.prefs.regionRender = false;
+      svi.engines.image.clearCacheAndRescan();
+      await new Promise((r) => setTimeout(r, 1200));
+      return {
+        cleared: cleared,
+        layers: document.querySelectorAll('[data-svi-region-correct]').length,
+        overlays: document.querySelectorAll('.svi-region-overlay').length,
+        samples: svi.regionCorrectionStore.list().length
+      };
+    })()`);
+    assert.strictEqual(rc5.cleared, 0, 'R7: 清空纠正数据');
+    assert.strictEqual(rc5.layers, 0, '关闭后零可视化层');
+    assert.strictEqual(rc5.overlays, 0, '关闭后零覆盖层');
+    assert.strictEqual(rc5.samples, 0, '关闭后零样本');
+
     console.log('\n🎉 ALL BROWSER AUTOMATION TESTS PASSED 100% SUCCESFULLY!\n');
 
     await new Promise((r) => setTimeout(r, 400)); // Windows 重定向: 等待 stdout 刷盘再退出

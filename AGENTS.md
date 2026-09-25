@@ -100,6 +100,11 @@ removed after it bound loopback-only and was unreachable via LAN/proxied browser
   `.trellis/spec/frontend/region-mask-contract.md` — any change goes back to planning first.
   `buildRegionMask` must stay a pure function; side effects (cache/counters/timing) live only in the
   `regionMaskTake` shell. With `regionSegment` off, no region code may run, cache, or write anything.
+- **Region correction is a DATA channel, not a drawing tool.** The only gesture is a single
+  `click` on a visualized region (a click flips that connected component's verdict). Never add
+  polygon/lasso/brush interaction. Corrections persist as a **flip set** keyed by
+  `host + selectorStem + intrinsic size` and can only calibrate the segmentation's
+  `regionMinAreaRatio` (never the whole-image thresholds, which belong to v5-3).
 - **Rendering a region mask has three non-obvious rules** (spec §6; each one was found only in a real
   browser): CSS `mask-image` clips by **alpha**, not luminance (write `alpha=0` for "keep" cells);
   a `<clipPath>` unions its children (emit ONE `<path>` with `clip-rule:evenodd`, kept outside the

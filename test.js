@@ -4424,6 +4424,258 @@ setTimeout(() => {
   }
 
   console.log('✓ v6.2 单测 passed: 内容盒几何(fill/contain/cover/none/scale-down + object-position) / 元素盒映射(letterbox 边距保持原色·洞搬位·裁切·退化) / 表达构造性等价(矢量反推 === 网格) / 祖先链四类截断可辨 / 互斥矩阵 / 关闭态纯短路与四条降级原因 / 调度门与暂停恢复账本');
+
+// ============================================================
+// v6.3 单测 (区域纠正: 点击语义 / 差分构造 / 持久化键 / 自校准四护栏 / 关闭态短路)
+// 契约来源: .trellis/tasks/09-25-v6-region-correction/design.md D1~D4 · PRD R1~R7
+// ============================================================
+(function () {
+  const {
+    regionCellFromPoint, regionDiffFromFlip, regionDiffStats, regionCalibrationAdvice,
+    regionCalibrationState, regionCalibrateNow, regionCalibrateRollback,
+    RegionCorrection, regionCorrectionStore, REGION_DEFAULTS, prefs, Store,
+  } = svi;
+
+  const bits = (arr) => Array.prototype.map.call(arr, (v) => (v ? '1' : '0')).join('');
+  const mkGrid = (rows) => {
+    const gh = rows.length;
+    const gw = rows[0].length;
+    const a = new Uint8Array(gw * gh);
+    for (let y = 0; y < gh; y++) for (let x = 0; x < gw; x++) a[y * gw + x] = rows[y][x] === '1' ? 1 : 0;
+    return { a: a, n: gw };
+  };
+
+  // ---- 1. 点坐标 → 格号 (纯函数) ----
+  {
+    assert.strictEqual(regionCellFromPoint(0, 0, 4, 100, 100), 0, '左上角 → 格 0');
+    assert.strictEqual(regionCellFromPoint(99, 99, 4, 100, 100), 15, '右下角 → 末格');
+    assert.strictEqual(regionCellFromPoint(50, 0, 4, 100, 100), 2, '中列 → 格 2');
+    assert.strictEqual(regionCellFromPoint(-1, 5, 4, 100, 100), -1, '左越界 → -1 (不允许点到边外随便翻一块)');
+    assert.strictEqual(regionCellFromPoint(5, 100, 4, 100, 100), -1, '下越界 → -1');
+    assert.strictEqual(regionCellFromPoint(5, 5, 4, 0, 0), -1, '盒尺寸为 0 → -1');
+  }
+
+  // ---- 2. 一次点击 = 整个连通域取反 (不是单格) ----
+  {
+    // 4×4: 主流是 1, 中间一个 2×2 的 0 块 (一个连通域)
+    const g = mkGrid(['1111', '1001', '1001', '1111']);
+    const flip = regionDiffFromFlip(g.a, 4, 5); // 点在 0 块里 (格 5)
+    assert.strictEqual(flip.changed, true, '翻转生效');
+    assert.strictEqual(bits(flip.corrected), '1111111111111111', '整块 0 连通域被翻成 1 (连通域整体, 不是单格)');
+    // 被翻转的 4 格在 4×4 网格里的下标是 5/6/9/10 (第 1、2 行的第 1、2 列)
+    assert.strictEqual(bits(flip.diff), '0000011001100000', '差分 = 那 4 格');
+    assert.strictEqual(flip.diff.length, 16, '差分长度 = 网格格数');
+
+    // 再点一次同一区域 → 翻转集归零 → changed=false (不产样本, 也不改渲染)。
+    //   连通域始终在**自动结果**上取 (而不是在"当前纠正后的网格"上) —— 否则第一次翻转后
+    //   区域与背景合并, 再点会翻转整张图 (实测踩到, 见 implement.md 偏离 1)。
+    const back = regionDiffFromFlip(g.a, 4, 5, flip.flips);
+    assert.strictEqual(back.changed, false, '翻回原位 = 无差分');
+    assert.strictEqual(bits(back.corrected), bits(g.a), '回到自动结果');
+    assert.strictEqual(back.flips.some((v) => v), false, '翻转集归零');
+
+    // 单格连通域 (孤立点) → 只翻那一格
+    const iso = mkGrid(['1101', '1111', '1111', '1111']);
+    const f2 = regionDiffFromFlip(iso.a, 4, 2);
+    assert.strictEqual(bits(f2.corrected), '1111111111111111', '孤立 0 格 → 翻成 1');
+    assert.strictEqual(bits(f2.diff), '0010000000000000', '只动那一格');
+
+    // 越界 / 空输入 → 安全返回 (绝不产坏样本)
+    assert.strictEqual(regionDiffFromFlip(g.a, 4, 999).changed, false, '越界格号 → 无差分');
+    assert.strictEqual(regionDiffFromFlip(null, 4, 0).corrected, null, '空网格 → 安全返回');
+  }
+
+  // ---- 3. 差分统计与样本形状 ----
+  {
+    const ours = new Uint8Array([1, 1, 0, 0]);
+    const corrected = new Uint8Array([1, 0, 1, 0]);
+    const st = regionDiffStats(ours, corrected);
+    assert.strictEqual(st.toKeep, 1, 'toKeep: 我们反了、用户要保原色');
+    assert.strictEqual(st.toInvert, 1, 'toInvert: 我们没反、用户要反');
+    assert.strictEqual(st.unchanged, 2, 'unchanged');
+    const s = svi.regionCorrectionStore && true;
+    assert.ok(s, 'store 导出存在');
+  }
+
+  // ---- 4. 持久化: 形状 / 上限 / 清空 / 命中键 / 坏数据降级 ----
+  {
+    const orig = Store.get('regionCorrections', null);
+    try {
+      regionCorrectionStore.data = null;
+      regionCorrectionStore.clear();
+      assert.strictEqual(regionCorrectionStore.list().length, 0, '清空后零样本');
+
+      const sample = {
+        host: 'h1', stem: 'img.photo', dims: '800x600', n: 4,
+        ours: '1111001110011111', corrected: '1111111111111111', diff: '0000110000110000', at: 1,
+      };
+      regionCorrectionStore.add(sample);
+      assert.strictEqual(regionCorrectionStore.list().length, 1, '写入一条');
+      const hit = regionCorrectionStore.find('h1', 'img.photo', '800x600');
+      assert.ok(hit && hit.corrected === sample.corrected, '命中键 = 站点 + 词干 + 尺寸指纹');
+      assert.strictEqual(regionCorrectionStore.find('h1', 'img.other', '800x600'), null, '词干不同 → 不命中');
+      assert.strictEqual(regionCorrectionStore.find('h2', 'img.photo', '800x600'), null, '站点不同 → 不命中');
+      assert.strictEqual(regionCorrectionStore.find('h1', 'img.photo', '400x300'), null, '尺寸指纹不同 → 不命中');
+
+      // 上限 FIFO
+      regionCorrectionStore.clear();
+      for (let i = 0; i < 205; i++) {
+        regionCorrectionStore.add({ host: 'h', stem: 's' + i, dims: '1x1', n: 2, ours: '10', corrected: '01', diff: '11', at: i });
+      }
+      const list = regionCorrectionStore.list();
+      assert.strictEqual(list.length, 200, '样本上限 200 (FIFO)');
+      assert.strictEqual(list[0].stem, 's5', '最旧的先被淘汰');
+
+      // 按键删除 (翻回原位时撤销该纠正)
+      regionCorrectionStore.clear();
+      regionCorrectionStore.add({ host: 'h', stem: 'a', dims: '1x1', n: 2, ours: '10', corrected: '01', diff: '11', at: 1 });
+      regionCorrectionStore.add({ host: 'h', stem: 'b', dims: '1x1', n: 2, ours: '10', corrected: '01', diff: '11', at: 2 });
+      assert.strictEqual(regionCorrectionStore.remove('h', 'a', '1x1'), 1, '按键删除命中 1 条');
+      assert.strictEqual(regionCorrectionStore.list().length, 1, '只剩另一条');
+      assert.strictEqual(regionCorrectionStore.remove('h', 'nope', '1x1'), 0, '未命中 → 0 (幂等)');
+
+      // 坏数据 → 空集, 绝不崩
+      Store.set('regionCorrections', { samples: 'not-an-array', calibration: 42 });
+      regionCorrectionStore.data = null;
+      const bad = regionCorrectionStore.load();
+      assert.strictEqual(bad.samples.length, 0, '坏 samples 字段 → 空集');
+      assert.deepStrictEqual(bad.calibration, {}, '坏 calibration 字段 → 空对象');
+    } finally {
+      regionCorrectionStore.clear();
+      if (orig) Store.set('regionCorrections', orig); else Store.remove('regionCorrections');
+      regionCorrectionStore.data = null;
+    }
+  }
+
+  // ---- 5. 自校准四护栏 (纯函数) ----
+  {
+    const mk = (up, down) => {
+      // 每条样本 8 位: 前 up 位是 0→1 (用户要反), 接着 down 位是 1→0 (用户要保)
+      let ours = '';
+      let corrected = '';
+      for (let i = 0; i < up; i++) { ours += '0'; corrected += '1'; }
+      for (let i = 0; i < down; i++) { ours += '1'; corrected += '0'; }
+      while (ours.length < 8) { ours += '1'; corrected += '1'; }
+      return { host: 'h', stem: 's', dims: 'd', n: 2, ours: ours, corrected: corrected, diff: '', at: 0 };
+    };
+
+    // (a) 累积门: 4 条不够
+    const few = [mk(0, 3), mk(0, 3), mk(0, 3), mk(0, 3)];
+    const a1 = regionCalibrationAdvice(few, 0.03, { minSamples: 5, step: 0.005 });
+    assert.strictEqual(a1.apply, false, '样本不足 → 不动');
+    assert.strictEqual(a1.reason, 'insufficient-samples', '原因 = insufficient-samples');
+
+    // (b) 方向一致 (全部"我们抠多了") → 面积门变大, 幅度 ≤ step
+    const up = [mk(0, 3), mk(0, 3), mk(0, 3), mk(0, 3), mk(0, 3)];
+    const a2 = regionCalibrationAdvice(up, 0.03, { minSamples: 5, step: 0.005 });
+    assert.strictEqual(a2.apply, true, '够样本 + 方向一致 → 应用');
+    assert.strictEqual(a2.direction, 'up', '方向 = up (我们抠多了 → 更保守)');
+    assert.ok(Math.abs(a2.to - 0.035) < 1e-9, '幅度 = step (0.005), got ' + a2.to);
+    assert.ok(Math.abs(a2.to - a2.from) <= 0.005 + 1e-12, '单次幅度不超过上限');
+
+    // (c) 反方向
+    const dn = [mk(3, 0), mk(3, 0), mk(3, 0), mk(3, 0), mk(3, 0)];
+    const a3 = regionCalibrationAdvice(dn, 0.03, { minSamples: 5, step: 0.005 });
+    assert.strictEqual(a3.direction, 'down', '方向 = down (我们抠少了 → 更激进)');
+    assert.ok(Math.abs(a3.to - 0.025) < 1e-9, '向下调整同样不超过 step, got ' + a3.to);
+
+    // (d) 方向不一致 (50%) → 不动
+    const mixed = [mk(0, 3), mk(0, 3), mk(3, 0), mk(3, 0), mk(1, 1)];
+    const a4 = regionCalibrationAdvice(mixed, 0.03, { minSamples: 5, step: 0.005 });
+    assert.strictEqual(a4.apply, false, '两类持平 → 视为噪声, 不动');
+    assert.strictEqual(a4.reason, 'ambiguous', '原因 = ambiguous');
+
+    // (e) 2/3 恰好达标 → 应用 (边界)
+    const two3 = [mk(0, 3), mk(0, 3), mk(3, 0)];
+    assert.strictEqual(regionCalibrationAdvice(two3, 0.03, { minSamples: 3, step: 0.005 }).direction, 'up',
+      '2/3 恰好在门槛上 → 应用');
+
+    // (f) 无差分 / 钳制
+    const noDiff = [mk(0, 0), mk(0, 0), mk(0, 0), mk(0, 0), mk(0, 0)];
+    assert.strictEqual(regionCalibrationAdvice(noDiff, 0.03, { minSamples: 5 }).reason, 'no-diff', '零差分 → 不动');
+    assert.strictEqual(regionCalibrationAdvice(up, 0.25, { minSamples: 5, step: 0.005 }).reason, 'clamped',
+      '已在上限 → 不动 (钳制)');
+  }
+
+  // ---- 6. 自校准的应用 / 回滚 / 只动一个参数 (R3) ----
+  {
+    const origArea = prefs.regionMinAreaRatio;
+    const origCal = prefs.regionCalibrate;
+    const origSamples = prefs.regionCalibrateMinSamples;
+    const origStep = prefs.regionCalibrateStep;
+    const origGrid = prefs.regionGridN;
+    const origCut = prefs.imgLumCutoff;
+    try {
+      regionCorrectionStore.clear();
+      regionCorrectionStore.data = null;
+      prefs.regionCalibrateMinSamples = 3;
+      prefs.regionCalibrateStep = 0.005;
+      for (let i = 0; i < 3; i++) {
+        regionCorrectionStore.add({ host: 'h', stem: 's', dims: 'd', n: 2, ours: '0000', corrected: '1100', diff: '1100', at: i });
+      }
+
+      // 开关关闭 → 只算不动
+      prefs.regionCalibrate = false;
+      prefs.regionMinAreaRatio = 0.03;
+      const off = regionCalibrateNow();
+      assert.strictEqual(off.apply, false, '自校准关闭时不应用');
+      assert.strictEqual(off.reason, 'switch-off', '原因 = switch-off');
+      assert.strictEqual(prefs.regionMinAreaRatio, 0.03, '关闭时参数分毫不动');
+
+      // 开关打开 → 应用; 只动面积门
+      //   样本 '0000'→'1100' 的语义: 我们没反、用户要反 = 我们**抠少了** → 面积门向下 (更激进)
+      prefs.regionCalibrate = true;
+      const on = regionCalibrateNow();
+      assert.strictEqual(on.apply, true, '打开后应用建议');
+      assert.strictEqual(on.direction, 'down', '方向 down (我们抠少了 → 更激进)');
+      assert.ok(Math.abs(prefs.regionMinAreaRatio - 0.025) < 1e-9, '面积门更新到 0.025, got ' + prefs.regionMinAreaRatio);
+      assert.strictEqual(prefs.regionGridN, origGrid, '网格 N 未被触碰 (R3: 只动分割参数里的面积门)');
+      assert.strictEqual(prefs.imgLumCutoff, origCut, '整图判定阈值未被触碰 (那是 v5-3 的回路)');
+      const st = regionCalibrationState();
+      assert.strictEqual(st.samples, 3, '诊断: 样本数');
+      assert.ok(st.last && Math.abs(st.last.from - 0.03) < 1e-9 && Math.abs(st.last.to - 0.025) < 1e-9,
+        '诊断: 最近一次校准 from→to, got ' + JSON.stringify(st.last));
+      assert.strictEqual(st.defaultValue, REGION_DEFAULTS.minAreaRatio, '诊断: 默认值来自单一真源');
+
+      // 一键回滚
+      const rb = regionCalibrateRollback();
+      assert.strictEqual(rb.to, REGION_DEFAULTS.minAreaRatio, '回滚到默认参数');
+      assert.strictEqual(prefs.regionMinAreaRatio, REGION_DEFAULTS.minAreaRatio, '参数已回默认');
+      assert.strictEqual(regionCalibrationState().last.direction, 'rollback', '诊断记录回滚动作');
+    } finally {
+      prefs.regionMinAreaRatio = origArea;
+      prefs.regionCalibrate = origCal;
+      prefs.regionCalibrateMinSamples = origSamples;
+      prefs.regionCalibrateStep = origStep;
+      regionCorrectionStore.clear();
+      regionCorrectionStore.data = null;
+    }
+  }
+
+  // ---- 7. 关闭态短路 (R5/R7): 默认关闭时零节点零动作 ----
+  {
+    const wasCorrect = prefs.regionCorrect;
+    try {
+      prefs.regionCorrect = false;
+      assert.strictEqual(RegionCorrection.enabled(), false, '默认关');
+      assert.strictEqual(RegionCorrection.active, false, '未进入模式');
+      assert.strictEqual(RegionCorrection.enter(null), false, '关闭时 enter 恒 false');
+      assert.strictEqual(RegionCorrection.exit(), false, '未进入时 exit 是 no-op');
+      assert.strictEqual(RegionCorrection.flipsFor(null, '', 4), null, '关闭/无效元素 → 无翻转集');
+      const d = RegionCorrection.diagnostics();
+      assert.strictEqual(d.active, false, '诊断: 未激活');
+      assert.strictEqual(typeof d.samples, 'number', '诊断: 样本数可读');
+      // 零施压: 诊断里不得出现任何"催用户纠正"的字段
+      assert.strictEqual(Object.keys(d).indexOf('suggest'), -1, '诊断里没有"建议纠正"类字段');
+      assert.strictEqual(Object.keys(d).indexOf('shouldCorrect'), -1, '诊断里没有施压字段');
+    } finally {
+      prefs.regionCorrect = wasCorrect;
+    }
+  }
+
+  console.log('✓ v6.3 单测 passed: 点击→格号(含越界) / 连通域整体翻转与翻回原位 / 差分统计 / 持久化(键命中·上限·清空·坏数据降级) / 自校准四护栏(累积门·方向不一致·幅度上限·钳制) / 应用与回滚且只动一个参数 / 关闭态零动作零施压');
+})();
+
 })();
 
 

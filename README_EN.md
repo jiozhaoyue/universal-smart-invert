@@ -128,6 +128,33 @@ end-to-end scenarios stay regression-free.
 
 ---
 
+## 🧪 v6.0 in progress (automatic partial inversion · correction & self-calibration)
+
+> **Status: off by default.** This is an **optional** data channel; not using it is fine
+> (you simply run the default parameters).
+
+The partial-inversion regions are produced by **automatic segmentation** (there is no manual
+region-drawing entry point). The segmentation parameters are hand-picked and had no supervision
+signal — this slice supplies it: **one click flips one region's verdict**.
+
+- **The only gesture is a click**: entering "region correction" overlays a visualization on the
+  media (red = inverted, blue = kept) and clicking a region flips it — no lasso, no brush, no
+  vertex dragging.
+- **Every correction yields a mask-difference sample** (our regions vs your corrected regions),
+  stored locally only, **zero network egress**; viewable and clearable in the panel and manually
+  exportable with a rule pack.
+- **Self-calibration is conservative and reversible**: it only acts once enough samples accumulate,
+  caps each step, does nothing when the direction is ambiguous, touches exactly one parameter
+  (the minimum connected-region area gate — **never the whole-image thresholds**), and rolls back
+  to defaults at any time.
+- **No nagging**: no prompts, no popups, no badges urging you to correct; the data is yours —
+  not committed, not logged, not reported.
+- Known limitation (stated plainly): corrections are remembered by "site + element stem + image
+  size" with **no content fingerprint** — a differently-laid-out image on the same site may miss,
+  in which case the correction applies to the current session only.
+
+---
+
 ## 🆕 What's New in v5.0 (Page-Media Governance Layer · Unified Actions)
 
 > v5.0 grows the script from an "inverter" into a **general page-media governance layer**:

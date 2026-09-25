@@ -312,6 +312,11 @@
     regionHeartbeatMs: 1000,     // 视频/GIF 掩码重算心跳 (200 ~ 5000)
     regionOverlayMax: 8,         // 全局覆盖层上限 (1 ~ 50)
     regionStaticOnly: false,     // 仅静态图 (视频/GIF 不挂覆盖层, 规避场景渐变时的掩码滞后)
+    // v6.3 纠正与自校准 —— 默认全关 (不纠正也完全可用)
+    regionCorrect: false,        // 区域纠正模式 (默认关; 需用户主动进入)
+    regionCalibrate: false,      // 用纠正数据自校准 (默认关)
+    regionCalibrateMinSamples: 5, // 累积门: 样本数达到才评估
+    regionCalibrateStep: 0.005,  // 单次调整幅度上限 (面积门步长)
   };
 
   // 运行时状态 (仅存于内存, 每个标签页独立, 绝不写入存储 —— 标签页隔离)
@@ -1102,6 +1107,10 @@
     merged.regionHeartbeatMs = Math.round(clampNumber(merged.regionHeartbeatMs, 200, 5000, 1000));
     merged.regionOverlayMax = Math.round(clampNumber(merged.regionOverlayMax, 1, 50, 8));
     merged.regionStaticOnly = merged.regionStaticOnly === true;
+    merged.regionCorrect = merged.regionCorrect === true;
+    merged.regionCalibrate = merged.regionCalibrate === true;
+    merged.regionCalibrateMinSamples = Math.round(clampNumber(merged.regionCalibrateMinSamples, 2, 100, 5));
+    merged.regionCalibrateStep = clampNumber(merged.regionCalibrateStep, 0.001, 0.05, 0.005);
     // 标签页隔离: 运行时状态绝不入库
     delete merged.invertActive;
 
@@ -10726,7 +10735,11 @@
       if (elemW <= 0 || elemH <= 0 || natW <= 0 || natH <= 0) return this.degrade(el, 'not-ready');
 
       const rect = regionContentRect(natW, natH, elemW, elemH, fit, posX, posY);
-      const built = regionRenderExpr(mask, rect, elemW, elemH, { n: mask.gw, kRects: state.regionKRects });
+      // 自动结果 (未经纠正) —— 纠正模式必须在**它**上面取连通域, 否则翻过一次后区域会与背景
+      // 合并, 再点一下就会翻转整张图 (实测踩到, 见 implement.md 偏离 2)
+      const builtAuto = regionRenderExpr(mask, rect, elemW, elemH, { n: mask.gw, kRects: state.regionKRects });
+      // v6.3: 有用户纠正就用「纠正后的网格」重算表达 (复用同一套渲染路径, 零特殊分支)
+      const built = regionCorrectionPatch(el, src, builtAuto);
 
       // —— 覆盖层节点 (复用既有 .svi-fx-overlay 的纪律: absolute / pointer-events:none / 最小 z-index) ——
       let rec = this.mounts.get(el);
@@ -10792,6 +10805,8 @@
         el: el, node: node, clip: maskEl, src: src || '',
         key: mask.key || '', epoch: this.epoch,
         lastCalcAt: Date.now(), recalc: 'mount',
+        built: built,          // 元素盒网格 + 表达 (可能已叠加纠正)
+        builtAuto: builtAuto,  // 未经纠正的自动结果 (纠正模式取连通域的基准)
         // 判定指纹: 重算调度用它判断"这一轮判定有没有变" (变了才动 DOM)
         maskData: String(mask.key || '') + '|' + regionCoverage(mask.data).toFixed(4),
       };
@@ -11137,6 +11152,468 @@
   }
 
   // ==========================================
+  // 20.6 v6.3 区域纠正与自校准数据回路 (RegionCorrection)
+  //   设计: .trellis/tasks/09-25-v6-region-correction/design.md (D1~D6)
+  //
+  //   **这不是给部分反色加人工绘制入口** (D1 已排除)。它给分割器补的是**监督信号**:
+  //   在自动结果之上做一次「点击级二值纠正」, 产出分割器唯一缺的掩码差分样本,
+  //   再用它保守地校准分割参数。不纠正也完全可用 (跑默认参数)。
+  //
+  //   唯一手势是 **click**: 点一下 = 把该点所属的**连通域**判定取反。
+  //   刻意不提供绘制 / 拖顶点 / 自由形状 —— 那是被明确排除的另一条路。
+  //   默认关闭 (regionCorrect=false): 关闭时零节点、零监听、零数据写入。
+  // ==========================================
+
+  const REGION_CORRECTIONS_KEY = 'regionCorrections'; // Store 键 (Store 自动加 svi: 前缀)
+  const REGION_SAMPLES_MAX = 200;                     // 样本上限 (FIFO)
+  const REGION_SAMPLE_MAX_BYTES = 2048;               // 单样本上限
+
+  // ---- 差分构造 (纯函数, 单测契约 / design D2) ----
+
+  // 点坐标 → 元素盒网格格号 (纯函数)。越界返回 -1 (调用方必须处理, 不允许"点到边外随便翻一块")
+  function regionCellFromPoint(x, y, n, boxW, boxH) {
+    if (!(boxW > 0) || !(boxH > 0) || !(n > 0)) return -1;
+    if (x < 0 || y < 0 || x >= boxW || y >= boxH) return -1;
+    const cx = Math.min(n - 1, Math.floor((x / boxW) * n));
+    const cy = Math.min(n - 1, Math.floor((y / boxH) * n));
+    return cy * n + cx;
+  }
+
+  // 一次点击 → 新的翻转集 + 纠正后的网格 + 差分。
+  //   语义 (design D1): 点击点所属的**连通域**整体取反。关键细节 —— 连通域在**自动结果 (ours)**
+  //   上取, 而不是在"当前纠正后的网格"上取: 否则第一次翻转会把该区域与背景合并成一个更大的
+  //   连通域, 再点一下就会翻转整张图 (实测踩到)。翻转用**翻转集 flips**表达, 于是:
+  //     corrected = ours XOR flips,  diff = flips,  再点同一区域 → flips 归零 → changed=false ✓
+  //   返回 { corrected, diff, flips, changed }: changed=false 表示这次点击等于"翻回原位" (不产样本)。
+  function regionDiffFromFlip(ours, n, cellIndex, flips) {
+    const out = { corrected: null, diff: null, flips: null, changed: false };
+    if (!ours || !n || cellIndex < 0 || cellIndex >= ours.length) return out;
+    const next = flips && flips.length === ours.length ? Uint8Array.from(flips) : new Uint8Array(ours.length);
+    // 连通域在**自动结果**上取: 该格属于哪一块, 整块一起翻
+    const comps = regionComponents(Uint8Array.from(ours), ours[cellIndex] ? 1 : 0, n, n);
+    let target = null;
+    for (let i = 0; i < comps.length; i++) {
+      if (comps[i].idx.indexOf(cellIndex) >= 0) { target = comps[i]; break; }
+    }
+    if (!target) return out;
+    for (let k = 0; k < target.idx.length; k++) {
+      const cell = target.idx[k];
+      next[cell] = next[cell] ? 0 : 1;
+    }
+    const corrected = new Uint8Array(ours.length);
+    let changed = false;
+    for (let i = 0; i < ours.length; i++) {
+      corrected[i] = ours[i] ^ next[i];
+      if (next[i]) changed = true;
+    }
+    out.corrected = corrected;
+    out.flips = next;
+    out.diff = next;   // 差分就是翻转集 (逐格一致)
+    out.changed = changed;
+    return out;
+  }
+
+  // 差分统计: toInvert = 我们没反、用户要反; toKeep = 我们反了、用户要保原色
+  function regionDiffStats(ours, corrected) {
+    const st = { toInvert: 0, toKeep: 0, unchanged: 0, total: 0 };
+    if (!ours || !corrected || ours.length !== corrected.length) return st;
+    for (let i = 0; i < ours.length; i++) {
+      st.total++;
+      if (ours[i] === corrected[i]) st.unchanged++;
+      else if (corrected[i]) st.toInvert++;
+      else st.toKeep++;
+    }
+    return st;
+  }
+
+  const regionBits = (arr) => Array.prototype.map.call(arr, (v) => (v ? '1' : '0')).join('');
+  const regionBitsToArray = (str, len) => {
+    const out = new Uint8Array(len);
+    for (let i = 0; i < len && i < String(str || '').length; i++) out[i] = String(str)[i] === '1' ? 1 : 0;
+    return out;
+  };
+
+  // 样本记录 (落 Store 的形状; 键 = 站点 + 选择器 stem, 见 design D3/R4)
+  function regionSampleFor(host, stem, dims, n, ours, corrected) {
+    return {
+      host: String(host || ''),
+      stem: String(stem || ''),
+      dims: String(dims || ''),
+      n: n,
+      ours: regionBits(ours),
+      corrected: regionBits(corrected),
+      diff: regionBits(Array.prototype.map.call(ours, (v, i) => (v !== corrected[i] ? 1 : 0))),
+      at: Date.now(),
+    };
+  }
+
+  // ---- 自校准 (纯函数 + 四护栏 / design D4) ----
+
+  // 由样本集提建议。**只动 regionMinAreaRatio**(最小连通域面积门), 其余参数本片不碰。
+  //   方向的直觉: 用户把我们抠掉的区域翻回"反色" → 我们抠多了 → 面积门该更保守 (变大);
+  //   用户把我们反色的区域翻成"保持原色" → 我们抠少了 → 面积门该更激进 (变小)。
+  //   四道护栏 (全部可单测): 累积门 / 方向一致性 ≥2/3 / 单次幅度上限 / 结果钳制。
+  function regionCalibrationAdvice(samples, current, opts) {
+    const o = opts || {};
+    const minSamples = Math.max(1, Math.round(o.minSamples != null ? o.minSamples : 5));
+    const step = Number(o.step) > 0 ? Number(o.step) : 0.005;
+    const lo = o.lo != null ? o.lo : 0.01;
+    const hi = o.hi != null ? o.hi : 0.25;
+    const out = { apply: false, direction: 'none', from: current, to: current, samples: 0, reason: '' };
+    const list = Array.isArray(samples) ? samples : [];
+    out.samples = list.length;
+    if (list.length < minSamples) { out.reason = 'insufficient-samples'; return out; }
+    let up = 0;
+    let down = 0;
+    for (let i = 0; i < list.length; i++) {
+      const s = list[i];
+      if (!s || typeof s.ours !== 'string' || typeof s.corrected !== 'string') continue;
+      const len = Math.min(s.ours.length, s.corrected.length);
+      for (let k = 0; k < len; k++) {
+        if (s.ours[k] === s.corrected[k]) continue;
+        if (s.corrected[k] === '1') down++;  // 用户要反 → 我们抠少了 → 面积门变小
+        else up++;                            // 用户要保原色 → 我们抠多了 → 面积门变大
+      }
+    }
+    const total = up + down;
+    if (!total) { out.reason = 'no-diff'; return out; }
+    const majority = Math.max(up, down) / total;
+    if (majority < 2 / 3) { out.reason = 'ambiguous'; return out; }
+    const dir = up > down ? 'up' : 'down';
+    const delta = Math.min(step, Math.abs(step)) * (dir === 'up' ? 1 : -1);
+    let next = Number(current) + delta;
+    if (next < lo) next = lo;
+    if (next > hi) next = hi;
+    if (Math.abs(next - Number(current)) < 1e-9) { out.reason = 'clamped'; return out; }
+    out.apply = true;
+    out.direction = dir;
+    out.from = Number(current);
+    out.to = next;
+    out.reason = 'applied';
+    return out;
+  }
+
+  // ---- 自校准的应用与回滚 (R3 / design D4) ----
+
+  // 当前自校准状态 (v6-4 的面板数据源: 累积样本数 / 最近一次校准 / 回滚入口)
+  function regionCalibrationState() {
+    const d = regionCorrectionStore.load();
+    return {
+      enabled: state.regionCalibrate === true,
+      samples: d.samples.length,
+      minSamples: Math.max(2, Math.round(Number(state.regionCalibrateMinSamples) || 5)),
+      step: Number(state.regionCalibrateStep) || 0.005,
+      current: Number(state.regionMinAreaRatio),
+      defaultValue: REGION_DEFAULTS.minAreaRatio,
+      last: (d.calibration && d.calibration.last) ? Object.assign({}, d.calibration.last) : null,
+    };
+  }
+
+  // 评估并应用。**只在开关开启时真正写参数**; 返回建议对象 (含 reason) 便于观测与单测。
+  //   写点唯一: state.regionMinAreaRatio —— 其余分割参数与整图判定阈值一律不碰 (R3 的硬约束)。
+  function regionCalibrateNow(opts) {
+    const d = regionCorrectionStore.load();
+    const advice = regionCalibrationAdvice(d.samples, state.regionMinAreaRatio, Object.assign({
+      minSamples: state.regionCalibrateMinSamples,
+      step: state.regionCalibrateStep,
+    }, opts || {}));
+    if (!advice.apply) return advice;
+    if (state.regionCalibrate !== true) {
+      advice.apply = false;
+      advice.reason = 'switch-off';
+      return advice;
+    }
+    const record = {
+      at: Date.now(), from: advice.from, to: advice.to,
+      samples: advice.samples, direction: advice.direction,
+    };
+    state.regionMinAreaRatio = advice.to;
+    d.calibration.last = record;
+    regionCorrectionStore.save();
+    try { StatsManager.count('regionCalibrations'); } catch (e) { /* ignore */ }
+    try { savePrefs(); } catch (e) { /* ignore */ }
+    return advice;
+  }
+
+  // 一键回滚到默认参数 (单一真源: REGION_DEFAULTS.minAreaRatio)
+  function regionCalibrateRollback() {
+    const d = regionCorrectionStore.load();
+    const from = Number(state.regionMinAreaRatio);
+    const to = REGION_DEFAULTS.minAreaRatio;
+    state.regionMinAreaRatio = to;
+    d.calibration.last = { at: Date.now(), from: from, to: to, samples: 0, direction: 'rollback' };
+    regionCorrectionStore.save();
+    try { StatsManager.count('regionCalibrateRollbacks'); } catch (e) { /* ignore */ }
+    try { savePrefs(); } catch (e) { /* ignore */ }
+    return { from: from, to: to };
+  }
+
+  // ---- 持久化 (复用 Store; 绝不新建第二套机制 / design D3) ----
+
+  const regionCorrectionStore = {
+    data: null,
+    load() {
+      if (this.data) return this.data;
+      let raw = null;
+      try { raw = Store.get(REGION_CORRECTIONS_KEY, null); } catch (e) { raw = null; }
+      const out = { v: 1, samples: [], calibration: {} };
+      try {
+        if (raw && typeof raw === 'object') {
+          if (Array.isArray(raw.samples)) {
+            out.samples = raw.samples.filter((s) => s && typeof s === 'object'
+              && typeof s.ours === 'string' && typeof s.corrected === 'string'
+              && JSON.stringify(s).length <= REGION_SAMPLE_MAX_BYTES).slice(-REGION_SAMPLES_MAX);
+          }
+          if (raw.calibration && typeof raw.calibration === 'object') out.calibration = raw.calibration;
+        }
+      } catch (e) { /* 坏数据 → 用空集, 绝不崩 */ }
+      this.data = out;
+      return out;
+    },
+    save() {
+      if (!this.data) return false;
+      try { Store.set(REGION_CORRECTIONS_KEY, this.data); return true; } catch (e) { return false; }
+    },
+    add(sample) {
+      const d = this.load();
+      d.samples.push(sample);
+      while (d.samples.length > REGION_SAMPLES_MAX) d.samples.shift();
+      this.save();
+      try { StatsManager.count('regionCorrections'); } catch (e) { /* ignore */ }
+      return d.samples.length;
+    },
+    clear() {
+      const d = this.load();
+      d.samples = [];
+      d.calibration = {};
+      this.save();
+      return true;
+    },
+    list() { return this.load().samples.slice(); },
+    // 按键删除 (翻回原位 = 撤销该纠正; 留着这条样本会让纠正被"粘"回来, 且它对自校准是噪声)
+    remove(host, stem, dims) {
+      const d = this.load();
+      const before = d.samples.length;
+      d.samples = d.samples.filter((s) => !(s.host === host && s.stem === stem && s.dims === dims));
+      if (d.samples.length !== before) { this.save(); return before - d.samples.length; }
+      return 0;
+    },
+    // 命中查询: 站点 + 选择器 stem + 尺寸指纹 (R4 的泛化键; 不含内容指纹, 已知局限)
+    find(host, stem, dims) {
+      const list = this.load().samples;
+      for (let i = list.length - 1; i >= 0; i--) {
+        const s = list[i];
+        if (s.host === host && s.stem === stem && s.dims === dims) return s;
+      }
+      return null;
+    },
+  };
+
+  // ---- 纠正模式 (R1 / design D1·D5): 可视化 + 一次点击翻转 ----
+
+  const RegionCorrection = {
+    active: false,
+    activeEl: null,
+    layer: null,            // 可视化层 (只在模式内存在; pointer-events:auto —— 唯一可点的层)
+    byEl: (typeof WeakMap === 'function') ? new WeakMap() : null,
+    lastFlip: null,
+
+    enabled() { return state.regionCorrect === true; },
+
+    // 该元素当前应使用的**翻转集** (null = 没有纠正, 沿用自动结果)。
+    //   为什么存翻转集而不是"纠正后的整份网格": 纠正在语义上是"把这块翻过来"这个**意图**,
+    //   它与自动结果的具体形状无关 —— 参数变了、网格重算了, 翻转意图照样能叠加 (见 design D1)。
+    flipsFor(el, src, n) {
+      try {
+        const mem = this.byEl ? this.byEl.get(el) : null;
+        if (mem && mem.n === n && mem.flips && mem.flips.length === n * n) return mem.flips;
+        const host = profileKey();
+        const stem = selectorStem(el);
+        const dims = regionDimsOf(el);
+        const s = regionCorrectionStore.find(host, stem, dims);
+        if (s && s.n === n && String(s.ours || '').length === n * n && String(s.corrected || '').length === n * n) {
+          // 持久化的样本按「ours XOR corrected」还原成翻转集 —— 于是它能叠加在**当前**自动结果上
+          const a = regionBitsToArray(s.ours, n * n);
+          const b = regionBitsToArray(s.corrected, n * n);
+          const flips = new Uint8Array(n * n);
+          for (let i = 0; i < flips.length; i++) flips[i] = a[i] ^ b[i];
+          if (this.byEl) this.byEl.set(el, { n: n, flips: flips, host: host, stem: stem, dims: dims });
+          return flips;
+        }
+      } catch (e) { /* ignore */ }
+      return null;
+    },
+
+    // 进入纠正模式: 给该元素叠一层可视化 (区域着色 + 轮廓 + 图例)
+    enter(el) {
+      if (!this.enabled() || !el) return false;
+      const doc = (typeof document !== 'undefined') ? document : null;
+      if (!doc || typeof doc.createElement !== 'function') return false;
+      const rec = RegionRenderEngine.mounts.get(el);
+      if (!rec || !rec.built) return false; // 没挂上区域层就没东西可纠正
+      this.exit(); // 同时只纠正一个元素 (可视化层会挡点击, 多开没有意义)
+      const anc = RegionRenderEngine.positionedAncestor(el);
+      if (!anc) return false;
+
+      const n = rec.built.n;
+      // 着色基准也用自动结果: 用户评判的对象是"自动判定", 不是"我们叠加后的结果"
+      const cells = (rec.builtAuto && rec.builtAuto.cells) ? rec.builtAuto.cells : rec.built.cells;
+      const layer = doc.createElement('div');
+      layer.className = 'svi-region-correct';
+      layer.style.position = 'absolute';
+      layer.style.left = el.offsetLeft + 'px';
+      layer.style.top = el.offsetTop + 'px';
+      layer.style.width = (el.clientWidth || el.offsetWidth) + 'px';
+      layer.style.height = (el.clientHeight || el.offsetHeight) + 'px';
+      layer.style.zIndex = '2';                 // 只在覆盖层之上 (仍是最小可用值)
+      layer.setAttribute('data-svi-region-correct', 'true');
+      layer.setAttribute('tabindex', '-1'); // 便于 Esc 退出 (不是交互控件, 不进 Tab 序)
+
+      // 逐格着色: 红 = 反色 / 蓝 = 保持原色; 走 inline SVG (≤1024 个 rect, 单元素可接受)
+      const ns = 'http://www.w3.org/2000/svg';
+      const w = el.clientWidth || el.offsetWidth || 1;
+      const h = el.clientHeight || el.offsetHeight || 1;
+      const svg = doc.createElementNS(ns, 'svg');
+      svg.setAttribute('viewBox', '0 0 ' + n + ' ' + n);
+      svg.setAttribute('preserveAspectRatio', 'none');
+      svg.style.width = '100%';
+      svg.style.height = '100%';
+      for (let y = 0; y < n; y++) {
+        for (let x = 0; x < n; x++) {
+          const r = doc.createElementNS(ns, 'rect');
+          r.setAttribute('x', String(x));
+          r.setAttribute('y', String(y));
+          r.setAttribute('width', '1');
+          r.setAttribute('height', '1');
+          r.setAttribute('fill', cells[y * n + x] ? '#ef4444' : '#3b82f6');
+          r.setAttribute('fill-opacity', '0.28');
+          svg.appendChild(r);
+        }
+      }
+      layer.appendChild(svg);
+
+      const legend = doc.createElement('div');
+      legend.className = 'svi-region-correct-legend';
+      legend.textContent = '区域纠正: 红=反色 · 蓝=保持原色 · 点一下切换该区域 (Esc 退出)';
+      legend.style.cssText = 'position:absolute;left:0;bottom:0;background:rgba(15,23,42,.86);color:#e2e8f0;'
+        + 'font-size:11px;padding:3px 8px;border-radius:0 6px 0 0;pointer-events:none;';
+      layer.appendChild(legend);
+
+      // **唯一手势是 click** (验收项: 不提供任何绘制型交互 —— 不注册 mousedown/mousemove 采样)
+      layer.addEventListener('click', (e) => { this.onClick(el, e); }, true);
+      layer.addEventListener('keydown', (e) => {
+        try { if (e && e.key === 'Escape') this.exit(); } catch (err) { /* ignore */ }
+      });
+      try { anc.appendChild(layer); } catch (e) { return false; }
+
+      this.active = true;
+      this.activeEl = el;
+      this.layer = layer;
+      this.boxW = w;
+      this.boxH = h;
+      try { StatsManager.count('regionCorrectionEnters'); } catch (e) { /* ignore */ }
+      return true;
+    },
+
+    onClick(el, ev) {
+      if (!this.active || !el || !this.layer) return false;
+      const rec = RegionRenderEngine.mounts.get(el);
+      if (!rec || !rec.built) return false;
+      let x = 0;
+      let y = 0;
+      try {
+        const r = this.layer.getBoundingClientRect();
+        x = ev.clientX - r.left;
+        y = ev.clientY - r.top;
+      } catch (e) { return false; }
+      const n = rec.built.n;
+      const cell = regionCellFromPoint(x, y, n, this.boxW, this.boxH);
+      if (cell < 0) return false;
+      // 连通域在**自动结果**上取 (rec.builtAuto), 不是在当前纠正后的网格上 —— 见 mount 里的说明
+      const ours = (rec.builtAuto && rec.builtAuto.cells) ? rec.builtAuto.cells : rec.built.cells;
+      const prevFlips = (this.byEl && this.byEl.get(el)) ? this.byEl.get(el).flips : null;
+      const flip = regionDiffFromFlip(ours, n, cell, prevFlips);
+      if (!flip.changed && prevFlips && !flip.flips.some((v) => v)) {
+        // 翻回原位 (翻转集归零) → 撤销这次纠正: 内存台账清掉 + 该键的持久样本删掉
+        //   (不删的话, 下一次挂载会从样本里把纠正"粘"回来 —— 实测踩到)
+        if (this.byEl) this.byEl.delete(el);
+        try { regionCorrectionStore.remove(profileKey(), selectorStem(el), regionDimsOf(el)); } catch (e) { /* ignore */ }
+        RegionRenderEngine.recalc(el, 'correction');
+        return false;
+      }
+      if (this.byEl) this.byEl.set(el, { n: n, flips: flip.flips, host: profileKey(), stem: selectorStem(el), dims: regionDimsOf(el) });
+      this.lastFlip = {
+        n: n, cell: cell,
+        stats: regionDiffStats(ours, flip.corrected),
+      };
+      // 落一份差分样本 (自校准的输入; 零遥测: 只进本地 Store)
+      regionCorrectionStore.add(regionSampleFor(profileKey(), selectorStem(el), regionDimsOf(el), n, ours, flip.corrected));
+      try { StatsManager.count('regionCorrectionFlips'); } catch (e) { /* ignore */ }
+      // 累积到阈值才评估; 开关关闭时 regionCalibrateNow 只算不动 (它自己会拒绝写入)
+      try { this.lastCalibration = regionCalibrateNow(); } catch (e) { /* ignore */ }
+      // 重挂覆盖层 (用纠正后的网格) —— 复用 v6-2 的渲染路径, 零特殊分支。
+      //   recalc 是**异步的** (要重采样), 所以可视化层的重画必须等它落地:
+      //   否则着色会慢一版 (实测踩到: 翻完了但格子上还是旧颜色, 见 implement.md 偏离 2)。
+      Promise.resolve(RegionRenderEngine.recalc(el, 'correction')).then(() => {
+        try { if (this.active && this.activeEl === el) this.enter(el); } catch (e) { /* ignore */ }
+      });
+      return true;
+    },
+
+    exit() {
+      if (!this.active) return false;
+      try { if (this.layer && this.layer.parentNode) this.layer.parentNode.removeChild(this.layer); } catch (e) { /* ignore */ }
+      this.layer = null;
+      this.active = false;
+      this.activeEl = null;
+      return true;
+    },
+
+    listSamples() { return regionCorrectionStore.list(); },
+    clearSamples() { return regionCorrectionStore.clear(); },
+
+    diagnostics() {
+      const d = regionCorrectionStore.load();
+      return {
+        active: this.active,
+        samples: d.samples.length,
+        calibration: Object.assign({}, d.calibration),
+        lastFlip: this.lastFlip,
+      };
+    },
+  };
+
+  // 元素尺寸指纹 (泛化键的一半; 不用内容指纹 —— D4 已排除, 已知局限如实标注)
+  function regionDimsOf(el) {
+    try {
+      const w = (el && (el.naturalWidth || el.videoWidth || el.width)) || 0;
+      const h = (el && (el.naturalHeight || el.videoHeight || el.height)) || 0;
+      return Math.round(w) + 'x' + Math.round(h);
+    } catch (e) { return '0x0'; }
+  }
+
+  // 渲染层取用纠正结果 (有纠正 → 用纠正后的网格重算表达; 否则原样返回)
+  function regionCorrectionPatch(el, src, built) {
+    try {
+      if (!RegionCorrection.enabled() && !regionCorrectionStore.load().samples.length) return built;
+      const flips = RegionCorrection.flipsFor(el, src, built.n);
+      if (!flips) return built;
+      const corrected = new Uint8Array(built.cells.length);
+      let any = false;
+      for (let i = 0; i < corrected.length; i++) {
+        corrected[i] = built.cells[i] ^ flips[i];
+        if (flips[i]) any = true;
+      }
+      if (!any) return built;
+      return {
+        n: built.n,
+        cells: corrected,
+        expr: deriveRegionExpr(corrected, built.n, built.n, REGION_DEFAULTS),
+      };
+    } catch (e) { return built; }
+  }
+
+  // ==========================================
   // 21. 本地数据统计管理器 (StatsManager) —— 仅本地存储, 绝不自动上传
   // ==========================================
   const StatsManager = {
@@ -11207,6 +11684,12 @@
         regionRenderDegradeOverlayBudget: 0,
         regionRenderDegradeNoMask: 0,
         regionRenderDegradeNotReady: 0,
+        // v6.3 纠正与自校准
+        regionCorrectionEnters: 0,
+        regionCorrectionFlips: 0,
+        regionCorrections: 0,
+        regionCalibrations: 0,
+        regionCalibrateRollbacks: 0,
       };
     },
 
@@ -15064,6 +15547,17 @@
     regionRenderUnmount,
     regionRenderOnSceneChange,
     regionCacheDelete,
+    // v6.3 纠正与自校准 (单测契约; v6-4 的面板数据源)
+    RegionCorrection,
+    regionCorrectionStore,
+    regionCellFromPoint,
+    regionDiffFromFlip,
+    regionDiffStats,
+    regionCalibrationAdvice,
+    regionCalibrationState,
+    regionCalibrateNow,
+    regionCalibrateRollback,
+    regionCorrectionPatch,
     exportStats: () => StatsManager.exportJson(),
     stats: StatsManager,
     engines: {},

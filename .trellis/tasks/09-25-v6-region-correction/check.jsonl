@@ -1,0 +1,2 @@
+{"file": ".trellis/tasks/09-25-v6-region-correction/prd.md", "reason": "逐条核对 R1-R7 与汇总验收标准（重点: 零绘制手势/零施压/零遥测）"}
+{"file": ".trellis/tasks/09-25-v6-region-correction/design.md", "reason": "核对 D1-D6 落地（含自校准四护栏与一键回滚）"}
