@@ -557,7 +557,28 @@ const VIEWER_HTML = `<!DOCTYPE html>
 
 // 1. Create HTTP test servers (main + cross-origin CORS SVG host)
 // Scenario 12 pages are registered in main() after the extension smoke builds the real bundle.
+// v5.0: 元素动作 bench 页 (hide / mask / dim / peek 的落点与开关即回滚)
+const ACTION_HTML = `<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Action bench</title>
+<style>
+  body { margin:0; background:#fff; font:14px sans-serif; }
+  #act-wrap { display:flex; padding:8px; }
+  .act-box { width:200px; height:120px; margin:8px; background:#f5f5f5; border:1px solid #ddd; }
+  #act-target { width:220px; height:140px; margin:8px; background:#ffffff; border:1px solid #eee; }
+</style></head>
+<body>
+  <div id="act-wrap">
+    <div class="act-box" id="act-box-a">框 A</div>
+    <div id="act-target">目标元素（遮罩 / 屏蔽 / 压暗用）</div>
+    <div class="act-box" id="act-box-b">框 B</div>
+  </div>
+  <script>
+    ${executableScript}
+  </script>
+</body></html>`;
+
 const PAGES = {
+  '/action-page': ACTION_HTML,
   '/login-page': LOGIN_HTML,
   '/recolor-page': RECOLOR_HTML,
   '/fx-luma-page': FX_LUMA_HTML,
@@ -2532,6 +2553,141 @@ async function main() {
     assert.strictEqual(guardState.style, false, 'flash guard style node must be removed');
     assert.strictEqual(guardState.bgrOn, true, 'bgReplace must be active on the login page');
     assert.notStrictEqual(guardState.bodyBg, 'rgb(255, 255, 255)', 'page stays dark after guard hand-off');
+
+    // ============================================================
+    // Scenario 25 (v5.0): 元素动作 (hide / mask / dim / peek)
+    //   - 默认全关时零新增属性写入 (父任务 AC-3)
+    //   - 各动作执行器落点 + computed 样式真实生效
+    //   - 开关即回滚: 关闭动作后无残留标记
+    // ============================================================
+    console.log('[Test] Scenario 25: v5.0 element actions (hide / mask / dim / peek) ...');
+    await sendCdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/action-page` });
+    await new Promise((r) => setTimeout(r, 2500));
+
+    const evalInPage = async (expr) => (await sendCdp('Runtime.evaluate', {
+      expression: expr, returnByValue: true
+    })).result.value;
+    // 需要等 CSS 过渡结束的断言走这个 (遮罩 ::after 有 140ms opacity 过渡,
+    // 否则 getComputedStyle 读到的是过渡中间值而非目标值)
+    const evalInPageAsync = async (expr) => (await sendCdp('Runtime.evaluate', {
+      expression: expr, returnByValue: true, awaitPromise: true
+    })).result.value;
+
+    // 25a. 默认全关 → 页面不得出现任何新动作痕迹
+    const actDefault = await evalInPage(`(() => ({
+      hidden: document.querySelectorAll('[data-svi-hidden]').length,
+      masked: document.querySelectorAll('[data-svi-masked]').length,
+      dimNode: !!document.querySelector('.svi-page-dim'),
+      peekOn: document.documentElement.classList.contains('svi-peek-on'),
+      hasSection: !!document.getElementById('svi-sec-actions'),
+      hoverRestore: window.__svi.prefs.hoverRestore,
+      peekEnabled: window.__svi.actionEnabled('peek')
+    }))()`);
+    assert.strictEqual(actDefault.hidden, 0, '默认关闭时不得写入 data-svi-hidden (AC-3)');
+    assert.strictEqual(actDefault.masked, 0, '默认关闭时不得写入 data-svi-masked (AC-3)');
+    assert.strictEqual(actDefault.dimNode, false, '默认关闭时不得创建 dim 层 (AC-3)');
+    assert.strictEqual(actDefault.peekOn, true, 'peek 门默认随 hoverRestore 开启; probe=' + JSON.stringify(actDefault));
+
+    // 25b. hide: 属性门 + computed display + revert
+    const hideRes = await evalInPage(`(() => {
+      const svi = window.__svi;
+      const el = document.getElementById('act-box-a');
+      svi.prefs.actions.hide.enabled = true;
+      svi.ACTIONS.hide.apply(el, { scope: 'session' }, 'manual');
+      const onAttr = el.getAttribute('data-svi-hidden');
+      const onDisplay = getComputedStyle(el).display;
+      svi.prefs.actions.hide.enabled = false;
+      svi.ACTIONS.hide.revert(el);
+      return { onAttr, onDisplay, offAttr: el.getAttribute('data-svi-hidden'), offDisplay: getComputedStyle(el).display };
+    })()`);
+    assert.strictEqual(hideRes.onAttr, 'session', 'hide 写入 scope 值');
+    assert.strictEqual(hideRes.onDisplay, 'none', 'hide 生效时必须 computed display:none');
+    assert.strictEqual(hideRes.offAttr, null, 'hide revert 摘除属性门');
+    assert.notStrictEqual(hideRes.offDisplay, 'none', 'revert 后元素重新可见');
+
+    // 25c. mask: 三档预设的 ::after 真实落地 (值取自 MASK_PRESETS, 唯一定义处)
+    const maskRes = await evalInPageAsync(`(async () => {
+      const svi = window.__svi;
+      const el = document.getElementById('act-target');
+      svi.prefs.actions.mask.enabled = true;
+      const settle = () => new Promise((r) => setTimeout(r, 400));
+      const out = {};
+      for (const style of ['solid', 'dim', 'frost']) {
+        svi.ACTIONS.mask.apply(el, { style: style }, 'manual');
+        await settle(); // ::after 有 140ms opacity 过渡, 等它结束再读计算值
+        const cs = getComputedStyle(el, '::after');
+        out[style] = {
+          attr: el.getAttribute('data-svi-masked'),
+          opacity: cs.opacity,
+          blur: cs.backdropFilter || cs.webkitBackdropFilter || '',
+          content: cs.content
+        };
+      }
+      svi.ACTIONS.mask.revert(el);
+      out.removed = el.getAttribute('data-svi-masked');
+      svi.prefs.actions.mask.enabled = false;
+      return out;
+    })()`);
+    assert.strictEqual(maskRes.solid.attr, 'solid', 'mask 写入预设 id');
+    assert.strictEqual(parseFloat(maskRes.solid.opacity), 1, 'solid = 全遮挡 (opacity 1)');
+    assert.strictEqual(parseFloat(maskRes.dim.opacity), 0.75, 'dim 预设不透明度取自 MASK_PRESETS');
+    assert.strictEqual(parseFloat(maskRes.frost.opacity), 0.35, 'frost 预设不透明度取自 MASK_PRESETS');
+    assert.ok(/blur/.test(maskRes.frost.blur), 'frost 必须应用 backdrop-filter 模糊, got ' + maskRes.frost.blur);
+    assert.notStrictEqual(maskRes.solid.content, 'none', '遮罩伪元素必须生成内容');
+    assert.strictEqual(maskRes.removed, null, 'mask revert 摘除属性门');
+
+    // 25d. dim: 全页层 + 不拦点击 + revert
+    const dimRes = await evalInPage(`(() => {
+      const svi = window.__svi;
+      svi.prefs.actions.dim.enabled = true;
+      svi.ACTIONS.dim.apply();
+      const n = document.querySelector('.svi-page-dim');
+      const cs = n ? getComputedStyle(n) : null;
+      const out = {
+        exists: !!n,
+        pe: cs ? cs.pointerEvents : '',
+        opacity: cs ? cs.opacity : '',
+        position: cs ? cs.position : '',
+        inset: n ? n.getBoundingClientRect().width : 0
+      };
+      svi.ACTIONS.dim.revert();
+      out.afterRevert = !!document.querySelector('.svi-page-dim');
+      svi.prefs.actions.dim.enabled = false;
+      return out;
+    })()`);
+    assert.strictEqual(dimRes.exists, true, 'dim 层已创建');
+    assert.strictEqual(dimRes.pe, 'none', 'dim 层必须不拦点击 (pointer-events:none)');
+    assert.strictEqual(dimRes.position, 'fixed', 'dim 层为 fixed 全页层');
+    assert.strictEqual(parseFloat(dimRes.opacity), 0.35, 'dim 不透明度取自 state.pageDimOpacity');
+    assert.ok(dimRes.inset > 100, 'dim 层覆盖整个视口宽度, got ' + dimRes.inset);
+    assert.strictEqual(dimRes.afterRevert, false, 'dim revert 移除层');
+
+    // 25e. peek 门随 hoverRestore 单一真源切换
+    const peekRes = await evalInPage(`(() => {
+      const svi = window.__svi;
+      svi.prefs.hoverRestore = false;
+      svi.ACTIONS.peek.revert();
+      const off = document.documentElement.classList.contains('svi-peek-on');
+      svi.prefs.hoverRestore = true;
+      svi.ACTIONS.peek.apply();
+      const back = document.documentElement.classList.contains('svi-peek-on');
+      return { off, back };
+    })()`);
+    assert.strictEqual(peekRes.off, false, 'hoverRestore=false 时 peek 门关闭');
+    assert.strictEqual(peekRes.back, true, 'hoverRestore=true 时 peek 门恢复');
+
+    // 25f. 开关即回滚: 关掉动作后 applyResolvedAction 必须清残留
+    const rollbackRes = await evalInPage(`(() => {
+      const svi = window.__svi;
+      const el = document.getElementById('act-box-b');
+      svi.prefs.actions.hide.enabled = true;
+      el.setAttribute('data-svi-hidden', 'session');
+      svi.prefs.actions.hide.enabled = false;
+      const ret = svi.applyResolvedAction(el, { actionId: 'hide', verdict: 'invert', reason: 'learned' });
+      return { ret, attr: el.getAttribute('data-svi-hidden') };
+    })()`);
+    assert.strictEqual(rollbackRes.ret, false, '动作关闭时 applyResolvedAction 返回 false');
+    assert.strictEqual(rollbackRes.attr, null, '动作关闭时必须清掉残留标记 (开关即回滚)');
 
     console.log('\n🎉 ALL BROWSER AUTOMATION TESTS PASSED 100% SUCCESFULLY!\n');
 

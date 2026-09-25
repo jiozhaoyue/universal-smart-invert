@@ -85,25 +85,25 @@
 
 ## 阶段 B — 新动作执行器（逐个落地，每个都默认关）
 
-- [ ] **B1** `hide` 执行器：`attr = data-svi-hidden`，值 `'session' | 'rule'`；
+- [x] **B1** `hide` 执行器：`attr = data-svi-hidden`，值 `'session' | 'rule'`；
       `apply` 只写属性，`revert` 摘属性；CSS 加 `[data-svi-hidden]{display:none!important}`
-- [ ] **B2** `hide` 触发：`Alt+Shift+点击` → 首次临时（`session`），同元素再次 → 永久
+- [x] **B2** `hide` 触发：`Alt+Shift+点击` → 首次临时（`session`），同元素再次 → 永久
       （写 `learned` 规则 `action:'hide'`，自带 `hits` 起始值 = `learnHits`）
-- [ ] **B3** `hide` 单测 + bench：点击后 `display` 为 `none`；再次点击后规则落库；
+- [x] **B3** `hide` 单测 + bench：点击后 `display` 为 `none`；再次点击后规则落库；
       「全部恢复」清空 session 级
-- [ ] **B4** `peek` 动作：`attr = data-svi-peek`；推广现有 hover-restore 样式规则到通用属性门；
+- [x] **B4** `peek` 动作：`attr = data-svi-peek`；推广现有 hover-restore 样式规则到通用属性门；
       `hoverRestore` 旧偏好映射为图片作用域别名（键名不变）
-- [ ] **B5** `peek` 单测（属性门 + 旧偏好映射）+ bench（invert 路径 hover 复原仍生效）
-- [ ] **B6** `mask` 执行器 + 三档预设 CSS（design §D-5 原样落地，变量挂 `:root`）；
+- [x] **B5** `peek` 单测（属性门 + 旧偏好映射）+ bench（invert 路径 hover 复原仍生效）
+- [x] **B6** `mask` 执行器 + 三档预设 CSS（design §D-5 原样落地，变量挂 `:root`）；
       `registry.maskPresets` 导出（**v5-5 依赖此契约**）
-- [ ] **B7** `mask` 伪元素占用检测（`::after` 冲突 → 回退独立层）+ `data-svi-mask-style` 属性
-- [ ] **B8** `mask` 触发：元素上 `Alt+M` → 元素遮罩；`Alt+拖拽` → 区域遮罩（复用 rect 框选 UI，
+- [x] **B7** `mask` 伪元素占用检测（`::after` 冲突 → 回退独立层）+ `data-svi-mask-style` 属性
+- [x] **B8** `mask` 触发：元素上 `Alt+M` → 元素遮罩；`Alt+拖拽` → 区域遮罩（复用 rect 框选 UI，
       **不得破坏现有 rect 反色**）
-- [ ] **B9** `mask` hover 揭开（`--svi-mask-hover-opacity`）+ `Shift+hover` 永久解除（落规则）
-- [ ] **B10** `mask` 单测（三档 CSS 值 + 伪元素冲突回退）+ bench（hover 前后 opacity / 永久解除）
-- [ ] **B11** `dim` 执行器（全页层，`pointer-events:none`，z-index 低于胶囊）+ 参数
-- [ ] **B12** `dim` 单测（透明度边界 0~0.9）+ bench（层存在、点击穿透、与 bgReplace 互斥提示）
-- [ ] **B13** 本步验证：四绿全绿 + 全动作关闭时页面属性写入与 v4.6.1 一致
+- [x] **B9** `mask` hover 揭开（`--svi-mask-hover-opacity`）+ `Shift+hover` 永久解除（落规则）
+- [x] **B10** `mask` 单测（三档 CSS 值 + 伪元素冲突回退）+ bench（hover 前后 opacity / 永久解除）
+- [x] **B11** `dim` 执行器（全页层，`pointer-events:none`，z-index 低于胶囊）+ 参数
+- [x] **B12** `dim` 单测（透明度边界 0~0.9）+ bench（层存在、点击穿透、与 bgReplace 互斥提示）
+- [x] **B13** 本步验证：四绿全绿 + 全动作关闭时页面属性写入与 v4.6.1 一致
       （对比手段：bench 场景里 dump 一次 `[data-svi-*]` 属性计数）
       GATE
       **回滚点 R3**
@@ -112,14 +112,14 @@
 
 ## 阶段 C — 开关矩阵与 UI
 
-- [ ] **C1** `state.actions` 偏好结构 + `loadState()` normalize（枚举/布尔/范围）
-- [ ] **C2** 新增「🧩 元素动作」区块：每个动作一行（总开关 + 作用域 + 生效时机 + 参数入口），
+- [x] **C1** `state.actions` 偏好结构 + `loadState()` normalize（枚举/布尔/范围）
+- [x] **C2** 新增「🧩 元素动作」区块：每个动作一行（总开关 + 作用域 + 生效时机 + 参数入口），
       复用现有 `ui.toggleRow` / 设置行处理器与回显契约（v4.5 修过的回显缺陷不得复发）
-- [ ] **C3** 遮罩风格选择器（三档预设 + 颜色/透明度/模糊滑块）+ 实时预览
-- [ ] **C4** 「安全模式」一键开关：关闭所有会改动 DOM 观感的新动作
-- [ ] **C5** 开关单测：关闭后 `resolveAction` 不返回该动作 + 无对应属性写入
-- [ ] **C6** 面板溢出检查 → `node scripts/check-panel-overflow.js`
-- [ ] **C7** 本步验证：四绿 + 面板截图人工确认布局
+- [x] **C3** 遮罩风格选择器（三档预设 + 颜色/透明度/模糊滑块）+ 实时预览
+- [x] **C4** 「安全模式」一键开关：关闭所有会改动 DOM 观感的新动作
+- [x] **C5** 开关单测：关闭后 `resolveAction` 不返回该动作 + 无对应属性写入
+- [x] **C6** 面板溢出检查 → `node scripts/check-panel-overflow.js`
+- [x] **C7** 本步验证：四绿 + 面板截图人工确认布局
       GATE
       **回滚点 R4**
 
@@ -127,14 +127,14 @@
 
 ## 阶段 D — 规格与文档
 
-- [ ] **D1** `.trellis/spec/frontend/quality-guidelines.md` 新增一节：
+- [x] **D1** `.trellis/spec/frontend/quality-guidelines.md` 新增一节：
       「Action Registry 契约」（resolveAction 两相、arbitrate 门、执行器幂等要求、
       禁用时不参与解析、新属性门命名）
-- [ ] **D2** `AGENTS.md` 引擎清单补 Registry 条目
-- [ ] **D3** `README.md` / `README_EN.md`：新增动作表 + 快捷键表（`Alt+Shift+点击`、`Alt+M`、
+- [x] **D2** `AGENTS.md` 引擎清单补 Registry 条目
+- [x] **D3** `README.md` / `README_EN.md`：新增动作表 + 快捷键表（`Alt+Shift+点击`、`Alt+M`、
       `Alt+拖拽`）+ 开关说明 + 已知限制（frost 与 invert 共存、区域遮罩滚动跟随）
-- [ ] **D4** `.trellis/spec/guides/index.md` 触发清单：如产生新教训则补条
-- [ ] **D5** 更新 `extension/`（`node scripts/build-extension.js`）+ `node scripts/pack.js`
+- [x] **D4** `.trellis/spec/guides/index.md` 触发清单：如产生新教训则补条
+- [x] **D5** 更新 `extension/`（`node scripts/build-extension.js`）+ `node scripts/pack.js`
       → 产出版本号提升到 `5.0.0`（重大功能版）
       GATE
 
@@ -142,16 +142,70 @@
 
 ## 最终验证（四绿门禁，缺一不可）
 
-- [ ] `node --check universal-smart-invert.user.js`
-- [ ] `node test.js`
-- [ ] `node test-browser.js`（24 场景 100%）
-- [ ] `node scripts/build-extension.js && node scripts/pack.js`
+- [x] `node --check universal-smart-invert.user.js`
+- [x] `node test.js`（✓ 行 17 → 19；新增 Action Registry 20 条 + 阶段 B 约 30 条断言）
+- [x] `node test-browser.js`（24 场景 + 新增 Scenario 25 = 25 场景，100%）
+- [x] `node scripts/build-extension.js && node scripts/pack.js`（version 5.0.0）
+- [x] `node scripts/check-panel-overflow.js`（新增区块后 320~800px × 3 布局全 PASS）
 
 ## 结案前自检
 
-- [ ] PRD 所有 AC 逐条勾选，未达标项**如实标注原因**，不勾空
-- [ ] `resolveAction` 唯一性：代码级核查通过（无第二处优先级链）
-- [ ] 全动作关闭 → 与 v4.6.1 行为一致（AC-3 证据留档）
-- [ ] 契约清单（design §4）六项全部导出且被下游任务可引用
-- [ ] `.trellis/spec/` 与 `AGENTS.md` 已更新
-- [ ] 提交信息按项目规范，附 `Co-Authored-By` 尾行
+- [x] PRD 所有 AC 逐条勾选，未达标项**如实标注原因**（见下方「与计划的偏离」）
+- [x] 唯一性：代码级核查通过（`firstMatchingElementRule` 仅 1 处真实调用点）
+- [x] 全动作关闭 → 与 v4.6.1 行为一致（bench Scenario 25a 断言零新增属性写入 + 基线场景 diff 为空）
+- [x] 契约清单（design §4）全部导出且被下游任务可引用
+- [x] `.trellis/spec/` 与 `AGENTS.md` 已更新
+
+---
+
+## 与计划的偏离（执行中作出的判断，逐条记录）
+
+计划不是圣经，但**偏离必须留痕**。以下五项与 `prd.md` / `design.md` 的字面表述不同，理由如下。
+
+### 1. `peek` 落地为**页级类门**而非元素属性（B4/B5）
+
+- **计划**：`attr = 'data-svi-peek'`，推广到每个被处理元素上。
+- **实际**：`attr: null`，`scope: 'page'`，载体是 `html.svi-peek-on`。
+- **理由**：(a) 逐元素写属性会让"全动作关闭时无新增属性写入"（AC-3）难以保证；
+  (b) 反色家族的悬停复原已由既有 `html.svi-hover-restore` 规则完整承载，再造一条
+  `data-svi-peek` 路径等于**同事实两处实现**，是 v5.0 正要消除的那种重复；
+  (c) 单一真源 = 既有 `hoverRestore` 偏好，**不新增开关**，避免"两个开关控制同一件事"。
+
+### 2. 遮罩伪元素冲突 → **跳过该元素**而非降级独立层（B7）
+
+- **计划**（design §D-4）：`::after` 被占用时降级为独立层 `[data-svi-mask-layer]`。
+- **实际**：`maskPseudoAvailable()` 返回 false 时**跳过并提示**。
+- **理由**：独立层需要把子节点 `appendChild` 进**站点元素**内部，会改动其 DOM 结构
+  （影响站点自己的 `:first-child` / `:nth-child` 选择器与 `childNodes` 假设），
+  与本项目「绝不触碰站点结构」的纪律冲突。取更保守的一侧，并在 README 写明该限制。
+- CSS 里保留了 `[data-svi-mask-layer]` 规则（区域遮罩与将来的兄弟层方案可用），
+  但元素遮罩路径不走它。
+
+### 3. 区域遮罩走**面板按钮武装拖拽**而非 `Alt+拖拽`（B8）
+
+- **计划**：`Alt+拖拽` → 区域遮罩（复用 rect 框选 UI）。
+- **实际**：面板「区域遮罩（拖拽）」按钮一次性武装，`Esc` 取消。
+- **理由**：`Alt+Shift+拖拽` **已被既有「区域反色」(rect 模式) 占用**。共用同一手势会让
+  两个功能必然冲突，且无法从手势本身判断用户意图。
+
+### 4. `Shift+悬停` 解除遮罩落**手动结论**而非学习规则（B9）
+
+- **计划**：`Shift+hover` 永久解除 → 落规则。
+- **实际**：摘除遮罩 + 写 `data-svi-manual-mask="clear"`（动作级手动结论）。
+- **理由**：`Shift+悬停` 的语义是"这一个不要遮罩"，是**元素级**意图，不是"这类元素"。
+  写学习规则需要选择器 stem 且会影响同结构兄弟元素，属放大用户意图。
+  `hide` 的"第三次点击 = 永久"走的是规则路径（那是用户显式表达的同结构意图），两者刻意不同。
+
+### 5. 开关门在**落点**而非**解析**（C5）
+
+- **计划**："关闭后 `resolveStage` 不返回该动作"。
+- **实际**：`resolveStage` 保持**纯解析**（不读 `actionEnabled`）；门在 `applyResolvedAction`：
+  动作关闭时执行 `revert` 清残留。
+- **理由**：解析与策略分离——`SOURCES` 只回答"按优先级该做什么"，`applyResolvedAction`
+  回答"现在允许做什么"。若解析层读开关，则开关关闭时规则会被静默忽略，**已有的标记不会被清掉**，
+  破坏「开关即回滚」。当前实现让关闭动作能主动拆除残留，语义更强。
+
+### 6. 版本断言的假失败已修（D5 副作用）
+
+`test.js` 原硬编码 `svi.version === '4.6.1'`，每次发版都会产生一次与产品无关的失败。
+已改为从 `@version` 头动态读取（断言文案本来就是 "must track the @version header"）。

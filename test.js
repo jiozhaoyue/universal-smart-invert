@@ -429,7 +429,12 @@ vm.runInThisContext(scriptSource, { filename: 'universal-smart-invert.user.js' }
 
 const svi = window.__svi;
 assert.ok(svi, 'window.__svi must be exported for tests');
-assert.strictEqual(svi.version, '4.6.1', 'script version must track the @version header');
+// v5.0 修正: 版本号从原始头动态读取, 不再硬编码 —— 硬编码会在每次发版时产生一次
+// 与产品无关的假失败 (v4.6.1 → v5.0.0 实测)。断言文案本来就写着"must track the @version header"。
+const HEADER_VERSION = (fs.readFileSync(path.join(__dirname, 'universal-smart-invert.user.js'), 'utf8')
+  .match(/@version\s+(\S+)/) || [])[1] || '';
+assert.ok(HEADER_VERSION, 'userscript header must declare @version');
+assert.strictEqual(svi.version, HEADER_VERSION, 'script version must track the @version header');
 
 // —— 7a. v3 → v4 迁移: 剥离运行时键, 保留偏好, 旧键不动 (R7) ——
 const v4raw = storageData['universal_smart_invert_v4'];
@@ -1782,8 +1787,18 @@ setTimeout(() => {
   assert.strictEqual(ACTIONS.invert.defaultEnabled, true, 'invert 默认开 (现状)');
   assert.strictEqual(ACTIONS.bgInvert.defaultEnabled, true, 'bgInvert 默认开 (现状)');
   assert.strictEqual(ACTIONS.keep.defaultEnabled, true, 'keep 默认开 (现状)');
-  assert.ok(!('hide' in ACTIONS) && !('mask' in ACTIONS) && !('dim' in ACTIONS) && !('peek' in ACTIONS),
-    '阶段 A 不得出现未落地动作 (hide/mask/dim/peek 属阶段 B)');
+  // v5.0 阶段 B: 会改动 DOM 观感的新动作一律默认关 (父 PRD 约束「默认保守」)
+  assert.strictEqual(ACTIONS.hide.defaultEnabled, false, 'hide 必须默认关');
+  assert.strictEqual(ACTIONS.mask.defaultEnabled, false, 'mask 必须默认关');
+  assert.strictEqual(ACTIONS.dim.defaultEnabled, false, 'dim 必须默认关');
+  assert.strictEqual(ACTIONS.hide.attr, 'data-svi-hidden', 'hide 属性门');
+  assert.strictEqual(ACTIONS.mask.attr, 'data-svi-masked', 'mask 属性门 (属性值 = 预设 id)');
+  assert.strictEqual(ACTIONS.dim.attr, null, 'dim 是全页动作, 无元素属性门');
+  assert.strictEqual(ACTIONS.peek.attr, null, 'peek 是页级类门, 无元素属性门');
+  assert.strictEqual(ACTIONS.dim.scope, 'page', 'dim 作用域为全页');
+  assert.strictEqual(ACTIONS.peek.scope, 'page', 'peek 作用域为全页');
+  assert.strictEqual(ACTIONS.hide.scope, 'element', 'hide 作用域为元素');
+  assert.strictEqual(ACTIONS.mask.scope, 'element', 'mask 作用域为元素');
   assert.ok(ACTIONS.invert.isActive({ getAttribute: () => 'true' }), 'invert.isActive 读属性门');
   assert.strictEqual(ACTIONS.keep.isActive({ getAttribute: () => 'true' }), false, 'keep 恒为非激活');
   assert.ok(ACTIONS.bgInvert.isActive({ getAttribute: (k) => (k === 'data-svi-bginv' ? 'true' : null) }), 'bgInvert.isActive 读自身属性门');
@@ -1980,6 +1995,160 @@ setTimeout(() => {
   svi.RuleLearner.data = {};
 
   console.log('✓ v5.0 unit tests passed: Action Registry (SOURCES 顺序/stage 分段/resolveStage 短路/arbitrate 两例外/keep 无属性门/bgInvert 独立属性门)');
+})();
+
+// ============================================================
+// v5.0 阶段 B 单测 (动作开关矩阵 / hide / mask / 元素级动作派发)
+// 契约来源: .trellis/tasks/09-25-v5-action-registry/design.md §D-3 / §D-5, prd.md R2 / R3 / R6
+// 任务: v5-1
+// ============================================================
+(function () {
+  const {
+    ACTIONS, actionEnabled, enabledActions, applyResolvedAction, resolveElementAction,
+    MASK_PRESETS, maskPseudoAvailable, readActionManual, ACTION_MANUAL_SCOPE,
+  } = svi;
+
+  function mkEl(opts) {
+    const o = opts || {};
+    const attrs = Object.assign({}, o.attrs);
+    return {
+      tagName: o.tagName || 'IMG',
+      id: o.id || '',
+      className: o.className || '',
+      getAttribute(k) { return Object.prototype.hasOwnProperty.call(attrs, k) ? attrs[k] : null; },
+      setAttribute(k, v) { attrs[k] = String(v); },
+      removeAttribute(k) { delete attrs[k]; },
+      matches() { return false; },
+      _attrs: attrs,
+    };
+  }
+
+  const host = svi.profileKey();
+  const hoverRestoreOn = svi.prefs.hoverRestore !== false;
+
+  // ---- 8. 动作开关矩阵 (AC-2: 唯一读取点) ----
+  assert.strictEqual(actionEnabled('hide'), false, 'hide 默认关 (保守)');
+  assert.strictEqual(actionEnabled('mask'), false, 'mask 默认关 (保守)');
+  assert.strictEqual(actionEnabled('dim'), false, 'dim 默认关 (保守)');
+  assert.strictEqual(actionEnabled('invert'), true, 'invert 恒开 (真实开关是 imageInvert / 站点档案)');
+  assert.strictEqual(actionEnabled('bgInvert'), true, 'bgInvert 恒开');
+  assert.strictEqual(actionEnabled('keep'), true, 'keep 恒开 (无副作用)');
+  assert.strictEqual(actionEnabled('peek'), hoverRestoreOn, 'peek 单一真源 = 既有 hoverRestore 偏好 (不新增开关)');
+  assert.deepStrictEqual(
+    enabledActions().sort(),
+    ['bgInvert', 'invert', 'keep'].concat(hoverRestoreOn ? ['peek'] : []).sort(),
+    '默认启用动作集合'
+  );
+
+  svi.prefs.actions.hide.enabled = true;
+  assert.strictEqual(actionEnabled('hide'), true, '开启后 hide 启用');
+  assert.ok(enabledActions().indexOf('hide') >= 0, 'enabledActions 反映开关');
+
+  // ---- 9. hide 执行器 + 动作级手动作用域 (D-3 通用化的落地) ----
+  const elH = mkEl({});
+  ACTIONS.hide.apply(elH, { scope: 'session' }, 'manual');
+  assert.strictEqual(elH.getAttribute('data-svi-hidden'), 'session', 'hide.apply 写 scope 值');
+  ACTIONS.hide.apply(elH, { scope: 'rule' }, 'manual');
+  assert.strictEqual(elH.getAttribute('data-svi-hidden'), 'rule', 'hide.apply 支持 rule 作用域');
+  assert.ok(ACTIONS.hide.isActive(elH), 'hide.isActive 认属性门');
+  ACTIONS.hide.revert(elH);
+  assert.strictEqual(elH.getAttribute('data-svi-hidden'), null, 'hide.revert 摘除属性门');
+
+  const elH2 = mkEl({});
+  ACTIONS.hide.apply(elH2, { scope: 'bogus' }, 'manual');
+  assert.strictEqual(elH2.getAttribute('data-svi-hidden'), 'session', '非法 scope 回退 session');
+
+  // 手动 'show' 压过规则驱动的 hide
+  const elH3 = mkEl({ attrs: { 'data-svi-manual-hide': 'show' } });
+  ACTIONS.hide.apply(elH3, { scope: 'rule' }, 'learned');
+  assert.strictEqual(elH3.getAttribute('data-svi-hidden'), null, '手动 show 必须压过学习规则的 hide');
+  // 手动 'hide' 压过规则驱动的 revert
+  const elH4 = mkEl({ attrs: { 'data-svi-manual-hide': 'hide' } });
+  ACTIONS.hide.revert(elH4);
+  assert.ok(elH4.getAttribute('data-svi-hidden') !== null, '手动 hide 必须压过规则驱动的 revert');
+  // 作用域不串台: invert 家族的手动结论不得影响 hide
+  const elH5 = mkEl({ attrs: { 'data-svi-manual': 'restore' } });
+  ACTIONS.hide.apply(elH5, { scope: 'session' }, 'learned');
+  assert.strictEqual(elH5.getAttribute('data-svi-hidden'), 'session', 'invert 家族手动结论不得串到 hide 作用域');
+
+  // 动作级手动作用域表契约 (供 v5-2 复查与 v5-3 权重消费)
+  assert.strictEqual(ACTION_MANUAL_SCOPE.hide.attr, 'data-svi-manual-hide', 'hide 手动作用域属性');
+  assert.strictEqual(ACTION_MANUAL_SCOPE.mask.attr, 'data-svi-manual-mask', 'mask 手动作用域属性');
+  assert.strictEqual(readActionManual(mkEl({ attrs: { 'data-svi-manual-hide': 'hide' } }), ACTION_MANUAL_SCOPE.hide), true, 'readActionManual on');
+  assert.strictEqual(readActionManual(mkEl({ attrs: { 'data-svi-manual-hide': 'show' } }), ACTION_MANUAL_SCOPE.hide), false, 'readActionManual off');
+  assert.strictEqual(readActionManual(mkEl({}), ACTION_MANUAL_SCOPE.hide), null, 'readActionManual 无表态');
+  assert.strictEqual(readActionManual(null, ACTION_MANUAL_SCOPE.hide), null, 'readActionManual 容忍 null');
+
+  // ---- 10. mask 执行器 + 三档预设 (D-5, v5-5 依赖本表为唯一定义处) ----
+  assert.deepStrictEqual(Object.keys(MASK_PRESETS).sort(), ['dim', 'frost', 'solid'], '三档遮罩预设');
+  for (const id of Object.keys(MASK_PRESETS)) {
+    const p = MASK_PRESETS[id];
+    assert.strictEqual(p.id, id, id + ': preset.id 自洽');
+    assert.ok(/^#[0-9a-f]{6}$/i.test(p.color), id + ': 颜色为 #rrggbb');
+    assert.ok(p.opacity >= 0 && p.opacity <= 1, id + ': 不透明度在 [0,1]');
+    assert.ok(p.hoverOpacity >= 0 && p.hoverOpacity <= 1, id + ': 悬停不透明度在 [0,1]');
+    assert.ok(typeof p.blur === 'number' && p.blur >= 0, id + ': blur 非负');
+  }
+  assert.strictEqual(MASK_PRESETS.solid.opacity, 1, 'solid = 全遮挡');
+  assert.ok(MASK_PRESETS.frost.blur > 0, 'frost = 有模糊');
+  assert.ok(MASK_PRESETS.dim.opacity > 0 && MASK_PRESETS.dim.opacity < 1, 'dim = 半透明');
+
+  const elM = mkEl({});
+  ACTIONS.mask.apply(elM, { style: 'frost' }, 'manual');
+  assert.strictEqual(elM.getAttribute('data-svi-masked'), 'frost', 'mask.apply 写预设 id');
+  ACTIONS.mask.apply(elM, { style: 'bogus' }, 'manual');
+  assert.strictEqual(elM.getAttribute('data-svi-masked'), 'dim', '非法预设回退 dim');
+  assert.ok(ACTIONS.mask.isActive(elM), 'mask.isActive 认属性门');
+  ACTIONS.mask.revert(elM);
+  assert.strictEqual(elM.getAttribute('data-svi-masked'), null, 'mask.revert 摘除');
+
+  const elM2 = mkEl({ attrs: { 'data-svi-manual-mask': 'clear' } });
+  ACTIONS.mask.apply(elM2, { style: 'dim' }, 'learned');
+  assert.strictEqual(elM2.getAttribute('data-svi-masked'), null, '手动 clear 必须压过规则驱动的 mask');
+
+  // 无 getComputedStyle 环境 → 乐观放行 (绝不因检测能力缺失而阻断功能)
+  assert.strictEqual(maskPseudoAvailable(mkEl({})), true, '无法检测伪元素占用时乐观放行');
+
+  // ---- 11. applyResolvedAction: 动作关闭 → 立即清残留 (「开关即回滚」) ----
+  svi.prefs.actions.hide.enabled = false;
+  const elR = mkEl({ attrs: { 'data-svi-hidden': 'session' } });
+  assert.strictEqual(
+    applyResolvedAction(elR, { actionId: 'hide', verdict: 'invert', reason: 'learned' }), false,
+    '动作关闭时 applyResolvedAction 返回 false'
+  );
+  assert.strictEqual(elR.getAttribute('data-svi-hidden'), null, '动作关闭必须 revert 清残留');
+
+  svi.prefs.actions.hide.enabled = true;
+  const elR2 = mkEl({});
+  assert.strictEqual(
+    applyResolvedAction(elR2, { actionId: 'hide', verdict: 'invert', reason: 'learned', params: { scope: 'rule' } }), true,
+    '动作开启时 applyResolvedAction 返回 true'
+  );
+  assert.strictEqual(elR2.getAttribute('data-svi-hidden'), 'rule', 'applyResolvedAction 落对应执行器');
+
+  // ---- 12. resolveElementAction: 只返回元素级动作 (hide / mask) ----
+  svi.RuleLearner.data = { [host]: { rules: [{ stem: 'div.hiddable', action: 'hide', hits: 5, lastAt: Date.now() }] } };
+  const ea = resolveElementAction(mkEl({ tagName: 'DIV', className: 'hiddable' }));
+  assert.ok(ea && ea.actionId === 'hide', 'hide 学习规则必须被识别为元素级动作');
+  assert.strictEqual(ea.verdict, 'invert', 'hide 候选的 verdict 语义 = 动作生效');
+
+  svi.RuleLearner.data = { [host]: { rules: [{ stem: 'div.maskable', action: 'mask', hits: 5, lastAt: Date.now() }] } };
+  const em = resolveElementAction(mkEl({ tagName: 'DIV', className: 'maskable' }));
+  assert.ok(em && em.actionId === 'mask', 'mask 学习规则必须被识别为元素级动作');
+
+  svi.RuleLearner.data = { [host]: { rules: [{ stem: 'img.learnt', action: 'invert', hits: 5, lastAt: Date.now() }] } };
+  assert.strictEqual(resolveElementAction(mkEl({ className: 'learnt' })), null, 'invert 家族规则不得被当作元素级动作');
+  assert.strictEqual(resolveElementAction(mkEl({ className: 'nomatch' })), null, '无规则命中 → null');
+
+  // 未达 learnHits 的 hide 规则不生效 (保持 v3.0 的命中门语义)
+  svi.RuleLearner.data = { [host]: { rules: [{ stem: 'div.hiddable', action: 'hide', hits: 1, lastAt: Date.now() }] } };
+  assert.strictEqual(resolveElementAction(mkEl({ tagName: 'DIV', className: 'hiddable' })), null, '未达命中门的 hide 规则不生效');
+
+  // ---- 清理 ----
+  svi.RuleLearner.data = {};
+  svi.prefs.actions.hide.enabled = false;
+
+  console.log('✓ v5.0 stage-B unit tests passed: 动作开关矩阵 / hide 作用域与动作级手动结论 / mask 三档预设 / applyResolvedAction 开关即回滚 / resolveElementAction 过滤');
 })();
 
 

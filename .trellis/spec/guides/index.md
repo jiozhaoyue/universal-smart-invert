@@ -74,6 +74,16 @@ These guides help you **ask the right questions before coding**.
 
 → Read [Subagent Model Policy § 六、编排自主权](./subagent-model-policy.md#六编排自主权收尾类动作不问冲突才问)
 
+### When Touching Element Actions or Decision Priority (强制，v5.0 起)
+
+- [ ] 你要新增/修改**元素动作**（invert / keep / hide / mask / dim / peek）吗？
+- [ ] 你想改**决策优先级**（手动 / 元素规则 / 学习规则 / 种子 / 像素 的顺序）吗？
+- [ ] 你要改 `applyInvertState` 或加一个新的属性写点吗？
+- [ ] 你要加一个**动作开关**吗？（必须经 `actionEnabled(id)`，不得另读 `state.actions`）
+- [ ] 你确定知道「决策快照夹在两段之间、位置不可移动」这件事吗？
+
+→ Read [Frontend Quality Guidelines § v5.0 Additions (Action Registry 契约)](../frontend/quality-guidelines.md)
+
 ### When Verifying AI Cross-Review Results
 
 - [ ] Reviewer claims "user input can be malicious" → Check the actual data source (internal manifest? user config? external API?)

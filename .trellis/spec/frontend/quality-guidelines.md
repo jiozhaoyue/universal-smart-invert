@@ -422,3 +422,94 @@ rules below are battle-tested conventions from v1.4.0 → v2.0.0; follow them fo
 > 另：定位可疑等待时，用括号配对从 `setTimeout(` 扫到匹配的 `}` 读其真实延迟值，
 > 比按行号猜更可靠（同一个测试块里往往有多个嵌套 `setTimeout`）。
 
+---
+
+## v5.0 Additions (Action Registry 契约)
+
+> 任务 v5-1。**任何新增元素动作或修改决策优先级之前，先读本节。**
+
+### 1. 决策优先级链的真实形态（不是"一条链"，是**两段 + 中间一个缓存接缝**）
+
+```
+stage 'override' : manualElement → manual → elementRule
+──【决策快照 decisionBySrc 命中即早退】──   ← 位置不得移动
+stage 'rule'     : learned → seedProtect → faviconSkip → seedForceInvert
+── 小元素门 / 策略门 / 像素管线 (不进 Registry) ──
+```
+
+三条硬约束：
+
+1. **快照卡在两段之间**。把 `learned` 提到快照之前，会让「已有快照的 src」被学习规则翻转 —— 属行为改变。
+2. `elementRules`（用户显式）与站点档案（`BUILTIN_RULES` 的 `protect` / `forceInvert`）**不是同一层**。
+3. **`protect` 与 `forceInvert` 之间夹着 favicon 判定**，顺序不可合并或重排。
+
+### 2. 单一解析入口 + 单一写入仲裁
+
+| 契约 | 位置 | 规则 |
+| :--- | :--- | :--- |
+| `SOURCES` | 有序来源表, `stage` 标签决定调用点 | **新增来源只改表, 不改调用点** —— 这是 AC-1「唯一性」的落地方式 |
+| `resolveStage(el, ctx, stage)` | 唯一解析入口 | 按表顺序短路, 首个命中即返回; 无人认领返回 `null` |
+| `arbitrate(el, candidate)` | 唯一写入仲裁 | 手动结论幂等占优; **直写例外只有 `manual` 与 `fx-mutex` 两条**（v4.6 实测得出，不得扩大） |
+| `actionEnabled(id)` | 动作"是否启用"的**唯一读取点** | UI / 引擎 / 触发器一律经此; 不得各自读 `state.actions` 或自行推断 |
+| `applyResolvedAction(el, cand)` | 候选落点派发 | 动作关闭时执行 `revert` 清残留（**开关即回滚**） |
+
+### 3. `verdict` 的语义约定（v5.0 起）
+
+`verdict` 是 Registry 的通用决策词汇，不是 invert 专用：
+
+- `'invert'` = **该候选动作生效**（对 hide 即"藏起来"，对 mask 即"盖住"）
+- `'keep'` = **该候选动作不生效**
+- `'skip'` = 维持 v3.x 既有语义（永不处理）
+
+对 `invert` / `bgInvert` 而言前两者与字面一致。新增动作时沿用这套语义，不要另发明 `'on'` / `'off'`。
+
+### 4. 执行器契约
+
+```js
+{ id, attr, scope: 'element'|'page', defaultEnabled,
+  apply(el, params, source), revert(el), isActive(el) }
+```
+
+- `attr: null` 表示该动作不写元素属性。**`keep` 刻意不写属性** —— 若给每个"保持原样"的元素写标记，
+  全动作关闭时的页面属性写入会比 v4.6.1 更多，破坏「默认零回归」。
+- `apply` / `revert` 必须**幂等、不抛异常、不查布局**（不得出现逐元素 `getComputedStyle`）。
+- 元素动作一律经 `applyFlagAction` 或同类写点，**不得在别处直接 `setAttribute`**。
+
+### 5. 动作级手动结论（v5.0 阶段 B）
+
+每种动作有自己的"用户手动表态"属性，**不能共用一个状态位**（"手动藏了"与"手动反色了"是两件事）：
+
+| 动作 | 手动作用域属性 | on / off |
+| :--- | :--- | :--- |
+| invert / bgInvert / keep | `data-svi-manual`（属性 ∪ src 键, v4.6 语义不变） | `invert` / `restore` |
+| hide | `data-svi-manual-hide` | `hide` / `show` |
+| mask | `data-svi-manual-mask` | `mask` / `clear` |
+
+### 6. 遮罩的唯一定义处
+
+`MASK_PRESETS`（JS）是遮罩风格的**唯一真源**，CSS 只消费 `:root` 变量（`syncMaskVars()` 注入）。
+**不要在 CSS 里另写一份预设值** —— 两处定义必然漂移。v5-5 的加载前 pending 遮罩必须复用本表。
+
+伪元素优先（`[data-svi-masked]::after`，零 DOM 节点、随元素跟随、无 z-index 问题）。
+**元素 `::after` 已被站点占用时：跳过该元素的遮罩并提示，不去 append 子节点** ——
+往站点元素里塞子节点会改动其 DOM 结构（影响 `:first-child` / `:last-child` 选择器与站点脚本的
+`childNodes` 假设），与本项目「绝不触碰站点结构」的纪律冲突。
+
+### 7. 测试遮罩过渡的坑
+
+遮罩 `::after` 有 `transition: opacity 140ms`。**施加遮罩后立刻 `getComputedStyle` 读到的是过渡中间值**，
+不是目标值（实测 `dim` 预设读到 `1` 而非 `0.75`）。bench 断言必须等过渡结束
+（`evalInPageAsync` + `await new Promise(r => setTimeout(r, 400))`）。
+
+### 8. 新增动作的清单
+
+1. `ACTIONS` 加执行器（`defaultEnabled: false`，保守）
+2. `actionEnabled` 的语义确认（需要新偏好吗？还是一如 `peek` 复用既有键？）
+3. `SOURCES` 若需承载规则 → `learned` 来源加分支 + `RuleLearner.record` 白名单加项
+4. `state` 默认值 + `loadState` 规范化（**枚举白名单内联，不要用依赖 `const` 表的函数 —— 会撞 TDZ**）
+5. CSS（消费 `:root` 变量，不写死预设值）
+6. UI 一行（`buildActionsSection`）+ 关闭时的 `teardown(id)`
+7. `test.js` 单测（执行器 / 开关矩阵 / 手动作用域 / 关闭即回滚）
+8. `test-browser.js` 场景（落点 + computed 样式 + 开关即回滚）
+
+

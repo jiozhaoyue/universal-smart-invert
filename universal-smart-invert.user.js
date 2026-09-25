@@ -3,10 +3,10 @@
 // @name:zh-CN   全网通用智能视频与图片反色
 // @name:en      Universal Smart Video & Image Invert
 // @namespace    https://github.com/jiozhaoyue/universal-smart-invert
-// @version      4.6.1
-// @description  全网通用智能视频与图片反色脚本 (v4.6, AGPL-3.0 开源)。新增: 本地优先判定 (所见即所得, 弱网/断网下按本地已渲染内容抢先判定, 不再等资源加载完成), Alt+点击一次生效的手动结论防覆盖层, 暗色遮罩上下文感知 (合成已够暗的媒体不再误反色), 版本自检徽标; 保留动态主题/定时模式/字体可读性/工具栏弹窗/规则分发等全部能力。
-// @description:zh-CN 全网通用智能视频与图片反色脚本 (v4.6, AGPL-3.0 开源)。新增: 本地优先判定 (所见即所得/弱网抢先)、Alt+点击一次生效、暗色遮罩上下文感知、版本自检; 保留全部既有能力。
-// @description:en Universal smart video and image invert userscript (v4.6, AGPL-3.0 licensed). New: local-first decisions (what is already rendered locally decides immediately, winning the race on slow/offline networks), one-click-stable Alt+click manual verdicts (no overwrite layer), dark-veil ancestor awareness (already-dark composites stay natural), and a version self-check badge. All prior capabilities retained.
+// @version      5.0.0
+// @description  全网通用智能视频与图片反色脚本 (v5.0, AGPL-3.0 开源)。v5.0 把插件扩为「页面媒体治理层」: 统一元素动作表 (invert/keep/hide/mask/dim/peek) 经单一来源表与写点仲裁解析; 新增元素屏蔽 (Alt+Shift+点击)、遮罩 (Alt+M, 三档风格可调, 悬停揭开/Shift+悬停永久解除)、全页压暗、悬停复原通用门, 全部默认关闭且可开关。保留 v4.6 全部能力 (本地优先判定/Alt+点击一次生效/暗色遮罩感知)。
+// @description:zh-CN 全网通用智能视频与图片反色脚本 (v5.0, AGPL-3.0 开源)。新增: 元素屏蔽 (Alt+Shift+点击)、遮罩 (Alt+M, 三档风格)、全页压暗、悬停复原通用门, 统一动作表与开关矩阵, 新动作默认关闭; 保留 v4.6 全部能力。
+// @description:en Universal smart video and image invert userscript (v5.0, AGPL-3.0 licensed). v5.0 grows the script into a page-media governance layer: a unified element-action table (invert/keep/hide/mask/dim/peek) resolved through a single ordered source table with one write-point arbitration; adds element blocking (Alt+Shift+click), masks (Alt+M, three adjustable styles, hover-to-reveal, Shift+hover to remove permanently), whole-page dimming, and a generic peek gate — all off by default and individually switchable. All v4.6 capabilities retained.
 // @author       jiozhaoyue
 // @license      AGPL-3.0-or-later
 // @icon         data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><circle cx=%2250%22 cy=%2250%22 r=%2246%22 fill=%22%231e293b%22 stroke=%22%2338bdf8%22 stroke-width=%228%22/><path d=%22M50 4 A46 46 0 0 1 50 96 Z%22 fill=%22%2338bdf8%22/></svg>
@@ -40,7 +40,7 @@
   // ==========================================
   // 1. 配置与常量定义
   // ==========================================
-  const SCRIPT_VERSION = '4.6.1';
+  const SCRIPT_VERSION = '5.0.0';
   const PREFS_KEY = 'universal_smart_invert_v4';   // v2.0 遗留偏好键 (迁移源, 迁移后原样保留以便回滚)
   const LEGACY_KEY = 'universal_smart_invert_v3';  // v1.x 旧键 (仅读取迁移, 保留不删以便回滚)
   const STATS_KEY = 'universal_smart_invert_stats_v1'; // v2.0 遗留统计键 (保留写入以兼容回滚)
@@ -211,6 +211,18 @@
 
     // ===== v4.6 新增偏好: 本地优先判定 (R1/R2: 判定依据 = 本地已渲染状态, 与网络交付解耦) =====
     localFirstDecide: true,    // 本地优先判定总开关: false 回退 v4.5 旧行为 (未解码等 load, 不做本地保守判定)
+
+    // ===== v5.0 新增偏好: 元素动作 (hide / mask / dim 默认全关 —— 保守; peek 复用既有 hoverRestore) =====
+    // 开关矩阵契约: 每个动作的"是否启用"由 actionEnabled(id) 统一读取, UI 不得自行判断。
+    actions: {
+      hide: { enabled: false, scope: 'session' }, // 元素屏蔽: 临时(仅本会话) | 永久(写学习规则)
+      mask: { enabled: false },                   // 遮罩: 预设见 maskStyle
+      dim: { enabled: false },                    // 全页温和压暗
+    },
+    maskStyle: 'dim',          // 遮罩预设 (solid 全遮挡 | dim 暗色半透明 | frost 毛玻璃)
+    maskHoverOpacity: 0.15,    // 悬停揭开后的不透明度 (0 ~ 1) —— 「可移动鼠标解除」的力度
+    maskBlur: 8,               // 毛玻璃模糊半径 px (0 ~ 40)
+    pageDimOpacity: 0.35,      // 全页压暗不透明度 (0 ~ 0.9)
   };
 
   // 运行时状态 (仅存于内存, 每个标签页独立, 绝不写入存储 —— 标签页隔离)
@@ -927,6 +939,22 @@
     merged.flashGuard = merged.flashGuard !== false;
     // v4.6 字段规范化: 暗色遮罩上下文感知 (默认开)
     merged.maskAware = merged.maskAware !== false;
+    // v5.0 字段规范化: 元素动作开关 (默认全关, 保守) + 遮罩/压暗参数钳制
+    // 注意: 此处刻意内联枚举白名单而不用 isMaskStyle() —— 后者依赖 MASK_PRESETS (const),
+    // 而 loadState 可能在其实施前被调用, 会撞 TDZ。与既有 settingsLayout 的写法保持一致。
+    {
+      const a = (merged.actions && typeof merged.actions === 'object' && !Array.isArray(merged.actions)) ? merged.actions : {};
+      const sub = (k) => (a[k] && typeof a[k] === 'object' && !Array.isArray(a[k])) ? a[k] : {};
+      merged.actions = {
+        hide: { enabled: sub('hide').enabled === true, scope: sub('hide').scope === 'rule' ? 'rule' : 'session' },
+        mask: { enabled: sub('mask').enabled === true },
+        dim: { enabled: sub('dim').enabled === true },
+      };
+      if (['solid', 'dim', 'frost'].indexOf(merged.maskStyle) === -1) merged.maskStyle = 'dim';
+      merged.maskHoverOpacity = clampNumber(merged.maskHoverOpacity, 0, 1, 0.15);
+      merged.maskBlur = clampNumber(merged.maskBlur, 0, 40, 8);
+      merged.pageDimOpacity = clampNumber(merged.pageDimOpacity, 0, 0.9, 0.35);
+    }
     // 标签页隔离: 运行时状态绝不入库
     delete merged.invertActive;
 
@@ -1808,6 +1836,30 @@
   // 仲裁直写例外 (v4.6 实测得出, 不得扩大)
   const ARBITRATE_BYPASS = { manual: 1, 'fx-mutex': 1 };
 
+  // 动作级手动结论作用域 (v5.0 阶段 B): 每种动作有自己的"用户手动表态"属性。
+  //   invert / bgInvert / keep 沿用 v4.6 的 data-svi-manual (属性 ∪ src 键), 语义不变;
+  //   hide / mask 各自独立, 因为"手动藏了"与"手动反色了"是两件事, 不能共用一个状态位。
+  //   on/off 的语义: on = 该动作被用户定为生效, off = 用户定为不生效。
+  const ACTION_MANUAL_SCOPE = {
+    hide: { attr: 'data-svi-manual-hide', on: 'hide', off: 'show' },
+    mask: { attr: 'data-svi-manual-mask', on: 'mask', off: 'clear' },
+  };
+
+  // 读取某动作的元素级手动结论: true = 手动定为生效, false = 手动定为不生效, null = 无表态
+  function readActionManual(el, scope) {
+    try {
+      if (!el || typeof el.getAttribute !== 'function') return null;
+      const v = el.getAttribute(scope.attr);
+      if (v === scope.on) return true;
+      if (v === scope.off) return false;
+    } catch (e) { /* ignore */ }
+    return null;
+  }
+
+  // 候选写入的单一仲裁门。
+  //   verdict 语义 (v5.0): 'invert' = 该候选动作生效, 'keep' = 该候选动作不生效。
+  //   对 invert / bgInvert 而言与字面一致; 对 hide / mask 而言 'invert' 即"藏起来 / 盖住"。
+  //   手动态: candidate.actionId 决定用哪个手动作用域 (缺省 = invert 家族的 v4.6 语义)。
   function arbitrate(el, candidate) {
     const c = {
       verdict: candidate.verdict || 'keep',
@@ -1815,9 +1867,17 @@
       force: !!candidate.force,
       params: candidate.params,
       source: candidate.source,
+      actionId: candidate.actionId,
     };
     if (!ARBITRATE_BYPASS[c.reason]) {
-      const manual = manualStateFor(el);
+      let manual = null;
+      const aid = c.actionId;
+      if (!aid || aid === 'invert' || aid === 'bgInvert' || aid === 'keep') {
+        manual = manualStateFor(el); // v4.6 语义: 属性 ∪ src 键
+      } else {
+        const scope = ACTION_MANUAL_SCOPE[aid];
+        manual = scope ? readActionManual(el, scope) : manualStateFor(el);
+      }
       if (manual !== null) {
         c.verdict = manual ? 'invert' : 'keep';
         c.reason = 'manual';
@@ -1825,6 +1885,23 @@
       }
     }
     return c;
+  }
+
+  // 元素级动作写点 (v5.0 阶段 B): 属性门为单值的动作 (hide / mask / peek) 共用。
+  //   onValue: 生效时写入的属性值 (缺省 'true')
+  function applyFlagAction(el, actionId, wantOn, reason, onValue) {
+    if (!el || typeof el.setAttribute !== 'function' || typeof el.getAttribute !== 'function') return reason || '';
+    const c = arbitrate(el, {
+      verdict: wantOn ? 'invert' : 'keep',
+      reason: reason,
+      actionId: actionId,
+    });
+    const on = c.verdict === 'invert';
+    try {
+      if (on) el.setAttribute(ACTIONS[actionId].attr, onValue === undefined ? 'true' : onValue);
+      else el.removeAttribute(ACTIONS[actionId].attr);
+    } catch (e) { /* ignore */ }
+    return c.reason;
   }
 
   // 背景图反色写点 (v5.0 A13): data-svi-bginv 的写入/摘除, 与 applyInvertState 同构
@@ -1875,7 +1952,197 @@
       revert() { /* keep 无副作用, 无操作 */ },
       isActive() { return false; },
     },
+
+    // ===== v5.0 阶段 B 新增动作 (全部 defaultEnabled: false, 保守) =====
+    // hide: 元素屏蔽。scope='session' 临时 (仅本会话) | 'rule' 永久 (由学习规则承载)
+    hide: {
+      id: 'hide',
+      attr: 'data-svi-hidden',
+      scope: 'element',
+      defaultEnabled: false,
+      apply(el, params, source) {
+        const s = (params && params.scope) === 'rule' ? 'rule' : 'session';
+        return applyFlagAction(el, 'hide', true, source || 'manual', s);
+      },
+      revert(el) { return applyFlagAction(el, 'hide', false, 'pixel'); },
+      isActive(el) {
+        return !!el && typeof el.getAttribute === 'function' && el.getAttribute('data-svi-hidden') !== null;
+      },
+    },
+    // mask: 遮罩 (全遮挡 / 暗色半透明 / 毛玻璃)。属性值即预设 id, 参数走 :root 变量 (无 inline style)
+    mask: {
+      id: 'mask',
+      attr: 'data-svi-masked',
+      scope: 'element',
+      defaultEnabled: false,
+      apply(el, params, source) {
+        const style = (params && params.style) || state.maskStyle || 'dim';
+        return applyFlagAction(el, 'mask', true, source || 'manual', isMaskStyle(style) ? style : 'dim');
+      },
+      revert(el) { return applyFlagAction(el, 'mask', false, 'pixel'); },
+      isActive(el) {
+        return !!el && typeof el.getAttribute === 'function' && el.getAttribute('data-svi-masked') !== null;
+      },
+    },
+    // dim: 全页温和压暗 (比反色温和; 与 bgReplace 互斥时 dim 优先)
+    dim: {
+      id: 'dim',
+      attr: null,
+      scope: 'page',
+      defaultEnabled: false,
+      apply() { return applyPageDim(true); },
+      revert() { return applyPageDim(false); },
+      isActive() { return !!pageDimNode; },
+    },
+    // peek: 悬停复原的通用门 (页级类 html.svi-peek-on; 由现有 hoverRestore 偏好驱动, 不新增开关)
+    peek: {
+      id: 'peek',
+      attr: null,
+      scope: 'page',
+      defaultEnabled: true,
+      apply() { return setPeekGate(true); },
+      revert() { return setPeekGate(false); },
+      isActive() {
+        try { return !!(document.documentElement && document.documentElement.classList.contains('svi-peek-on')); } catch (e) { return false; }
+      },
+    },
   };
+
+  // 遮罩风格预设 (唯一定义处) —— v5-5 加载前 pending 遮罩必须复用本表, 不得另行定义。
+  //   on/off 语义见 arbitrate 注释; CSS 由 injectStyles 内的 :root 变量 + [data-svi-masked] 规则消费。
+  const MASK_PRESETS = {
+    solid: { id: 'solid', name: '全遮挡', color: '#0f172a', opacity: 1.0, blur: 0, hoverOpacity: 0.15 },
+    dim: { id: 'dim', name: '暗色半透明', color: '#0f172a', opacity: 0.75, blur: 0, hoverOpacity: 0.15 },
+    frost: { id: 'frost', name: '毛玻璃', color: '#0f172a', opacity: 0.35, blur: 8, hoverOpacity: 0.05 },
+  };
+
+  function isMaskStyle(id) {
+    return Object.prototype.hasOwnProperty.call(MASK_PRESETS, String(id));
+  }
+
+  // 遮罩伪元素可用性检测 (design §D-4)。元素 ::after 已被站点占用时不改站点 DOM 去塞独立层,
+  // 而是**跳过该元素的遮罩**并提示 —— 往站点元素里 append 子节点会改动其 DOM 结构
+  // (影响 :first-child/:last-child 选择器与站点脚本的 childNodes 假设), 与本项目
+  // 「绝不触碰站点结构」的纪律冲突。只在用户施加遮罩时查一次, 不进热路径。
+  function maskPseudoAvailable(el) {
+    try {
+      const view = document.defaultView;
+      if (!view || typeof view.getComputedStyle !== 'function') return true; // 无法检测 → 乐观放行
+      const cs = view.getComputedStyle(el, '::after');
+      if (!cs) return true;
+      const c = cs.content;
+      if (c === undefined || c === null) return true;
+      const s = String(c).trim();
+      return !(s && s !== 'none' && s !== 'normal');
+    } catch (e) {
+      return true;
+    }
+  }
+
+  // ===== 动作开关矩阵 (v5.0) —— 动作"是否启用"的唯一读取点 =====
+  //   UI / 引擎 / 触发器一律经此判断, 不得各自读 state.actions 或自行推断,
+  //   否则新增动作时会出现多处开关判定而漂移 (v5.0 AC-2)。
+  function actionEnabled(id) {
+    try {
+      // peek 的单一真源是既有 hoverRestore 偏好 (键名与语义不变) —— 刻意不新增开关,
+      // 避免"两个开关控制同一件事"互相打架 (v3.1 R5 已有该偏好的行与回显契约)
+      if (id === 'peek') return state.hoverRestore !== false;
+      // invert 家族是现状主路径, 恒由 actionEnabled 返回 true;
+      // 其真实开关是 imageInvert / profile.imageInvert (现有语义, 不在此表重复控制)
+      if (id === 'invert' || id === 'bgInvert' || id === 'keep') return true;
+      const a = state.actions && state.actions[id];
+      return !!(a && a.enabled);
+    } catch (e) { return false; }
+  }
+
+  // 当前启用的动作 id 列表 (诊断/UI 用)
+  function enabledActions() {
+    return Object.keys(ACTIONS).filter((id) => actionEnabled(id));
+  }
+
+  // 元素级动作 (hide / mask) 的规则查询 —— 供不具备完整 rule 段语义的调用方使用 (如 BgImageEngine)。
+  //  走同一来源表 (resolveStage), 只把结果过滤为元素级动作, 不新增第二处规则读取点。
+  //  ctx 刻意只给 src='' : protect / forceInvert / favicon 三条需要 ctx 的来源自然不会命中,
+  //  等价于"只查学习规则中的元素级动作"。
+  function resolveElementAction(el) {
+    const c = resolveStage(el, { src: '' }, 'rule');
+    if (c && (c.actionId === 'hide' || c.actionId === 'mask')) return c;
+    return null;
+  }
+
+  // 已解析候选的落点 (v5.0): 按 actionId 派发到对应执行器, 并尊重 actionEnabled。
+  //  动作关闭时执行 revert 以确保不留残留标记 (开关即回滚)。
+  function applyResolvedAction(el, cand) {
+    const aid = cand.actionId || 'invert';
+    const act = ACTIONS[aid];
+    if (!act) return false;
+    if (!actionEnabled(aid)) {
+      try { act.revert(el); } catch (e) { /* ignore */ }
+      return false;
+    }
+    try {
+      if (cand.verdict === 'invert') act.apply(el, cand.params, cand.reason);
+      else act.revert(el);
+    } catch (e) { /* ignore */ }
+    return true;
+  }
+
+  // ===== 页级动作的 DOM 载体 (v5.0 阶段 B) =====
+  //   dim: 一个 fixed 全页层 (pointer-events:none, z-index 低于胶囊/面板/弹窗)
+  //   peek: html 上的类门 (与现有 html.svi-hover-restore 同一偏好驱动, 见 ACTIONS.peek 注释)
+  let pageDimNode = null;
+
+  function applyPageDim(on) {
+    try {
+      if (!on) {
+        if (pageDimNode) {
+          try { pageDimNode.remove(); } catch (e) { /* ignore */ }
+          pageDimNode = null;
+        }
+        return 'dim-off';
+      }
+      if (pageDimNode) return 'dim-on';
+      const node = document.createElement('div');
+      node.className = 'svi-page-dim';
+      node.setAttribute('aria-hidden', 'true');
+      (document.body || document.documentElement).appendChild(node);
+      pageDimNode = node;
+      return 'dim-on';
+    } catch (e) {
+      return 'dim-error';
+    }
+  }
+
+  function setPeekGate(on) {
+    try {
+      const de = document.documentElement;
+      if (!de) return '';
+      de.classList.toggle('svi-peek-on', !!on);
+    } catch (e) { /* ignore */ }
+    return on ? 'peek-on' : 'peek-off';
+  }
+
+  // 遮罩参数的 CSS 变量同步 —— JS 侧 MASK_PRESETS 是唯一真源, CSS 只消费变量
+  // (避免预设值在 JS 与 CSS 两处重复定义而漂移; 同时不用 inline style, 遵守属性写点收口纪律)
+  function syncMaskVars() {
+    try {
+      const de = document.documentElement;
+      if (!de || !de.style) return;
+      for (const id of Object.keys(MASK_PRESETS)) {
+        const p = MASK_PRESETS[id];
+        de.style.setProperty('--svi-mask-' + id + '-color', p.color);
+        de.style.setProperty('--svi-mask-' + id + '-opacity', String(p.opacity));
+        de.style.setProperty('--svi-mask-' + id + '-blur', (p.blur || 0) + 'px');
+        de.style.setProperty('--svi-mask-' + id + '-hover', String(p.hoverOpacity));
+      }
+      // 用户可调全局旋钮 (面板): 悬停揭开后的不透明度 / 毛玻璃模糊半径
+      const hover = typeof state.maskHoverOpacity === 'number' ? state.maskHoverOpacity : 0.15;
+      const blur = typeof state.maskBlur === 'number' ? state.maskBlur : 8;
+      de.style.setProperty('--svi-mask-hover', String(Math.max(0, Math.min(1, hover))));
+      de.style.setProperty('--svi-mask-blur-user', Math.max(0, Math.min(40, blur)) + 'px');
+      de.style.setProperty('--svi-mask-dim-rest', String(Math.max(0, Math.min(1, typeof state.pageDimOpacity === 'number' ? state.pageDimOpacity : 0.35))));
+    } catch (e) { /* ignore */ }
+  }
 
   // 有序来源表。stage: 'override' (快照前) | 'rule' (快照后)
   // 顺序即优先级, 不得重排; 新增来源只改本表, 不改调用点 (v5.0 AC-1 唯一性)。
@@ -1924,8 +2191,11 @@
       id: 'learned', stage: 'rule',
       resolve(el, ctx) {
         const r = ruleLearner.decideFor(profileKey(), el);
-        if (r === 'invert') return { verdict: 'invert', reason: 'learned' };
-        if (r === 'protect') return { verdict: 'keep', reason: 'learned' };
+        if (r === 'invert') return { verdict: 'invert', reason: 'learned', actionId: 'invert' };
+        if (r === 'protect') return { verdict: 'keep', reason: 'learned', actionId: 'invert' };
+        // v5.0 阶段 B: 学习规则可承载元素级动作 (由『永久屏蔽』Alt+Shift+点击 / 『遮罩』Alt+M 写入)
+        if (r === 'hide') return { verdict: 'invert', reason: 'learned', actionId: 'hide' };
+        if (r === 'mask') return { verdict: 'invert', reason: 'learned', actionId: 'mask' };
         return null;
       },
     },
@@ -3303,6 +3573,105 @@
       html.svi-img-invert-on video[data-svi-poster="light"]:not(.svi-playing),
       body.svi-img-invert-on video[data-svi-poster="light"]:not(.svi-playing) {
         filter: var(--svi-img-filter, invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.90)) !important;
+      }
+
+      /* ==========================================
+         v5.0 新增样式: 元素动作 (hide / mask / dim / peek)
+         遮罩预设值来自 JS 侧 MASK_PRESETS, 经 :root 变量注入 (单一真源, 无 inline style)
+         ========================================== */
+
+      /* --- hide: 元素屏蔽 (display:none, 不占位; 因此不提供悬停窥视 —— 不可悬停) --- */
+      [data-svi-hidden] {
+        display: none !important;
+      }
+
+      /* --- mask: 遮罩。伪元素优先 (零 DOM 节点, 随元素天然跟随, 无 z-index 问题);
+             元素已占用 ::after 时由 JS 降级为独立层 [data-svi-mask-layer] --- */
+      [data-svi-masked] {
+        position: relative;
+      }
+      [data-svi-masked]::after,
+      [data-svi-mask-layer]::after {
+        content: '';
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        background: var(--svi-mask-dim-color, #0f172a);
+        opacity: var(--svi-mask-dim-opacity, 0.75);
+        transition: opacity 140ms ease;
+      }
+      [data-svi-masked="solid"]::after {
+        background: var(--svi-mask-solid-color, #0f172a);
+        opacity: var(--svi-mask-solid-opacity, 1);
+      }
+      [data-svi-masked="frost"]::after {
+        background: var(--svi-mask-frost-color, #0f172a);
+        opacity: var(--svi-mask-frost-opacity, 0.35);
+        backdrop-filter: blur(var(--svi-mask-blur-user, 8px));
+      }
+      /* 降级路径: 独立层 (元素 ::after 已被站点占用时) */
+      [data-svi-mask-layer] {
+        position: absolute;
+        pointer-events: none;
+        z-index: 1;
+        background: var(--svi-mask-dim-color, #0f172a);
+        opacity: var(--svi-mask-dim-opacity, 0.75);
+        transition: opacity 140ms ease;
+      }
+      [data-svi-mask-layer="solid"] {
+        background: var(--svi-mask-solid-color, #0f172a);
+        opacity: var(--svi-mask-solid-opacity, 1);
+      }
+      [data-svi-mask-layer="frost"] {
+        background: var(--svi-mask-frost-color, #0f172a);
+        opacity: var(--svi-mask-frost-opacity, 0.35);
+        backdrop-filter: blur(var(--svi-mask-blur-user, 8px));
+      }
+
+      /* --- peek: 悬停复原通用门 (html.svi-peek-on)。
+             遮罩: 悬停即降到 --svi-mask-hover, 移出恢复 —— 「可移动鼠标解除」。
+             反色家族 (img/svg/canvas/video/背景图) 的悬停复原仍由既有
+             html.svi-hover-restore 规则承载 (同一 hoverRestore 偏好, 不重复实现)。 --- */
+      html.svi-peek-on [data-svi-masked]:hover::after,
+      html.svi-peek-on [data-svi-mask-layer]:hover {
+        opacity: var(--svi-mask-hover, 0.15);
+      }
+      /* Shift+悬停 = 永久解除: 由 JS 监听 mouseover(shiftKey) 摘除遮罩, 不靠 CSS */
+
+      /* --- 区域遮罩 (Alt+拖拽) 独立层: 几何只能逐层写 style (自有节点, 非站点元素) --- */
+      .svi-mask-region {
+        position: fixed;
+        pointer-events: none;
+        z-index: 2147483644;
+        background: var(--svi-mask-dim-color, #0f172a);
+        opacity: var(--svi-mask-dim-opacity, 0.75);
+        transition: opacity 140ms ease;
+      }
+      html.svi-peek-on .svi-mask-region.svi-mask-hoverable:hover {
+        opacity: var(--svi-mask-hover, 0.15);
+      }
+
+      /* --- dim: 全页温和压暗 (比反色温和; 不拦点击; z-index 低于胶囊/面板/弹窗) --- */
+      .svi-page-dim {
+        position: fixed;
+        inset: 0;
+        pointer-events: none !important;
+        z-index: 2147483640;
+        background: #000;
+        opacity: var(--svi-mask-dim-rest, 0.35);
+        transition: opacity 160ms ease;
+      }
+      html.svi-peek-on .svi-page-dim:hover {
+        opacity: var(--svi-mask-hover, 0.15);
+      }
+
+      /* --- 区域选取框 (与 rect 反色框共用视觉, 独立类避免影响既有选择器) --- */
+      .svi-mask-select {
+        position: fixed;
+        border: 1px dashed #a78bfa;
+        background: rgba(167, 139, 250, 0.15);
+        pointer-events: none;
+        z-index: 2147483646;
       }
 
       /* 区域反色 (Alt+Shift+拖拽) 选择框 */
@@ -5071,9 +5440,12 @@
     }
 
     // 每次 Alt+点击调用: action = 'invert' (强制反色) | 'protect' (恢复原色)
-    record(host, el, action) {
+    // v5.0: 扩展至 'hide' (永久屏蔽) | 'mask' (遮罩); immediate=true 时立即激活
+    //   —— 用户显式选择的"永久/遮罩"语义不该再等 learnHits 次累计命中
+    record(host, el, action, immediate) {
       const stem = selectorStem(el);
-      if (!host || !stem || (action !== 'invert' && action !== 'protect')) return null;
+      const ALLOWED_RULE_ACTIONS = { invert: 1, protect: 1, hide: 1, mask: 1 };
+      if (!host || !stem || !ALLOWED_RULE_ACTIONS[action]) return null;
       const hd = this._hostData(host);
       let rule = hd.rules.find((r) => r.stem === stem);
       if (rule && rule.action === action) {
@@ -5087,6 +5459,10 @@
       } else {
         rule = { stem, action, hits: 1, lastAt: Date.now() };
         hd.rules.push(rule);
+      }
+      if (immediate) {
+        const min = Math.max(2, Number(state.learnHits) || 2);
+        rule.hits = Math.max(rule.hits || 1, min);
       }
       // 每主机规则上限 100 (FIFO)
       if (hd.rules.length > 100) {
@@ -5644,9 +6020,177 @@
           if (target) {
             e.preventDefault();
             e.stopPropagation();
+            // v5.0: Alt+Shift+点击 = 元素屏蔽开关 (hide); Alt+点击 = 反色开关 (现状, 语义不变)
+            if (e.shiftKey && actionEnabled('hide')) {
+              this.toggleHide(target);
+              return;
+            }
             this.toggleMediaOverride(target);
           }
         }
+      }, true);
+      // v5.0: 悬停目标跟踪 (Alt+M 元素遮罩的取法) —— capture + 只存引用, 零布局读取
+      document.addEventListener('mouseover', (e) => {
+        try { this.hoverTarget = (e.target && e.target.nodeType === 1) ? e.target : null; } catch (err) { this.hoverTarget = null; }
+      }, true);
+      // v5.0: Shift+悬停 = 永久解除遮罩 (mask 的「可移动鼠标解除」升级档)
+      document.addEventListener('mouseover', (e) => {
+        if (!e.shiftKey || !actionEnabled('mask')) return;
+        try {
+          const el = e.target && e.target.nodeType === 1 ? e.target : null;
+          if (!el) return;
+          const maskedEl = el.closest ? el.closest('[data-svi-masked]') : null;
+          if (maskedEl) {
+            ACTIONS.mask.revert(maskedEl);
+            maskedEl.setAttribute('data-svi-manual-mask', 'clear');
+            showToast('已永久解除该遮罩 (Shift+悬停)');
+            return;
+          }
+          const region = el.closest ? el.closest('[data-svi-mask-region]') : null;
+          if (region) {
+            region.remove();
+            showToast('已移除该区域遮罩 (Shift+悬停)');
+          }
+        } catch (err) { /* ignore */ }
+      }, true);
+      this.bindRegionMask();
+    }
+
+    // ===== v5.0 阶段 B: 元素动作 (hide / mask / dim) 的触发器 =====
+
+    // 元素屏蔽开关。三态循环 (与 hide 动作的 scope 语义一致):
+    //   未隐藏 → 临时隐藏 (session, 仅本会话) → 已隐藏时点击 = 恢复并落"手动不隐藏"表态
+    //   已有"手动不隐藏"表态时再次点击 → 永久隐藏 (写学习规则, 同 stem 元素后续自动隐藏)
+    toggleHide(target) {
+      try {
+        if (!target || typeof target.setAttribute !== 'function') return false;
+        if (target.getAttribute('data-svi-hidden') !== null) {
+          ACTIONS.hide.revert(target);
+          target.setAttribute('data-svi-manual-hide', 'show');
+          this.sessionHidden.delete(target);
+          showToast('已恢复显示 (Alt+Shift+点击)');
+          return true;
+        }
+        const scope = target.getAttribute('data-svi-manual-hide') === 'show' ? 'rule' : 'session';
+        ACTIONS.hide.apply(target, { scope: scope }, 'manual');
+        target.setAttribute('data-svi-manual-hide', 'hide');
+        if (scope === 'rule') {
+          try { ruleLearner.record(profileKey(), target, 'hide', true); } catch (e) { /* ignore */ }
+          showToast('已永久屏蔽 (规则已记录，同结构元素后续自动屏蔽)');
+        } else {
+          this.sessionHidden.add(target);
+          showToast('已临时屏蔽 · 再点一次恢复 · 第三次点=永久');
+        }
+        return true;
+      } catch (e) { return false; }
+    }
+
+    // 取消本会话全部临时隐藏 (永久规则不在其内, 需在规则列表里删)
+    restoreAllHidden() {
+      let n = 0;
+      for (const el of Array.from(this.sessionHidden)) {
+        try {
+          if (el && typeof el.getAttribute === 'function' && el.getAttribute('data-svi-hidden') === 'session') {
+            ACTIONS.hide.revert(el);
+            el.setAttribute('data-svi-manual-hide', 'show');
+            n++;
+          }
+        } catch (e) { /* ignore */ }
+        this.sessionHidden.delete(el);
+      }
+      showToast(n ? ('已恢复 ' + n + ' 个临时屏蔽元素') : '本页没有临时屏蔽的元素');
+      return n;
+    }
+
+    // 元素遮罩开关 (Alt+M，目标 = 最近悬停元素)
+    toggleMask(target) {
+      try {
+        if (!target || typeof target.setAttribute !== 'function') return false;
+        if (target.getAttribute('data-svi-masked') !== null) {
+          ACTIONS.mask.revert(target);
+          target.setAttribute('data-svi-manual-mask', 'clear');
+          showToast('已取消遮罩 (Alt+M)');
+          return true;
+        }
+        if (!maskPseudoAvailable(target)) {
+          showToast('该元素已占用 ::after 伪元素，跳过遮罩（绝不改动站点 DOM）');
+          return false;
+        }
+        ACTIONS.mask.apply(target, { style: state.maskStyle }, 'manual');
+        target.setAttribute('data-svi-manual-mask', 'mask');
+        showToast('已加遮罩 · 悬停揭开 · Shift+悬停永久解除');
+        return true;
+      } catch (e) { return false; }
+    }
+
+    // 区域遮罩: 一次性武装拖拽 (刻意不复用 Alt+Shift+拖拽 —— 那个手势已被区域反色占用)
+    armRegionMask() {
+      if (!actionEnabled('mask')) { showToast('遮罩未启用（设置 → 🧩 元素动作）'); return false; }
+      this.regionArmed = !this.regionArmed;
+      showToast(this.regionArmed ? '请在页面上拖拽框选区域（Esc 取消）' : '已取消区域遮罩');
+      return this.regionArmed;
+    }
+
+    cancelRegionMask() {
+      if (!this.regionArmed) return false;
+      this.regionArmed = false;
+      showToast('已取消区域遮罩');
+      return true;
+    }
+
+    addRegionMask(rect) {
+      try {
+        const node = document.createElement('div');
+        node.className = 'svi-mask-region svi-mask-hoverable';
+        node.setAttribute('data-svi-mask-region', '1');
+        node.setAttribute('aria-hidden', 'true');
+        node.style.left = Math.round(rect.left) + 'px';
+        node.style.top = Math.round(rect.top) + 'px';
+        node.style.width = Math.round(rect.width) + 'px';
+        node.style.height = Math.round(rect.height) + 'px';
+        (document.body || document.documentElement).appendChild(node);
+        showToast('已加区域遮罩 · 悬停揭开 · Shift+悬停移除');
+        return node;
+      } catch (e) { return null; }
+    }
+
+    bindRegionMask() {
+      let sel = null;
+      let start = null;
+      document.addEventListener('mousedown', (e) => {
+        if (!this.regionArmed || e.button !== 0) return;
+        e.preventDefault();
+        e.stopPropagation();
+        start = { x: e.clientX, y: e.clientY };
+        try {
+          sel = document.createElement('div');
+          sel.className = 'svi-mask-select';
+          (document.body || document.documentElement).appendChild(sel);
+        } catch (err) { sel = null; }
+      }, true);
+      document.addEventListener('mousemove', (e) => {
+        if (!this.regionArmed || !start || !sel) return;
+        try {
+          sel.style.left = Math.min(start.x, e.clientX) + 'px';
+          sel.style.top = Math.min(start.y, e.clientY) + 'px';
+          sel.style.width = Math.abs(e.clientX - start.x) + 'px';
+          sel.style.height = Math.abs(e.clientY - start.y) + 'px';
+        } catch (err) { /* ignore */ }
+      }, true);
+      document.addEventListener('mouseup', (e) => {
+        if (!this.regionArmed || !start) return;
+        const rect = {
+          left: Math.min(start.x, e.clientX),
+          top: Math.min(start.y, e.clientY),
+          width: Math.abs(e.clientX - start.x),
+          height: Math.abs(e.clientY - start.y),
+        };
+        try { if (sel) sel.remove(); } catch (err) { /* ignore */ }
+        sel = null;
+        start = null;
+        this.regionArmed = false;
+        if (rect.width < 8 || rect.height < 8) { showToast('区域过小，已取消'); return; }
+        this.addRegionMask(rect);
       }, true);
     }
 
@@ -5809,6 +6353,14 @@
       //    小元素/策略门 —— v3.1 顺序修复 F3, 使同一图片在任何通道得同一决策)
       const crule = resolveStage(img, srcCtx, 'rule');
       if (crule) {
+        // v5.0 阶段 B: 元素级动作 (hide / mask) 的学习规则 —— 直接落对应执行器,
+        // 不进反色决策管线。仍写一条 skip 决策, 让本元素不再被反复处理 (decide-once)。
+        // 语义提示: 被规则遮罩/屏蔽的元素不会被反色 (遮罩/屏蔽优先于反色)。
+        if (crule.actionId && crule.actionId !== 'invert') {
+          applyResolvedAction(img, crule);
+          this.applyDecision(img, src, this.recordDecision(src, 'skip', crule.actionId + '-rule'));
+          return;
+        }
         // v4.6 遮罩否决: 祖先暗色蒙层使合成观感已暗, 本段一切"自动反色"结论让位
         // (手动覆盖与元素规则不受影响 —— 它们属 override 段, 已在此前返回)
         if (crule.verdict === 'invert' && maskedVeto()) return;
@@ -7056,6 +7608,15 @@
         return;
       }
 
+      // v5.0 阶段 B: 元素级动作规则 (hide / mask) —— 背景元素同样适用。
+      // 刻意只取元素级动作: 把 invert 家族的 rule 段 (种子保护 / 强制反色) 也引进来
+      // 会改变本引擎既有判定, 属另一件事, 不在本阶段夹带。
+      const eact = resolveElementAction(el);
+      if (eact) {
+        applyResolvedAction(el, eact);
+        return;
+      }
+
       // 元素门槛: 渲染尺寸 ≥ 32×32
       const w = el.clientWidth || 0;
       const h = el.clientHeight || 0;
@@ -8087,6 +8648,10 @@
   class UIController {
     constructor() {
       this.stateMachine = null;
+      // ===== v5.0: 元素动作触发器状态 (仅内存, 标签页隔离) =====
+      this.sessionHidden = new Set(); // 本会话临时隐藏的元素 (『全部恢复』用)
+      this.hoverTarget = null;        // 最近悬停元素 (Alt+M 的元素遮罩取法)
+      this.regionArmed = false;       // 区域遮罩一次性武装拖拽模式
       this.root = null;
       this.pill = null;
       this.dot = null;
@@ -8368,10 +8933,11 @@
       sitePanel.appendChild(this.buildSiteSection());
       sitePanel.appendChild(this.buildMediaSection());
 
-      // 全局页签: 外观 / 图片 / 视频 / 站点名单 / 颜色保护 / 数据与备份 / 技巧
+      // 全局页签: 外观 / 图片 / 视频 / 元素动作 / 可读性 / 动态主题 / 站点名单 / 定时 / 颜色保护 / 数据与备份 / 技巧
       globalPanel.appendChild(this.buildAppearanceSection());
       globalPanel.appendChild(this.buildImageSection());
       globalPanel.appendChild(this.buildVideoSection());
+      globalPanel.appendChild(this.buildActionsSection()); // v5.0: 🧩 元素动作
       globalPanel.appendChild(this.buildReadabilitySection());
       globalPanel.appendChild(this.buildDynamicThemeSection());
       globalPanel.appendChild(this.buildSiteListsSection());
@@ -8435,9 +9001,11 @@
         this.closeSettingsModal();
       }, true);
 
-      // Esc 关闭
+      // Esc 关闭 (v5.0: 先取消区域遮罩武装态, 再关弹窗)
       document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape' && this.modalMask.classList.contains('show')) {
+        if (e.key !== 'Escape') return;
+        if (this.cancelRegionMask()) return;
+        if (this.modalMask.classList.contains('show')) {
           this.closeSettingsModal();
         }
       });
@@ -8887,6 +9455,152 @@
     // ==========================================
     // v3.3 模态区块: 💾 数据与备份 (规则文件 / 全量备份 / 本地统计, 合并原「存储」+「数据与反馈」)
     // ==========================================
+    // ==========================================
+    // v5.0 模态区块: 🧩 元素动作 (动作开关矩阵, 任务 v5-1 R6 / AC-2)
+    //   每个动作一行: 总开关 + 作用域与生效时机写在提示文案里 + 参数入口。
+    //   开关的**读取**一律经 actionEnabled(); 此处只负责写入, 不自行推断启用状态。
+    // ==========================================
+    buildActionsSection() {
+      const sec = ui.section('🧩 元素动作', '把插件从「反色器」扩成页面媒体治理层；会改动页面观感的新动作默认关闭', 'svi-sec-actions');
+
+      const refresh = () => {
+        try { syncMaskVars(); } catch (e) { /* ignore */ }
+        if (this.actionsDiag) this.actionsDiag.setText('当前启用动作：' + enabledActions().join(' / '));
+        if (this.modalControls) this.modalControls.syncAll();
+      };
+      // 关闭某动作时拆除本页全部对应标记 (「开关即回滚」, 与 applyResolvedAction 语义一致)
+      const teardown = (id) => {
+        const attr = ACTIONS[id] && ACTIONS[id].attr;
+        if (!attr) return;
+        try {
+          document.querySelectorAll('[' + attr + ']').forEach((el) => ACTIONS[id].revert(el));
+        } catch (e) { /* ignore */ }
+      };
+
+      // —— hide: 元素屏蔽 ——
+      const hideRow = ui.toggleRow('元素屏蔽 (hide)',
+        'Alt+Shift+点击 屏蔽该元素：首次=临时（仅本会话），再点=恢复，第三次=永久（写规则）。Alt+Shift+Z 一键恢复本页临时屏蔽。作用域：元素 · 生效时机：立即',
+        () => actionEnabled('hide'),
+        (on) => {
+          state.actions.hide.enabled = !!on;
+          savePrefs();
+          if (!on) teardown('hide');
+          showToast(on ? '元素屏蔽已启用' : '元素屏蔽已关闭（本页标记已拆除）');
+          refresh();
+        });
+      sec.add(hideRow);
+      this.rowSyncs.push(() => hideRow.sync());
+
+      // —— mask: 遮罩 ——
+      const maskRow = ui.toggleRow('遮罩 (mask)',
+        'Alt+M 给鼠标所在元素加/取消遮罩；鼠标移入自动揭开，Shift+移入永久解除。作用域：元素 · 生效时机：立即',
+        () => actionEnabled('mask'),
+        (on) => {
+          state.actions.mask.enabled = !!on;
+          savePrefs();
+          if (!on) {
+            teardown('mask');
+            try { document.querySelectorAll('[data-svi-mask-region]').forEach((n) => n.remove()); } catch (e) { /* ignore */ }
+          }
+          showToast(on ? '遮罩已启用' : '遮罩已关闭（本页遮罩已拆除）');
+          refresh();
+        });
+      sec.add(maskRow);
+      this.rowSyncs.push(() => maskRow.sync());
+
+      const maskStyleRow = ui.selectRow('遮罩风格', '新加的遮罩使用的预设（已加的遮罩不受影响）',
+        [
+          { v: 'dim', label: '暗色半透明', describe: '压暗但保留轮廓 —— 「暂时不想看」。' },
+          { v: 'solid', label: '全遮挡', describe: '完全盖住 —— 屏蔽干扰区。' },
+          { v: 'frost', label: '毛玻璃', describe: '模糊化 —— 保留色块与布局感。' },
+        ],
+        () => state.maskStyle,
+        (v) => { state.maskStyle = v; savePrefs(); refresh(); });
+      sec.add(maskStyleRow);
+      this.rowSyncs.push(() => maskStyleRow.sync());
+
+      const hoverOpRow = ui.sliderRow('悬停揭开程度', '鼠标移到遮罩上时剩下的不透明度：越小揭开越彻底（0 = 完全揭开）',
+        () => state.maskHoverOpacity,
+        (v) => { state.maskHoverOpacity = v; savePrefs(); syncMaskVars(); },
+        0, 1, 0.05, '');
+      sec.add(hoverOpRow);
+      this.rowSyncs.push(() => hoverOpRow.sync());
+
+      const blurRow = ui.sliderRow('毛玻璃模糊半径', '仅「毛玻璃」风格生效',
+        () => state.maskBlur,
+        (v) => { state.maskBlur = v; savePrefs(); syncMaskVars(); },
+        0, 24, 1, 'px');
+      sec.add(blurRow);
+      this.rowSyncs.push(() => blurRow.sync());
+
+      sec.add(ui.btnRow([
+        { label: '区域遮罩（拖拽）', onClick: () => { this.armRegionMask(); refresh(); } },
+        { label: '清除全部遮罩', onClick: () => {
+            teardown('mask');
+            try { document.querySelectorAll('[data-svi-mask-region]').forEach((n) => n.remove()); } catch (e) { /* ignore */ }
+            showToast('已清除本页全部遮罩');
+          } },
+      ]));
+
+      // —— dim: 全页压暗 ——
+      const dimRow = ui.toggleRow('全页压暗 (dim)',
+        '整页盖一层压暗蒙层（比反色温和，不改内容颜色，不拦点击）。作用域：全页 · 生效时机：立即',
+        () => actionEnabled('dim'),
+        (on) => {
+          state.actions.dim.enabled = !!on;
+          savePrefs();
+          ACTIONS.dim[on ? 'apply' : 'revert']();
+          showToast(on ? '全页压暗已开启' : '全页压暗已关闭');
+          refresh();
+        });
+      sec.add(dimRow);
+      this.rowSyncs.push(() => dimRow.sync());
+
+      const dimOpRow = ui.sliderRow('压暗不透明度', '0 = 不压暗，0.9 = 接近全黑（移入鼠标可临时揭开）',
+        () => state.pageDimOpacity,
+        (v) => { state.pageDimOpacity = v; savePrefs(); syncMaskVars(); },
+        0, 0.9, 0.05, '');
+      sec.add(dimOpRow);
+      this.rowSyncs.push(() => dimOpRow.sync());
+
+      // —— peek: 悬停复原 (与既有「悬停显示原图」同一偏好, 单一真源) ——
+      const peekRow = ui.toggleRow('悬停复原 (peek)',
+        '通用门：被遮罩的元素与图片反色在鼠标移入时临时还原。与「🖼️ 图片反色 · 悬停显示原图」是同一个开关。作用域：全页 · 生效时机：立即',
+        () => actionEnabled('peek'),
+        (on) => {
+          state.hoverRestore = !!on; // 单一真源: 既有偏好键名与语义不变
+          savePrefs();
+          try { document.documentElement.classList.toggle('svi-hover-restore', !!on); } catch (e) { /* ignore */ }
+          ACTIONS.peek[on ? 'apply' : 'revert']();
+          showToast(on ? '悬停复原已开启' : '悬停复原已关闭');
+          refresh();
+        });
+      sec.add(peekRow);
+      this.rowSyncs.push(() => peekRow.sync());
+
+      // —— 安全模式 ——
+      sec.add(ui.btnRow([
+        { label: '安全模式（只留反色）', onClick: () => {
+            state.actions.hide.enabled = false;
+            state.actions.mask.enabled = false;
+            state.actions.dim.enabled = false;
+            savePrefs();
+            teardown('hide');
+            teardown('mask');
+            try { document.querySelectorAll('[data-svi-mask-region]').forEach((n) => n.remove()); } catch (e) { /* ignore */ }
+            ACTIONS.dim.revert();
+            showToast('安全模式：已关闭全部会改动页面观感的动作');
+            refresh();
+          } },
+        { label: '恢复本页临时屏蔽', onClick: () => { this.restoreAllHidden(); refresh(); } },
+      ]));
+
+      this.actionsDiag = ui.infoLine('当前启用动作：' + enabledActions().join(' / '));
+      sec.add(this.actionsDiag);
+
+      return sec.el;
+    }
+
     buildDataSection() {
       const sec = document.createElement('div');
       sec.className = 'svi-modal-section';
@@ -10360,6 +11074,16 @@
         } else if (e.altKey && (e.key === 'a' || e.key === 'A')) {
           e.preventDefault();
           this.stateMachine.onUserToggleAuto();
+        } else if (e.altKey && !e.shiftKey && (e.key === 'm' || e.key === 'M')) {
+          // v5.0: Alt+M = 给「最近悬停元素」加/取消遮罩 (元素遮罩的元素取法见 hoverTarget 跟踪)
+          e.preventDefault();
+          if (!actionEnabled('mask')) { showToast('遮罩未启用（设置 → 🧩 元素动作）'); return; }
+          if (!this.hoverTarget) { showToast('请先把鼠标移到目标元素上，再按 Alt+M'); return; }
+          this.toggleMask(this.hoverTarget);
+        } else if (e.altKey && e.shiftKey && (e.key === 'z' || e.key === 'Z')) {
+          // v5.0: Alt+Shift+Z = 恢复本页全部临时屏蔽元素
+          e.preventDefault();
+          this.restoreAllHidden();
         }
       });
     }
@@ -10543,6 +11267,15 @@
   updateFontCss();
   StatsManager.load();
 
+  // v5.0: 元素动作的启动态 —— 遮罩参数变量 + peek 门 + dim 层按偏好落地。
+  //   hide / mask 不需要启动态处理: 它们由规则/手动触发, 没有"页级常驻状态"。
+  //   dim / peek 是页级动作, 必须在此按持久化偏好恢复 (刷新后仍生效)。
+  try {
+    syncMaskVars();
+    setPeekGate(actionEnabled('peek'));
+    if (actionEnabled('dim')) applyPageDim(true);
+  } catch (e) { /* ignore */ }
+
   // 调试与单测句柄 (始终暴露, 纯逻辑可直接在 Node 中通过环境桩单测)
   window.__svi = {
     version: SCRIPT_VERSION,
@@ -10584,6 +11317,18 @@
     SOURCES,
     resolveStage,
     arbitrate,
+    // v5.0 阶段 B: 动作开关矩阵 / 遮罩预设 / 元素级动作派发
+    actionEnabled,
+    enabledActions,
+    applyResolvedAction,
+    resolveElementAction,
+    MASK_PRESETS,
+    maskPseudoAvailable,
+    readActionManual,
+    ACTION_MANUAL_SCOPE,
+    applyPageDim,
+    setPeekGate,
+    syncMaskVars,
     ImageInvertEngine,
     // v3.2 纯函数导出 (单测契约): 视频画面调节滤镜链构建
     buildVideoTuneFilter,
@@ -10630,6 +11375,10 @@
         updateImageFilterCss();
         applyVideoTune();
         updateFontCss();
+        // v5.0: 远端偏好到达后重放页级动作态 (遮罩变量 / peek 门 / dim 层)
+        syncMaskVars();
+        setPeekGate(actionEnabled('peek'));
+        if (actionEnabled('dim')) applyPageDim(true); else applyPageDim(false);
       } catch (e) { /* ignore */ }
     };
     Store.init();

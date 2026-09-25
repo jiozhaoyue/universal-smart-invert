@@ -1,7 +1,7 @@
 # Universal Smart Video & Image Invert
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-4.6.1-blue.svg?style=flat-square" alt="Version">
+  <img src="https://img.shields.io/badge/version-5.0.0-blue.svg?style=flat-square" alt="Version">
   <img src="https://img.shields.io/badge/license-AGPL--3.0-green.svg?style=flat-square" alt="License">
   <img src="https://img.shields.io/badge/Tampermonkey-Supported-orange.svg?style=flat-square" alt="Tampermonkey">
   <img src="https://img.shields.io/badge/ScriptCat-Supported-purple.svg?style=flat-square" alt="ScriptCat">
@@ -51,6 +51,87 @@ Specifically designed to tame **blinding white PowerPoint/PDF lecture slides in 
   - `Alt + I`: Toggle video inversion (with manual override lock);
   - `Alt + A`: Toggle smart auto mode;
   - `Alt + Left Click`: Force toggle inversion on any specific image or SVG.
+
+---
+
+## 🆕 What's New in v5.0 (Page-Media Governance Layer · Unified Actions)
+
+> v5.0 grows the script from an "inverter" into a **general page-media governance layer**:
+> one unified element-action table, one unified decision-priority chain, one unified switch
+> matrix. **Every new action is off by default** — with them all off, behaviour is identical
+> to v4.6.1.
+
+### 1. 🧩 Unified element-action table (Action Registry)
+
+Six element actions share **one** resolution entry point and **one** write-point arbitration:
+
+| Action | Purpose | Default |
+| :--- | :--- | :--- |
+| `invert` | Invert (the existing main path) | on |
+| `keep` | Leave as-is | on |
+| `bgInvert` | Invert background images | on |
+| `hide` | Block an element | **off** |
+| `mask` | Overlay a mask | **off** |
+| `dim` | Dim the whole page | **off** |
+| `peek` | Generic hover-reveal gate (the same switch as "reveal original on hover") | on |
+
+> The real priority chain is **not** a straight line:
+> `manual > user element rules > 【decision snapshot】 > learned rules > seed protect >
+> favicon skip > seed force-invert > pixel`
+> — the decision snapshot sits **between** the two stages, and its position may not move.
+> That is exactly what v5.0 preserved verbatim.
+
+### 2. 🚫 Element blocking (hide)
+
+- `Alt+Shift+click` blocks the element: **first = temporary** (this session only, gone on
+  reload), **click again = restore**, **third = permanent** (writes a learned rule, so
+  same-shaped elements are blocked automatically from then on);
+- `Alt+Shift+Z` restores every temporary block on the page;
+- Blocking uses `display:none` (no layout space kept), so **hover-peek is not offered** —
+  you cannot hover what is not rendered.
+
+### 3. 🌫 Masks (mask) — three adjustable styles
+
+- `Alt+M` masks/unmasks the **hovered element**; the panel's "🧩 Element actions" section has
+  a "Region mask (drag)" button (one-shot arm, drag to select, `Esc` cancels);
+- **Three presets** (switchable, parameters adjustable):
+
+  | Preset | Effect | Opacity | On hover |
+  | :--- | :--- | :--- | :--- |
+  | Dim | Darkened, silhouette kept | 0.75 | 0.15 |
+  | Solid | Fully covered | 1.0 | 0.15 |
+  | Frost | Blurred, layout feel kept | 0.35 | 0.05 |
+
+- **Move the mouse to dismiss**: hovering a mask reveals it (down to an adjustable opacity);
+  moving away restores it. **`Shift` + hover removes the mask permanently**;
+- Implemented with an `::after` pseudo-element (zero DOM nodes, follows the element on
+  scroll/transform, no z-index wars). **If the site already uses `::after` on that element,
+  the mask is skipped with a notice** — this project never appends child nodes into site
+  elements (it would break the site's `:first-child` / `childNodes` assumptions).
+
+### 4. 🌑 Whole-page dimming (dim)
+
+One full-page dim layer (`pointer-events:none`, never intercepts clicks). Gentler than
+inverting and it **does not touch content colours**. Adjustable opacity (0 ~ 0.9); hovering
+reveals temporarily.
+
+### 5. 🔌 Switch matrix and safe mode
+
+- Every action gets **one row with its scope and when it takes effect**, all under
+  "🧩 Element actions";
+- Turning an action off **immediately strips every corresponding marker on the page**
+  (switch-as-rollback, no reload needed);
+- A one-click "Safe mode (invert only)" turns off everything that alters page appearance.
+
+### 6. ⌨️ New shortcuts
+
+| Shortcut | Action |
+| :--- | :--- |
+| `Alt+Shift+click` | Block / restore the element (three-state cycle, see above) |
+| `Alt+M` | Mask / unmask the hovered element |
+| `Alt+Shift+Z` | Restore every temporary block on the page |
+| `Shift`+hover a mask | Remove that mask permanently |
+| `Esc` | Cancel the armed region-mask mode (does not change the existing "close panel" behaviour) |
 
 ---
 

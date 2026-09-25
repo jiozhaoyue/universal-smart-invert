@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "全网通用智能视频与图片反色 (Universal Smart Video & Image Invert)",
-  "version": "4.6.1",
-  "description": "全网通用智能视频与图片反色脚本 (v4.6, AGPL-3.0 开源)。新增: 本地优先判定 (所见即所得, 弱网/断网下按本地已渲染内容抢先判定, 不再等资源加载完成), Alt+点击一次生效的手动结论防覆盖层, 暗色遮罩上下文感知",
+  "version": "5.0.0",
+  "description": "全网通用智能视频与图片反色脚本 (v5.0, AGPL-3.0 开源)。v5.0 把插件扩为「页面媒体治理层」: 统一元素动作表 (invert/keep/hide/mask/dim/peek) 经单一来源表与写点仲裁解析; 新增元素屏蔽",
   "icons": {
     "16": "icons/icon16.png",
     "32": "icons/icon32.png",

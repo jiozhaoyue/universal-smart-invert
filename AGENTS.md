@@ -27,7 +27,9 @@ Single-file Tampermonkey userscript (`universal-smart-invert.user.js`, the CANON
 Chrome extension DERIVED from it. Key paths:
 
 - `universal-smart-invert.user.js` — all engines (video HIL state machine, image/bg-image/canvas
-  decision pipeline, background replace, WebGL video FX, Store, RuleLearner, TimelineLearner, UI)
+  decision pipeline, background replace, WebGL video FX, Store, RuleLearner, TimelineLearner, UI,
+  and the v5.0 **Action Registry** = ordered `SOURCES` table + `resolveStage` + `arbitrate` +
+  `ACTIONS` executors, with the switch matrix read only through `actionEnabled(id)`)
 - `extension/` — GENERATED output (content.js + manifest.json + icons). **Never hand-edit**;
   rebuild after every header change with `node scripts/build-extension.js`
 - `scripts/` — zero-dependency build chain (build-extension, gen-icons, pack, zip lib) and live
