@@ -2721,4 +2721,151 @@ setTimeout(() => {
   console.log('✓ v5.4 unit tests passed: 帧序列两个门(含跃变优先于白闪)/动图闸门/全帧谱三分类(混合型默认不反)/分帧步长覆盖全段');
 })();
 
+// ============================================================
+// v5.5 单测 (三档迁移 / 本站启用门 / pending 遮罩与预算 / 逃生)
+// 契约来源: .trellis/tasks/09-25-v5-mask-guard/design.md §D-1 / §D-2 / §D-4 / §D-5
+// ============================================================
+(function () {
+  const { maskShouldArm, pendingMask, siteMediaStore, loadState } = svi;
+
+  function mkEl(opts) {
+    const o = opts || {};
+    const attrs = Object.assign({}, o.attrs);
+    const el = {
+      tagName: o.tagName || 'IMG', id: '', className: '', isConnected: true,
+      getAttribute(k) { return Object.prototype.hasOwnProperty.call(attrs, k) ? attrs[k] : null; },
+      setAttribute(k, v) { attrs[k] = String(v); },
+      removeAttribute(k) { delete attrs[k]; },
+      matches() { return false; },
+      querySelectorAll() { return []; },
+      _attrs: attrs,
+    };
+    return el;
+  }
+
+  // ---- 1. 三档 + 旧布尔无损迁移 (design D-1) ----
+  // 注意: loadState 优先读 svi: 命名空间 (Store.get('prefs')), 而不是 localStorage 遗留键。
+  // 初版写到遗留键上 → 读到的仍是旧值, 断言假失败 (已改为直接写 Store)。
+  const origStorePrefs = svi.Store.get('prefs', null);
+  function withPrefs(obj) {
+    svi.Store.set('prefs', obj || {});
+    return loadState();
+  }
+  assert.strictEqual(withPrefs({ flashGuard: true }).flashGuardLevel, 'document',
+    '旧 true → document (= v4.6.1 行为, 零回归)');
+  assert.strictEqual(withPrefs({ flashGuard: false }).flashGuardLevel, 'off',
+    '旧 false → off');
+  assert.strictEqual(withPrefs({}).flashGuardLevel, 'document',
+    '字段缺失 → document (默认即 v4.6.1 行为)');
+  assert.strictEqual(withPrefs({ flashGuardLevel: 'media' }).flashGuardLevel, 'media', '新值原样保留');
+  assert.strictEqual(withPrefs({ flashGuardLevel: 'bogus' }).flashGuardLevel, 'document',
+    '非法档位回退 document');
+  // flashGuard 是派生值 (旧版本仍能读到正确的布尔)
+  assert.strictEqual(withPrefs({ flashGuardLevel: 'media' }).flashGuard, true, 'media → flashGuard=true (派生)');
+  assert.strictEqual(withPrefs({ flashGuardLevel: 'off' }).flashGuard, false, 'off → flashGuard=false (派生)');
+  // 预算钳制
+  const clamped = withPrefs({ maskBudgetMs: 99999, maskMaxElements: 0, siteInvertRate: 5 });
+  assert.strictEqual(clamped.maskBudgetMs, 5000, '总时长预算钳到上限');
+  assert.strictEqual(clamped.maskMaxElements, 1, '元素数钳到下限');
+  assert.strictEqual(clamped.siteInvertRate, 0.95, '反色率门钳到上限');
+  if (origStorePrefs) svi.Store.set('prefs', origStorePrefs); else svi.Store.remove('prefs');
+
+  // ---- 2. 本站启用门 (四类条件 + 首访不遮) ----
+  assert.strictEqual(maskShouldArm('x', {}).armed, false, '首访 (无任何证据) 一律不遮');
+  assert.ok(/首访/.test(maskShouldArm('x', {}).reason), '首访原因要写明');
+  assert.strictEqual(maskShouldArm('x', { override: 'off', hasForceInvert: true }).armed, false,
+    '面板禁用优先于一切自动门');
+  assert.strictEqual(maskShouldArm('x', { override: 'on' }).armed, true, '面板强制启用');
+  assert.strictEqual(maskShouldArm('x', { hasForceInvert: true }).armed, true, '内置强制反色 → 启用');
+  assert.strictEqual(maskShouldArm('x', { hasLearnedInvert: true }).armed, true, '学习到的反色规则 → 启用');
+  // 历史反色率门
+  assert.strictEqual(maskShouldArm('x', { seen: 4, inverted: 4, minSeen: 5 }).armed, false,
+    '样本数未达门 → 不遮 (即使反色率 100%)');
+  assert.strictEqual(maskShouldArm('x', { seen: 5, inverted: 1, max: 1, minSeen: 5, rateThreshold: 0.35 }).armed, false,
+    '反色率 20% < 35% → 不遮');
+  assert.strictEqual(maskShouldArm('x', { seen: 5, inverted: 2, minSeen: 5, rateThreshold: 0.35 }).armed, true,
+    '反色率 40% ≥ 35% 且样本达门 → 启用');
+  assert.strictEqual(maskShouldArm('x', { seen: 10, inverted: 3, minSeen: 5, rateThreshold: 0.3 }).armed, true,
+    '恰好等于阈值的边界 (0.30 ≥ 0.30) → 启用 (闭区间)');
+  assert.strictEqual(maskShouldArm('x', { seen: 10, inverted: 2, minSeen: 5, rateThreshold: 0.3 }).armed, false,
+    '恰好在阈值下方 (0.20 < 0.30) → 不遮');
+
+  // ---- 3. siteMediaStore: 记录与比率 ----
+  siteMediaStore.data = null;
+  try { svi.Store.remove('siteMedia'); } catch (e) { /* ignore */ }
+  siteMediaStore.record('a.test', true);
+  siteMediaStore.record('a.test', true);
+  siteMediaStore.record('a.test', false);
+  const st1 = siteMediaStore.stats('a.test');
+  assert.strictEqual(st1.seen, 3, 'seen 累加');
+  assert.strictEqual(st1.inverted, 2, 'inverted 累加');
+  assert.ok(Math.abs(siteMediaStore.rate('a.test') - 2 / 3) < 1e-9, '反色率 = 2/3');
+  assert.strictEqual(siteMediaStore.rate('never.test'), 0, '无记录站点反色率 0');
+  assert.strictEqual(siteMediaStore.stats('never.test').seen, 0, '无记录站点 seen 0');
+
+  // ---- 4. pending 遮罩: 打标 / 摘罩 / 白名单 / 暂停 / 预算 ----
+  const savedMaskMax = svi.prefs.maskMaxElements;
+  const savedPaused = svi.runtime.maskPaused;
+  pendingMask.armed = true;
+  pendingMask.count = 0;
+  pendingMask.settled = 0;
+  svi.runtime.maskPaused = false;
+
+  const e1 = mkEl({});
+  assert.strictEqual(pendingMask.tag(e1), true, '正常情况下打标成功');
+  assert.strictEqual(e1.getAttribute('data-svi-pending'), '', '写 pending 属性 (纯 CSS 门的载体)');
+  assert.strictEqual(pendingMask.count, 1, '计数 +1');
+  // 幂等: 已打标不重复
+  assert.strictEqual(pendingMask.tag(e1), false, '已打标不重复');
+  // 摘罩
+  assert.strictEqual(pendingMask.settle(e1, 'pixel'), true, '摘罩返回 true');
+  assert.strictEqual(e1.getAttribute('data-svi-pending'), null, 'pending 属性被摘');
+  assert.strictEqual(e1.getAttribute('data-svi-settled'), 'pixel', '写 settled 并记原因');
+  assert.strictEqual(pendingMask.count, 0, '计数归零');
+  assert.strictEqual(pendingMask.settle(e1, 'again'), false, '重复摘罩返回 false (幂等)');
+
+  // 白名单: 用户已表态的元素不打标
+  const e2 = mkEl({ attrs: { 'data-svi-manual': 'restore' } });
+  assert.strictEqual(pendingMask.tag(e2), false, '用户已手动表态的元素不得被遮');
+  assert.strictEqual(e2.getAttribute('data-svi-pending'), null, '且不写 pending');
+
+  // 暂停态 (Esc 逃生后) 不打标
+  svi.runtime.maskPaused = true;
+  assert.strictEqual(pendingMask.tag(mkEl({})), false, '暂停态不打标');
+  svi.runtime.maskPaused = false;
+
+  // 元素数预算: 超出部分不打标 + 记一次预算超限
+  svi.prefs.maskMaxElements = 2;
+  const c0 = (svi.stats.counters || {}).maskBudgetExceeded || 0;
+  pendingMask.count = 0;
+  const b1 = mkEl({}); const b2 = mkEl({}); const b3 = mkEl({});
+  assert.strictEqual(pendingMask.tag(b1), true, '第 1 个在预算内');
+  assert.strictEqual(pendingMask.tag(b2), true, '第 2 个在预算内');
+  assert.strictEqual(pendingMask.tag(b3), false, '第 3 个超出预算 → 不打标 (宁可白闪也不白藏)');
+  assert.strictEqual(b3.getAttribute('data-svi-pending'), null, '超预算元素不得被遮');
+  assert.ok(((svi.stats.counters || {}).maskBudgetExceeded || 0) > c0, '超预算必须可观测');
+
+  // settleAll: 一次性摘除 + 原因可追溯
+  assert.strictEqual(pendingMask.settleAll('escape') >= 1, true, 'settleAll 摘除至少 1 个');
+  assert.strictEqual(b1.getAttribute('data-svi-pending'), null, 'settleAll 后无残留 pending');
+  assert.strictEqual(pendingMask.count, 0, 'settleAll 后计数归零');
+
+  // 平均遮罩时长: 有摘罩记录时可算
+  pendingMask.settled = 2;
+  pendingMask.totalMs = 300;
+  assert.strictEqual(pendingMask.avgMs(), 150, '平均遮罩时长');
+  pendingMask.settled = 0;
+  assert.strictEqual(pendingMask.avgMs(), 0, '无记录时返回 0 (不除零)');
+
+  // ---- 清理 ----
+  svi.prefs.maskMaxElements = savedMaskMax;
+  svi.runtime.maskPaused = savedPaused;
+  pendingMask.armed = false;
+  pendingMask.count = 0;
+  siteMediaStore.data = null;
+  try { svi.Store.remove('siteMedia'); } catch (e) { /* ignore */ }
+
+  console.log('✓ v5.5 unit tests passed: 三档与旧布尔无损迁移 / 本站启用门四类条件(含首访不遮与边界) / pending 打标与白名单与预算 / settleAll 幂等 / 逃生暂停');
+})();
+
 

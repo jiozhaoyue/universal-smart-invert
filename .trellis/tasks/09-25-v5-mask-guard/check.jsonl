@@ -1,0 +1,8 @@
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "检查项: 打标回调是否零布局读取(不得出现 gBCR/gCS/offsetWidth); 遮罩门是否纯 CSS; observe 目标是否为 document; 新纯函数是否挂 __svi 且被单测; 复验 v5.0-v5.4 各节契约未被破坏。"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "检查项: 档位枚举在 loadState / 面板 / setupFlashGuard / 迁移 四处是否都被处理; 旧布尔迁移是否两种取值都覆盖; svi:siteMedia 是否有容量上限。"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "检查项: 是否复用了既有 setupFlashGuard 与 MASK_PRESETS, 而没有第二套黑底逻辑或第二份遮罩风格定义。"}
+{"file": ".trellis/tasks/09-25-v5-media-governance/prd.md", "reason": "检查项: AC-6 三条(预算兑现 / 失败放行 / 一键全局关闭)是否各有可验证路径与证据; 约束 2 形态差异是否在面板显式标注。"}
+{"file": ".trellis/tasks/09-25-v5-mask-guard/prd.md", "reason": "逐条核对 R1-R6; 重点核对 R4「用户脚本形态的诚实降级」—— 面板说明文案必须存在, 且首屏元素**不被打标**(可 bench 断言)。"}
+{"file": ".trellis/tasks/09-25-v5-mask-guard/design.md", "reason": "检查项: (1) 默认档(document)行为是否与 v4.6.1 逐字一致 (D-1); (2) 首访站点是否不遮 (D-2); (3) 打标是否零布局 (D-3); (4) 摘罩是否挂在唯一决策落点而非定时器 (D-4); (5) 失败是否必放行 (D-4); (6) Esc 优先级是否在既有链之后 (D-5); (7) 三个计数器是否可观测 (D-6)。"}
+{"file": ".trellis/tasks/09-25-v5-mask-guard/implement.md", "reason": "检查项: 三个回滚点 (R1-R3) 是否真实跑过; Scenario 29 是否覆盖"形态差异"与"失败必放行"这两条最容易含糊的验收; 复选框是否随执行实时勾选; 偏离项是否留痕。"}
+{"file": ".trellis/tasks/09-25-v5-action-registry/design.md", "reason": "检查项: MASK_PRESETS 是否作为唯一风格来源被复用 (不得在 CSS 里另写一份预设值)。"}

@@ -678,4 +678,58 @@ CSS `filter` / `content:url` 都无法按时序切换。"按多数帧近似"是�
   时是 no-op，而某个前序场景会把它关掉。断言计数类行为前要在场景内显式打开并还原。
 - **判可见性不要用 `offsetParent`**：对 `position: fixed` 容器内的元素恒为 `null`。
 
+---
+
+## v5.5 Additions (加载前遮罩契约)
+
+### 1. 默认值会**掩盖迁移分支**（本片最值得记的一条）
+
+三档 `flashGuardLevel` 要从旧布尔 `flashGuard` 迁移。初版写成：
+
+```js
+if (['off','document','media'].indexOf(merged.flashGuardLevel) === -1) {
+  merged.flashGuardLevel = (merged.flashGuard === false) ? 'off' : 'document';
+}
+```
+
+**永远不执行** —— 因为 `merged = {...defaults, ...stored}`，而 `defaults.flashGuardLevel` 已经是
+`'document'`，`merged` 里**永远有合法值**。
+
+正确写法要判**存储里有没有这个键**：
+```js
+const rawLevel = (safeStored && typeof safeStored === 'object') ? safeStored.flashGuardLevel : undefined;
+if (['off','document','media'].indexOf(rawLevel) === -1) { /* 迁移 */ }
+```
+
+> 泛化：**任何"字段缺失时从旧字段迁移"的逻辑都必须读原始存储对象，不能读合并后的对象**。
+> 这条由单测直接钉住（`flashGuard:false → 'off'`）。
+
+### 2. `sec` 不一定是 `ui.section()`
+
+`buildDynamicThemeSection` 的 `sec` 是**裸 `document.createElement('div')`**，用
+`sec.appendChild(row.row)`；而其它区块用的是 `ui.section()` 返回的 `{el, add}`，用 `sec.add(row)`。
+
+混用会让**整个设置弹窗构建失败**（错误被吞掉，只表现为"弹窗不存在"）。
+bench 场景 1 的 `UI Settings Modal: ✗ Missing` 是这类错误的唯一表征 ——
+**改任何模态区块前先确认该方法的 `sec` 是哪一种**。
+
+### 3. 打标路径：零布局、纯 CSS 门、集合兜底
+
+- 打标只写属性，**绝不读布局**（不调 gBCR / gCSS）—— 它在 MutationObserver 回调里，属热路径；
+- 灰罩门是**纯 CSS**（`html[data-svi-masking] [data-svi-pending]:not([data-svi-settled])`），
+  摘罩只需摘属性，不需要删样式；
+- `settleAll` 走**维护的元素集合**而不是全文档 `querySelector` —— 更快，且不依赖 DOM 查询能力
+  （否则 Node 单测无法覆盖）。
+
+### 4. 形态能力差异必须显式，且要有断言
+
+用户脚本 `@run-at document-end` 时首屏已渲染 → **刻意不做首屏扫描**（`tag` 只由
+MutationObserver 触发）。这样"首屏不被打标"是**结构保证**而不是运气，并可用 bench 断言
+（Scenario 29b：`before === 0`）。
+
+### 5. 逃生通道的优先级
+
+`Esc` 只在 `pendingMask.count > 0` 时接管 —— 否则会抢掉"关闭弹窗 / 取消区域遮罩武装态"。
+**新增全局快捷键/全局 Esc 行为时必须插在既有链的合适位置，不能无条件拦截。**
+
 

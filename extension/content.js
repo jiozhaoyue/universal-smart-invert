@@ -288,6 +288,17 @@
     frameSampleCap: 60,        // 谱分析最多解多少帧 (4 ~ 200; 超出按 stride 抽帧)
     animDecodeBudgetMs: 40,    // 谱分析毫秒预算 (10 ~ 300; 超限用已解帧出结论)
     animRecheckMs: 30,         // 动图结论多久后允许复议一次 (秒, 5 ~ 600)
+
+    // ===== v5.5 新增偏好: 加载前遮罩 (任务 v5-5) =====
+    // 三档取代原布尔 flashGuard (旧值由 loadState 无损迁移: true=document / false=off)。
+    // 默认 document = v4.6.1 行为, 故默认零回归。
+    flashGuardLevel: 'document', // off | document(文档级黑底) | media(+ 元素 pending 遮罩)
+    maskPending: true,           // media 档下是否启用元素 pending 遮罩
+    maskBudgetMs: 1200,          // 遮罩总时长预算 (超限全部摘罩放行)
+    maskMaxElements: 80,         // 同时遮罩的元素数上限 (超出部分不打标)
+    maskSettleTimeoutMs: 800,    // 单元素摘罩超时兜底
+    siteInvertRate: 0.35,        // 本站"已知会反色"门: 历史反色率门
+    siteMinSeen: 5,              // 本站"已知会反色"门: 最少样本数
   };
 
   // 运行时状态 (仅存于内存, 每个标签页独立, 绝不写入存储 —— 标签页隔离)
@@ -298,6 +309,7 @@
     normalSceneCount: 0,
     fileAccessBlocked: false,     // file:// 页面且文件访问被拦截 (UI 显示一次性提示)
     fxTransformsInFlight: 0,      // 图片特效当前并发数 (诊断)
+    maskPaused: false,            // v5.5: 用户按过 Esc/胶囊逃生 → 本会话不再遮罩 (仅内存, 不落盘)
   };
 
   // 智能小元素屏蔽上下文选择器 (p0)
@@ -1045,7 +1057,25 @@
     merged.animAllLightRatio = clampNumber(merged.animAllLightRatio, 0.6, 1, 0.9);
     merged.frameSampleCap = Math.round(clampNumber(merged.frameSampleCap, 4, 200, 60));
     merged.animDecodeBudgetMs = Math.round(clampNumber(merged.animDecodeBudgetMs, 10, 300, 40));
-    merged.animRecheckMs = Math.round(clampNumber(merged.animRecheckMs, 5, 600, 30));
+    animRecheckMs: Math.round(clampNumber(merged.animRecheckMs, 5, 600, 30));
+
+    // v5.5 字段规范化: 加载前遮罩三档 + **旧布尔无损迁移**
+    //   迁移规则: flashGuard=true → 'document' (= v4.6.1 行为), false → 'off', 缺失 → 'document'。
+    //   注意必须看**存储里有没有这个键**, 不能看 merged —— defaults 里已经有 'document',
+    //   merged 永远拿到合法值, 那样迁移分支永远不执行 (初版就是这个错, 被单测抓到)。
+    const rawLevel = (safeStored && typeof safeStored === 'object') ? safeStored.flashGuardLevel : undefined;
+    if (['off', 'document', 'media'].indexOf(rawLevel) === -1) {
+      merged.flashGuardLevel = (merged.flashGuard === false) ? 'off' : 'document';
+    } else {
+      merged.flashGuardLevel = rawLevel;
+    }
+    merged.flashGuard = merged.flashGuardLevel !== 'off';
+    merged.maskPending = merged.maskPending !== false;
+    merged.maskBudgetMs = Math.round(clampNumber(merged.maskBudgetMs, 200, 5000, 1200));
+    merged.maskMaxElements = Math.round(clampNumber(merged.maskMaxElements, 1, 500, 80));
+    merged.maskSettleTimeoutMs = Math.round(clampNumber(merged.maskSettleTimeoutMs, 200, 5000, 800));
+    merged.siteInvertRate = clampNumber(merged.siteInvertRate, 0.05, 0.95, 0.35);
+    merged.siteMinSeen = Math.round(clampNumber(merged.siteMinSeen, 1, 50, 5));
     // 标签页隔离: 运行时状态绝不入库
     delete merged.invertActive;
 
@@ -2787,6 +2817,196 @@
     skip: '跳过',
   };
 
+  // ==========================================
+  // 4.9 v5.5 加载前遮罩 (任务 v5-5)
+  //     设计: .trellis/tasks/09-25-v5-mask-guard/design.md
+  //
+  //     **形态硬约束**: 真·"首帧前遮罩"只有扩展形态 (document_start) 能做到。
+  //     用户脚本 @run-at document-end, 脚本运行时首屏元素已渲染 —— 只能覆盖"脚本启动之后
+  //     动态插入的元素", 首屏由文档级黑底兜底。面板必须显式标注这个差异。
+  // ==========================================
+  const SITE_MEDIA_KEY = 'siteMedia';
+  const SITE_MEDIA_MAX = 200;
+
+  const siteMediaStore = {
+    data: null,
+    pending: 0,
+    flushTimer: null,
+    load() {
+      if (this.data) return this.data;
+      let d = null;
+      try { d = Store.get(SITE_MEDIA_KEY, null); } catch (e) { d = null; }
+      if (!d || typeof d !== 'object' || Array.isArray(d)) d = {};
+      this.data = d;
+      return d;
+    },
+    host(h) {
+      const d = this.load();
+      const k = String(h == null ? '' : h);
+      let hd = d[k];
+      if (!hd || typeof hd !== 'object' || Array.isArray(hd)) hd = {};
+      if (typeof hd.seen !== 'number') hd.seen = 0;
+      if (typeof hd.inverted !== 'number') hd.inverted = 0;
+      d[k] = hd;
+      return hd;
+    },
+    // 决策落点调用。写入走 1s 去抖 —— 首屏可能连落几十条决策, 逐条落盘没意义。
+    record(h, inverted) {
+      try {
+        const hd = this.host(h);
+        hd.seen = (hd.seen || 0) + 1;
+        if (inverted) hd.inverted = (hd.inverted || 0) + 1;
+        hd.at = Date.now();
+        const d = this.load();
+        const keys = Object.keys(d);
+        if (keys.length > SITE_MEDIA_MAX) {
+          keys.sort((a, b) => (d[a].at || 0) - (d[b].at || 0));
+          for (const k of keys.slice(0, keys.length - SITE_MEDIA_MAX)) delete d[k];
+        }
+        if (this.flushTimer) return;
+        this.flushTimer = setTimeout(() => {
+          this.flushTimer = null;
+          this.persist();
+        }, 1000);
+      } catch (e) { /* ignore */ }
+    },
+    rate(h) {
+      try {
+        const hd = this.host(h);
+        return hd.seen > 0 ? (hd.inverted / hd.seen) : 0;
+      } catch (e) { return 0; }
+    },
+    stats(h) {
+      try {
+        const hd = this.host(h);
+        return { seen: hd.seen || 0, inverted: hd.inverted || 0, at: hd.at || 0 };
+      } catch (e) { return { seen: 0, inverted: 0, at: 0 }; }
+    },
+    persist() { try { Store.set(SITE_MEDIA_KEY, this.load()); } catch (e) { /* ignore */ } },
+  };
+
+  // 本站"已知会反色"门 (纯函数, 单测契约): 四类条件任一即可。**首访站点一律不遮**。
+  function maskShouldArm(host, opts) {
+    const o = opts || {};
+    try {
+      if (o.override === 'off') return { armed: false, reason: '本站已被你设为不遮' };
+      if (o.override === 'on') return { armed: true, reason: '本站被你强制启用' };
+      if (o.hasForceInvert) return { armed: true, reason: '本站内置规则含强制反色选择器' };
+      if (o.hasLearnedInvert) return { armed: true, reason: '本站存在学习到的反色规则' };
+      const seen = Number(o.seen) || 0;
+      const minSeen = Math.max(1, Math.min(50, Number(o.minSeen) || 5));
+      const rate = seen > 0 ? (Number(o.inverted) || 0) / seen : 0;
+      const th = typeof o.rateThreshold === 'number' ? o.rateThreshold : 0.35;
+      const pct = Math.round(rate * 100);
+      if (seen >= minSeen && rate >= th) {
+        return { armed: true, reason: '上次本站反色率 ' + pct + '%（≥' + Math.round(th * 100) + '%）' };
+      }
+      if (seen > 0) return { armed: false, reason: '上次本站反色率 ' + pct + '% 未达门' };
+      return { armed: false, reason: '本站尚无历史记录（首访不遮，宁可白闪一次也不白藏）' };
+    } catch (e) {
+      return { armed: false, reason: '门判定失败' };
+    }
+  }
+
+  // ===== 元素级 pending 遮罩 =====
+  //   打标阶段是**同步热路径**: 只写属性, **绝不读布局** (不调 gBCR / gComputedStyle)。
+  const pendingMask = {
+    armed: false,
+    count: 0,
+    settled: 0,
+    totalMs: 0,
+    t0: 0,
+    bgTimer: null,
+    elTimers: null,
+    observer: null,
+    // 已打标元素的集合 (有界: 受 maskMaxElements 约束)。
+    //   settleAll 走它而不是全文档 querySelector —— 更快, 且不依赖 DOM 查询能力 (可单测)。
+    pending: new Set(),
+    tag(el) {
+      try {
+        if (!this.armed || runtime.maskPaused) return false;
+        if (!el || typeof el.setAttribute !== 'function' || typeof el.getAttribute !== 'function') return false;
+        if (el.getAttribute('data-svi-pending') !== null || el.getAttribute('data-svi-settled') !== null) return false;
+        // 用户已表态的元素直接放行 (不打标, 也不留 settled——它本来就不该被藏)
+        if (el.getAttribute('data-svi-manual') !== null) return false;
+        const max = Math.max(1, Math.min(500, Number(state.maskMaxElements) || 80));
+        if (this.count >= max) {
+          if (!this._over) {
+            this._over = true;
+            StatsManager.count('maskBudgetExceeded');
+          }
+          return false;
+        }
+        if (!this.t0) this.t0 = Date.now();
+        el.setAttribute('data-svi-pending', '');
+        this.pending.add(el);
+        this.count += 1;
+        if (!this.bgTimer) {
+          this.bgTimer = setTimeout(() => {
+            this.bgTimer = null;
+            this.settleAll('budget');
+          }, Math.max(200, Math.min(5000, Number(state.maskBudgetMs) || 1200)));
+        }
+        // 单元素超时兜底 (元素可能既不失败也不落决策 —— 例如被策略门提前跳过)
+        try {
+          this.elTimers = this.elTimers || new Set();
+          const t = setTimeout(() => {
+            this.elTimers.delete(t);
+            this.settle(el, 'timeout');
+          }, Math.max(200, Math.min(5000, Number(state.maskSettleTimeoutMs) || 800)));
+          this.elTimers.add(t);
+        } catch (e) { /* ignore */ }
+        return true;
+      } catch (e) { return false; }
+    },
+    settle(el, reason) {
+      try {
+        if (!el || typeof el.getAttribute !== 'function') return false;
+        if (el.getAttribute('data-svi-pending') === null) return false;
+        el.removeAttribute('data-svi-pending');
+        el.setAttribute('data-svi-settled', String(reason || '1'));
+        this.pending.delete(el);
+        this.count = Math.max(0, this.count - 1);
+        this.settled += 1;
+        if (this.t0) { this.totalMs += Date.now() - this.t0; this.t0 = 0; }
+        return true;
+      } catch (e) { return false; }
+    },
+    settleAll(reason) {
+      try {
+        if (this.bgTimer) { clearTimeout(this.bgTimer); this.bgTimer = null; }
+        if (this.elTimers) {
+          for (const t of this.elTimers) clearTimeout(t);
+          this.elTimers.clear();
+        }
+        let n = 0;
+        for (const el of Array.from(this.pending)) {
+          if (this.settle(el, reason)) n += 1;
+        }
+        // 兜底: 集合可能漏掉(极端情况下的跨壳元素), 再按属性扫一遍
+        try {
+          document.querySelectorAll('[data-svi-pending]').forEach((el) => { if (this.settle(el, reason)) n += 1; });
+        } catch (e) { /* ignore */ }
+        this.pending.clear();
+        this.count = 0;
+        this.t0 = 0;
+        if (reason === 'budget') StatsManager.count('maskBudgetExceeded');
+        return n;
+      } catch (e) { return 0; }
+    },
+    avgMs() {
+      return this.settled > 0 ? Math.round(this.totalMs / this.settled) : 0;
+    },
+    // 逃生: Esc / 胶囊按钮 —— 摘除全部并**本会话暂停**
+    escape() {
+      const n = this.settleAll('escape');
+      runtime.maskPaused = true;
+      try { if (this.observer) this.observer.disconnect(); } catch (e) { /* ignore */ }
+      showToast('已显示全部内容 · 本会话不再遮罩');
+      return n;
+    },
+  };
+
   // ===== v5.3 形状签名与跨站先验 (design D-4) =====
   //   形状 = 与 host 解耦的元素"长相": tag + 排序后前 3 个 class 词元 + 尺寸桶 + 上下文词元。
   //   目的: 让"某个 host 上学到的结论"对新 host 上的同形元素形成**最弱先验** (冷启动加速)。
@@ -4411,8 +4631,14 @@
         opacity: var(--svi-mask-hover, 0.15);
       }
 
-      /* --- 区域选取框 (与 rect 反色框共用视觉, 独立类避免影响既有选择器) --- */
-      .svi-mask-select {
+      /* --- v5.5 加载前 pending 遮罩 (media 档): **纯 CSS 属性门**, 不用 inline style。
+             判定完成 (data-svi-settled 写入) 即自动失效 —— 摘罩不需要删样式。
+             用 visibility 而非 opacity: 不留可点击的透明元素, 也不产生过渡中间态。 --- */
+      html[data-svi-masking] [data-svi-pending]:not([data-svi-settled]) {
+        visibility: hidden !important;
+      }
+
+      /* --- 区域选取框 (与 rect 反色框共用视觉, 独立类避免影响既有选择器) --- */      .svi-mask-select {
         position: fixed;
         border: 1px dashed #a78bfa;
         background: rgba(167, 139, 250, 0.15);
@@ -7251,6 +7477,10 @@
         el.removeAttribute('data-svi-failed');
       } catch (e) { /* ignore */ }
       this.finalizeInvert(el, src, d.verdict === 'invert');
+      // v5.5: 判定完成即摘罩 —— 挂在**唯一决策落点**上, 不靠定时器 (定时器只是兜底)
+      try { pendingMask.settle(el, d.reason || 'decision'); } catch (e) { /* ignore */ }
+      // v5.5: 记本站反色率 (供下次加载的"已知会反色"门使用)。写入走 1s 去抖。
+      try { siteMediaStore.record(profileKey(), d.verdict === 'invert'); } catch (e) { /* ignore */ }
       // v5.2: 会话处理日志 + 撤销栈 —— 仅记"动作确实被施加"的结论 (keep / skip 无可见状态可回退)
       if (d.verdict === 'invert') {
         recordProcessed(el, 'invert', d.reason, src);
@@ -7265,6 +7495,8 @@
       prev.at = Date.now();
       this.failures.set(src, prev);
       try { img.setAttribute('data-svi-failed', String(prev.at)); } catch (e) { /* ignore */ }
+      // v5.5: 判定失败**必须立即放行原图** —— 绝不允许"拿不到像素就把图藏起来"
+      try { pendingMask.settle(img, 'failure'); StatsManager.count('maskSettleFailures'); } catch (e) { /* ignore */ }
     }
 
     // ==========================================
@@ -10103,6 +10335,8 @@
       // Esc 关闭 (v5.0: 先取消区域遮罩武装态, 再关弹窗)
       document.addEventListener('keydown', (e) => {
         if (e.key !== 'Escape') return;
+        // v5.5 逃生: 只在"确实有东西被遮住"时接管 Esc —— 否则会抢掉关闭弹窗/取消区域遮罩
+        if (pendingMask.count > 0) { pendingMask.escape(); return; }
         if (this.cancelRegionMask()) return;
         if (this.modalMask.classList.contains('show')) {
           this.closeSettingsModal();
@@ -11027,6 +11261,28 @@
           });
           row.append(sig, cnt, del);
           this.shapeBox.appendChild(row);
+        }
+      } catch (e) { /* ignore */ }
+    }
+
+    // v5.5: 元素遮罩诊断行刷新 (与动作区块诊断同理 —— 必须随打开刷新)
+    refreshPendingDiag() {
+      try {
+        const gate = pendingMaskGate();
+        if (this.pendingDiag) {
+          this.pendingDiag.setText('本站元素遮罩：'
+            + (state.flashGuardLevel === 'media'
+              ? (gate.armed ? ('已启用（' + gate.reason + '）') : ('未启用（' + gate.reason + '）'))
+              : '未启用（当前档位不是「文档黑底 + 元素遮罩」）'));
+        }
+        if (this.maskStatsDiag) {
+          const c = StatsManager.counters || {};
+          this.maskStatsDiag.setText('遮罩诊断：本会话已武装 ' + (pendingMask.armed ? '是' : '否')
+            + ' · 当前遮住 ' + pendingMask.count + ' 个'
+            + ' · 平均遮罩时长 ' + pendingMask.avgMs() + 'ms'
+            + ' · 预算超限 ' + (c.maskBudgetExceeded || 0) + ' 次'
+            + ' · 失败放行 ' + (c.maskSettleFailures || 0) + ' 次'
+            + (runtime.maskPaused ? ' · 本会话已暂停（Esc）' : ''));
         }
       } catch (e) { /* ignore */ }
     }
@@ -12216,6 +12472,7 @@
       // v5.3: 元素动作区块的诊断行必须在打开时刷新 —— 否则会停留在构建时的旧值
       // (与 v4.5 修过的"设置行不回显"是同一类缺陷)
       this.refreshActionsSection();
+      this.refreshPendingDiag();
       // 当前页媒体列表保持惰性 (设计: 点击「采集/刷新列表」按钮才全页扫描, 打开面板零开销)
       this.updateStatusBadge();
     }
@@ -12504,17 +12761,92 @@
 
       sec.appendChild(ui.infoLine('作用于背景替换引擎的生成配色 (非滤镜路径)；仅当本站卡片开启「背景替换」时可见效果，变更立即重扫生效。').row);
 
-      const fgRow = ui.toggleRow('防闪光黑底', '深色站点加载前先铺黑底消除白闪 (仅本站开启动态主题时生效)；关闭立即拆除，重新开启自下次页面加载生效',
-        () => state.flashGuard !== false,
+      // v5.5: 布尔 → 三档选择器 (旧值已由 loadState 无损迁移)
+      const fgRow = ui.selectRow('加载前保护（防白闪）',
+        '深色站点加载前先铺黑底消除白闪；「元素遮罩」档另加元素级 pending 遮罩（见下）。'
+        + '⚠ 元素级遮罩**只有扩展形态**能做到真正的"首帧前"—— 用户脚本在 document-end 启动，'
+        + '首屏元素已渲染，因此只覆盖后续动态插入的元素，首屏由黑底兜底',
+        [
+          { v: 'off', label: '关闭', describe: '不做任何加载前介入。' },
+          { v: 'document', label: '文档黑底', describe: '仅文档级黑底（与 v4.6 行为一致，默认）。' },
+          { v: 'media', label: '文档黑底 + 元素遮罩', describe: '另对"本站已知会反色"时的元素做 pending 遮罩。' },
+        ],
+        () => state.flashGuardLevel || 'document',
         (v) => {
-          state.flashGuard = v;
+          state.flashGuardLevel = v;
+          state.flashGuard = v !== 'off'; // 派生值 (旧版本可读)
           savePrefs();
-          if (!v) {
+          if (v === 'off') {
             try { window.__svi && window.__svi.flashGuardOff && window.__svi.flashGuardOff(); } catch (e) { /* ignore */ }
+            try { pendingMask.settleAll('level-off'); } catch (e) { /* ignore */ }
           }
+          showToast(v === 'off' ? '加载前保护已关闭'
+            : (v === 'media' ? '已开启元素遮罩（自下次页面加载生效）' : '已切到文档黑底'));
         });
       sec.appendChild(fgRow.row);
       this.rowSyncs.push(fgRow.sync);
+
+      // 注意: 本方法的 sec 是**裸 div** (不是 ui.section), 必须 appendChild(x.row) ——
+      // 不能用 sec.add(), 全模态窗口会构建失败 (初版踩过, bench 场景 1 立刻抓到)
+      // ===== v5.5 元素遮罩 (仅 media 档生效) =====
+      const gateInfo = (() => { try { return pendingMaskGate(); } catch (e) { return { armed: false, reason: '不可用' }; } })();
+      this.pendingDiag = ui.infoLine('本站元素遮罩：'
+        + (state.flashGuardLevel === 'media'
+          ? (gateInfo.armed ? ('已启用（' + gateInfo.reason + '）') : ('未启用（' + gateInfo.reason + '）'))
+          : '未启用（当前档位不是「文档黑底 + 元素遮罩」）'));
+      sec.appendChild(this.pendingDiag.row);
+
+      const pendRow = ui.toggleRow('元素遮罩（pending 遮罩）',
+        'media 档下对"本站已知会反色"的新插入媒体先遮住（visibility:hidden），判定完成即放行。'
+        + '三层预算兜底：总时长 / 元素数 / 单元素超时；判定失败**立即放行原图**。'
+        + '按 Esc（有东西被遮住时）或点下方按钮可一次性显示全部并暂停本会话',
+        () => state.maskPending !== false,
+        (on) => {
+          state.maskPending = !!on;
+          savePrefs();
+          if (!on) { try { pendingMask.settleAll('switch-off'); } catch (e) { /* ignore */ } }
+          showToast(on ? '元素遮罩已开启（自下次页面加载生效）' : '元素遮罩已关闭（本页已全部放行）');
+          this.refreshPendingDiag();
+        });
+      sec.appendChild(pendRow.row);
+      this.rowSyncs.push(() => pendRow.sync());
+
+      const maskBudgetRow = ui.sliderRow('遮罩总时长预算', '超过即全部摘罩放行（防"页面一直白/一直黑"）',
+        () => state.maskBudgetMs, (v) => { state.maskBudgetMs = Math.round(v); savePrefs(); },
+        200, 5000, 100, 'ms');
+      sec.appendChild(maskBudgetRow.row);
+      this.rowSyncs.push(() => maskBudgetRow.sync());
+
+      const maskMaxRow = ui.sliderRow('遮罩元素数上限', '同时最多遮住多少个元素（超出部分不打标）',
+        () => state.maskMaxElements, (v) => { state.maskMaxElements = Math.round(v); savePrefs(); },
+        1, 500, 1, '个');
+      sec.appendChild(maskMaxRow.row);
+      this.rowSyncs.push(() => maskMaxRow.sync());
+
+      const rateRow = ui.sliderRow('本站启用门 · 历史反色率', '上次在本站的反色率超过此值才启用元素遮罩（首访站点一律不遮）',
+        () => state.siteInvertRate, (v) => { state.siteInvertRate = v; savePrefs(); },
+        0.05, 0.95, 0.05, '');
+      sec.appendChild(rateRow.row);
+      this.rowSyncs.push(() => rateRow.sync());
+
+      sec.appendChild(ui.btnRow([
+        { label: '立即显示全部（并暂停本会话）', onClick: () => {
+            pendingMask.escape();
+            this.refreshPendingDiag();
+          } },
+        { label: '本站强制启用 / 取消', onClick: () => {
+            const host = profileKey();
+            const ov = (state.siteOverrides = state.siteOverrides || {});
+            const cur = (ov[host] && typeof ov[host] === 'object') ? ov[host] : (ov[host] = {});
+            cur.pendingMask = (cur.pendingMask === 'on') ? 'off' : 'on';
+            savePrefs();
+            showToast(cur.pendingMask === 'on' ? '本站已强制启用元素遮罩' : '本站已设为不遮');
+            this.refreshPendingDiag();
+          } },
+      ]).row);
+      this.maskStatsDiag = ui.infoLine('');
+      sec.appendChild(this.maskStatsDiag.row);
+      this.refreshPendingDiag();
 
       const rescanBgr = () => {
         try {
@@ -12826,7 +13158,7 @@
   // 浅色站点不触发 (否则黑→白反而是闪光); 图片反色路径页面本就保持原色, 无需介入。
   function setupFlashGuard() {
     try {
-      if (state.flashGuard === false) return; // v4.3: 设置项可关
+      if (state.flashGuardLevel === 'off') return; // v5.5: 三档取代布尔 (旧 false 迁移为 'off')
       const de = document.documentElement;
       if (!de || de.dataset.sviFlashguard) return;
       const prof = getSiteProfile();
@@ -12869,6 +13201,92 @@
     } catch (e) { /* ignore */ }
   }
   setupFlashGuard();
+
+  // ==========================================
+  // v5.5 元素级 pending 遮罩 (任务 v5-5)
+  //   **形态硬约束**: 真·"首帧前遮罩"只有扩展形态 (document_start) 能做到。
+  //   用户脚本 @run-at document-end, 脚本运行时首屏元素已渲染 —— 本函数**刻意不做首屏扫描**,
+  //   因此首屏元素不会被遮 (它们已渲染, 藏了反而是"图片迟现")。首屏由文档级黑底兜底。
+  //   面板会显式标注这个差异。
+  // ==========================================
+  function tagInlineMedia(node) {
+    if (!node || node.nodeType !== 1) return;
+    try {
+      const tag = String(node.tagName || '').toLowerCase();
+      if (tag === 'img') pendingMask.tag(node);
+      else if (tag === 'video' && node.getAttribute && node.getAttribute('poster')) pendingMask.tag(node);
+      if (node.querySelectorAll) {
+        node.querySelectorAll('img, video[poster]').forEach((el) => pendingMask.tag(el));
+      }
+    } catch (e) { /* ignore */ }
+  }
+
+  function setupPendingMask() {
+    try {
+      if (state.flashGuardLevel !== 'media' || state.maskPending === false) return;
+      if (runtime.maskPaused) return;
+      const de = document.documentElement;
+      if (!de || de.hasAttribute('data-svi-masking')) return;
+      const gate = pendingMaskGate();
+      if (!gate.armed) {
+        runtime.pendingMaskReason = gate.reason;
+        return;
+      }
+      runtime.pendingMaskReason = gate.reason;
+      de.setAttribute('data-svi-masking', '1');
+      pendingMask.armed = true;
+      StatsManager.count('maskArmed');
+      try {
+        const mo = new MutationObserver((records) => {
+          for (const m of records) {
+            if (m.type !== 'childList') continue;
+            for (const n of m.addedNodes) tagInlineMedia(n);
+          }
+        });
+        // **必须 observe(document)**: document_start 时刻 documentElement 仍是 null,
+        // observe(null) 抛错被吞掉后会静默失效 (v4.6.1 踩过同一个坑)。
+        mo.observe(document, { childList: true, subtree: true });
+        pendingMask.observer = mo;
+      } catch (e) { /* ignore */ }
+    } catch (e) { /* ignore */ }
+  }
+
+  // 门判定 (把纯函数与运行时状态缝在一起)
+  function pendingMaskGate() {
+    try {
+      const host = profileKey();
+      const prof = getSiteProfile();
+      let hasForceInvert = false;
+      try {
+        hasForceInvert = Array.isArray(prof.forceInvert) && prof.forceInvert.length > 0;
+      } catch (e) { /* ignore */ }
+      let hasLearnedInvert = false;
+      try {
+        hasLearnedInvert = ruleLearner.activeRules(host, undefined).some((r) => r.action === 'invert');
+      } catch (e) { /* ignore */ }
+      const st = siteMediaStore.stats(host);
+      let override;
+      try {
+        const ov = (state.siteOverrides || {})[host];
+        if (ov && typeof ov === 'object' && (ov.pendingMask === 'on' || ov.pendingMask === 'off')) {
+          override = ov.pendingMask;
+        }
+      } catch (e) { /* ignore */ }
+      return maskShouldArm(host, {
+        override: override,
+        hasForceInvert: hasForceInvert,
+        hasLearnedInvert: hasLearnedInvert,
+        seen: st.seen,
+        inverted: st.inverted,
+        minSeen: state.siteMinSeen,
+        rateThreshold: state.siteInvertRate,
+      });
+    } catch (e) {
+      return { armed: false, reason: '门判定失败' };
+    }
+  }
+
+  setupPendingMask();
 
   // v4.3: 设置项即时拆除句柄 (关闭开关立即移除守卫样式; 重新开启自下次页面加载生效)。
   // 注意: 此处 __svi 字面量尚未创建, 先存句柄, 字面量之后再挂载。
@@ -12995,6 +13413,15 @@
     animatedProbe,
     animatedSpectrum,
     animatedStride,
+    // v5.5 加载前遮罩契约 (单测契约)
+    pendingMask,
+    siteMediaStore,
+    maskShouldArm,
+    pendingMaskGate,
+    tagInlineMedia,
+    setupPendingMask,
+    // v5.5: 导出 loadState 以便单测直接验证"旧布尔 → 三档"的迁移 (纯读取, 无副作用)
+    loadState,
     ImageInvertEngine,
     // v3.2 纯函数导出 (单测契约): 视频画面调节滤镜链构建
     buildVideoTuneFilter,

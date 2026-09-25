@@ -236,6 +236,44 @@ then frozen, so a scene-changing GIF stayed wrong forever. Now:
 - Without `ImageDecoder`: **silent degradation** to static judging plus one explanatory line in the
   panel — never an error.
 
+### 13. 🛡 Pre-load protection (three tiers + element masking)
+
+This closes the "a glaring white image shows for a few dozen milliseconds before it gets inverted"
+flash. The former "anti-flash black" toggle becomes **three tiers**:
+
+| Tier | Behaviour |
+| :--- | :--- |
+| Off | No intervention |
+| **Document black** (default) | Dark sites get a black backdrop before load (**identical** to v4.6) |
+| Document black + element masking | Additionally masks **newly inserted media** when this site is "known to invert", releasing each as soon as it is decided |
+
+> **⚠ Form-factor boundary (must know)**: true "before first paint" masking is **only possible in
+> the extension form** (`document_start`). The userscript starts at `document-end`, so
+> **the first screen is already rendered** — element masking therefore only covers media inserted
+> **after the script starts**, with the document backdrop covering the first screen. The panel
+> states this; it does not pretend to do more.
+
+**Arming gate (never masks unconditionally)**: only when the site is "known to invert" — a built-in
+force-invert rule / a learned invert rule on this site / **last session's invert rate ≥ 35% with
+≥ 5 samples** / you forced it on in the panel.
+**First-visit sites are never masked** — better one white flash than hiding your images.
+
+**It never hurts** (three safeguards):
+
+- **Three budgets**: total duration (1.2 s) / element count (80) / per-element timeout (0.8 s) —
+  any overrun releases everything immediately;
+- **Failure always releases**: pixels unavailable, cross-origin failure, analysis error →
+  **the mask comes off immediately and the original shows** — never "we couldn't read the pixels,
+  so we'll keep it hidden";
+- **Escape**: press `Esc` while anything is masked, or use the panel's
+  "Show everything now (and pause this session)" — one-shot release plus **no more masking this session**.
+
+The mask gate is a **pure CSS attribute gate** (`visibility:hidden`) that expires automatically
+once the verdict lands — site DOM structure is never touched and no inline styles are written.
+
+**Upgrading**: the old boolean `flashGuard` migrates automatically (`true` → document black,
+`false` → off) and is written back as a derived value, so downgrading still reads a correct value.
+
 ---
 
 ## 🆕 What's New in v4.6 (Local-First Decisions · Interaction Fixes · Dark-Veil Awareness)

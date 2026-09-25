@@ -2945,6 +2945,75 @@ async function main() {
     assert.strictEqual(an2.light, 'invert', '全浅动图反色');
     assert.strictEqual(an2.stride, 17, '1000 帧抽 60 → 步长 17 (抽帧覆盖全段而不是只解开头)');
 
+    // ============================================================
+    // Scenario 29 (v5.5): 加载前遮罩 (三档 / pending / 预算 / 逃生)
+    //   - 默认档必须等于 v4.6.1 行为 (零回归)
+    //   - **用户脚本形态首屏不打标** (形态硬约束的落地, 不假装能做到)
+    //   - 预算超限必放行; Esc 逃生后本会话不再打标
+    // ============================================================
+    console.log('[Test] Scenario 29: v5.5 pre-load mask (tiers / pending / budget / escape) ...');
+
+    const mg1 = await evalInPageAsync(`(() => {
+      const svi = window.__svi;
+      return {
+        level: svi.prefs.flashGuardLevel,
+        legacyBool: svi.prefs.flashGuard,
+        derivedOk: svi.prefs.flashGuard === (svi.prefs.flashGuardLevel !== 'off'),
+        budget: svi.prefs.maskBudgetMs,
+        maxEl: svi.prefs.maskMaxElements,
+      };
+    })()`);
+    assert.strictEqual(mg1.level, 'document', '默认档必须是 document (= v4.6.1 行为, 零回归)');
+    assert.strictEqual(mg1.legacyBool, true, 'flashGuard 派生值为 true (旧版本可读)');
+    assert.strictEqual(mg1.derivedOk, true, 'flashGuard 必须是档位的派生值');
+    assert.ok(mg1.budget > 0 && mg1.maxEl > 0, '预算字段已规范化');
+
+    const mg2 = await evalInPageAsync(`(() => {
+      const svi = window.__svi;
+      svi.pendingMask.armed = true;
+      const before = document.querySelectorAll('[data-svi-pending]').length;
+      const im = document.createElement('img');
+      im.src = 'data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==';
+      document.body.appendChild(im);
+      svi.tagInlineMedia(im);
+      const tagged = im.getAttribute('data-svi-pending') !== null;
+      const after = document.querySelectorAll('[data-svi-pending]').length;
+      const cleared = svi.pendingMask.settleAll('test');
+      const remain = document.querySelectorAll('[data-svi-pending]').length;
+      svi.pendingMask.armed = false;
+      return { before, tagged, after, cleared, remain };
+    })()`);
+    assert.strictEqual(mg2.before, 0, '**首屏元素不得被打标** —— 用户脚本在 document-end 启动, 首屏已渲染, 刻意不做首屏扫描');
+    assert.strictEqual(mg2.tagged, true, '脚本启动之后动态插入的媒体必须被打标');
+    assert.strictEqual(mg2.after, 1, '打标计数正确');
+    assert.ok(mg2.cleared >= 1, 'settleAll 必须摘除');
+    assert.strictEqual(mg2.remain, 0, 'settleAll 后无残留 pending');
+
+    const mg3 = await evalInPageAsync(`(() => {
+      const svi = window.__svi;
+      const savedMax = svi.prefs.maskMaxElements;
+      const savedPaused = svi.runtime.maskPaused;
+      svi.prefs.maskMaxElements = 2;
+      svi.pendingMask.armed = true;
+      svi.pendingMask.count = 0;
+      svi.runtime.maskPaused = false;
+      const els = [0, 1, 2].map(() => { const d = document.createElement('div'); document.body.appendChild(d); return d; });
+      const tagged = els.map((el) => svi.pendingMask.tag(el));
+      const escN = svi.pendingMask.escape();
+      const paused = svi.runtime.maskPaused;
+      const afterTag = svi.pendingMask.tag(document.createElement('div'));
+      const remain = document.querySelectorAll('[data-svi-pending]').length;
+      svi.prefs.maskMaxElements = savedMax;
+      svi.runtime.maskPaused = savedPaused;
+      svi.pendingMask.armed = false;
+      return { tagged, escN, paused, afterTag, remain };
+    })()`);
+    assert.deepStrictEqual(mg3.tagged, [true, true, false], '超出元素数预算的部分必须不打标 (宁可白闪也不白藏)');
+    assert.ok(mg3.escN >= 2, 'Esc 逃生必须一次性摘除全部, got ' + mg3.escN);
+    assert.strictEqual(mg3.paused, true, 'Esc 后本会话暂停');
+    assert.strictEqual(mg3.afterTag, false, '暂停后不再打标');
+    assert.strictEqual(mg3.remain, 0, '逃生后无残留 pending');
+
     console.log('\n🎉 ALL BROWSER AUTOMATION TESTS PASSED 100% SUCCESFULLY!\n');
 
     await new Promise((r) => setTimeout(r, 400)); // Windows 重定向: 等待 stdout 刷盘再退出

@@ -1,0 +1,9 @@
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "编码纪律权威来源。本片重点: 打标阶段是**同步热路径**(MutationObserver 回调), 禁止任何布局读取 (gBCR/gCS); 遮罩门必须纯 CSS (不用 inline style); 观察器必须 observe(document) 而非 documentElement (v4.6.1 踩过的坑, 已入 spec); 新纯函数 maskShouldArm / siteMediaStore 须挂 __svi 并单测。"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "本片新增 svi:siteMedia 存储 + 档位枚举 + 本站覆盖字段, 会穿透「存储 → 门判定 → 打标 → 决策落点 → 面板」多层; 且旧布尔 flashGuard 的迁移涉及跨版本兼容。逐层校验消费方。"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "本片要复用既有 setupFlashGuard / sviFlashGuardOff / MASK_PRESETS(v5-1 唯一定义处) —— 不得另写遮罩风格或第二套黑底逻辑。"}
+{"file": ".trellis/tasks/09-25-v5-media-governance/prd.md", "reason": "父任务 AC-6「遮罩不伤人: 预算必被兑现, 判定失败必放行原图, 遮罩期内用户可一键全局关闭」为本片核心验收; 约束 2「形态差异必须显式」为硬约束。"}
+{"file": ".trellis/tasks/09-25-v5-mask-guard/prd.md", "reason": "本片需求 R1-R6。注意 R3 的"真·加载前只有扩展形态能做到"必须显式标注, 不得含糊。"}
+{"file": ".trellis/tasks/09-25-v5-mask-guard/design.md", "reason": "本片技术设计。D-1 默认档必须等于 v4.6.1 行为 + 旧布尔无损迁移; D-2 四类触发门且首访不遮; D-3 纯 CSS 属性门 + observe(document) + 零布局; D-4 摘罩挂唯一决策落点 + 三层预算 + 失败必放行; D-5 Esc 逃生优先级在既有 Esc 链之后; D-6 可观测三计数。"}
+{"file": ".trellis/tasks/09-25-v5-action-registry/prd.md", "reason": "上游契约: MASK_PRESETS 是遮罩风格的唯一定义处, pending 遮罩必须复用它而不是另定义风格。"}
+{"file": ".trellis/tasks/09-25-v5-preload-decide/prd.md", "reason": "上游时序依赖: v5-4 的 earlySwitch 让"判定完成"更早发生, 本片摘罩挂在同一事件上, 两者语义需一致。"}
+{"file": ".trellis/tasks/09-25-v5-data-loop/prd.md", "reason": "同源数据: 本片的"本站历史反色率"门与 v5-3 的数据闭环读同一批决策记录, 面板展示口径需一致。"}
