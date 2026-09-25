@@ -457,3 +457,26 @@ Session summary was not supplied.
 ### Status
 
 [OK] **Completed**
+
+
+## Session 15: v6-2 完成: 部分反色渲染层 (backdrop 覆盖层 + 位图/矢量掩码)
+<!-- trellis-session: v=2 fp=8410da3c44e72a92 -->
+
+**Date**: 2026-09-26
+**Task**: v6-2 完成: 部分反色渲染层 (backdrop 覆盖层 + 位图/矢量掩码)
+**Branch**: `main`
+
+### Summary
+
+把 RegionMask 渲染成可见的部分反色: backdrop-filter 覆盖层 + 两表达掩码 + object-fit 几何映射 + backdrop-root 降级 + 全屏/PiP 暂停 + 视频重算调度 + 生命周期回收。四条 CSS 语义坑(alpha 掩码 / clipPath 并集 / 掩码直连 / 覆盖层几何)全部实测踩到并写进 spec。四绿, 30 场景 100%。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `9d58bd0` | feat(v6.0): v6-2 完成 — 部分反色渲染层 (backdrop 覆盖层 + 位图/矢量掩码 + 几何映射 + 降级/生命周期) |
+| `1df8c4a` | docs(readme): 修正 v6.0 内核章节里「渲染层还没做」的过时表述 |
+
+### Status
+
+[OK] **Completed**
