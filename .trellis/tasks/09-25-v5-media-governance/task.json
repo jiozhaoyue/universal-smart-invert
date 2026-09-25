@@ -1,0 +1,32 @@
+{
+  "id": "v5-media-governance",
+  "name": "v5-media-governance",
+  "title": "v5 页面媒体治理层: 动作统一 + 复查撤销 + 数据闭环 + 提前判定 + 加载前遮罩",
+  "description": "父任务: 把插件从「反色器」扩展为通用页面媒体治理层。统一元素动作表 (invert/keep/hide/mask/dim/peek), 新增复查撤销、数据采集消费回路、视频帧序列提前判定 + 动图全帧谱分析、加载前遮罩保护。分两批: 批1 = 动作统一/复查/数据闭环; 批2 = 提前判定/加载前遮罩。",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P1",
+  "creator": "jiozhaoyue",
+  "assignee": "jiozhaoyue",
+  "createdAt": "2026-09-25",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "09-25-v5-action-registry",
+    "09-25-v5-review-undo",
+    "09-25-v5-data-loop",
+    "09-25-v5-preload-decide",
+    "09-25-v5-mask-guard"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

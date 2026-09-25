@@ -1783,23 +1783,162 @@
     return null;
   }
 
+  // ==========================================
+  // 4.7 v5.0 元素动作注册表 (Action Registry) —— 唯一解析入口 + 唯一写入仲裁
+  //     设计: .trellis/tasks/09-25-v5-action-registry/design.md §D-1 / §D-3
+  //
+  //     SOURCES: 有序来源表, 顺序即优先级, stage 标签对应调用点位置。
+  //       真实链 (已核对现行 decideImage, 非推测):
+  //         stage 'override' : manual → elementRule
+  //         ──【决策快照 decisionBySrc 命中即早退, 位置不得移动】──
+  //         stage 'rule'     : learned → seedProtect → faviconSkip → seedForceInvert
+  //       小元素门 / 策略门 / 像素管线不进本表 (保持原样)。
+  //
+  //     resolveStage(el, ctx, stage) → { verdict, source, reason, force?, params? } | null
+  //       verdict: 'invert' | 'keep' | 'skip' (沿用现行三值语义)
+  //       返回 null = 本阶段无人认领 (override 段 → 继续走快照; rule 段 → 继续走门与像素)
+  //
+  //     arbitrate(el, candidate): 手动结论幂等占优 (v4.6 C2/C3 通用化)。
+  //       两条例外 (manual 自身 / fx-mutex 机械摘除) 原样保留, 不得扩大。
+  //
+  //     ACTIONS: 元素动作执行器表。本阶段只有 invert / keep 两个,
+  //       invert.apply 原样复用现有 applyInvertState 写点 (不复制逻辑)。
+  // ==========================================
+
+  // 仲裁直写例外 (v4.6 实测得出, 不得扩大)
+  const ARBITRATE_BYPASS = { manual: 1, 'fx-mutex': 1 };
+
+  function arbitrate(el, candidate) {
+    const c = {
+      verdict: candidate.verdict || 'keep',
+      reason: candidate.reason || 'pixel',
+      force: !!candidate.force,
+      params: candidate.params,
+      source: candidate.source,
+    };
+    if (!ARBITRATE_BYPASS[c.reason]) {
+      const manual = manualStateFor(el);
+      if (manual !== null) {
+        c.verdict = manual ? 'invert' : 'keep';
+        c.reason = 'manual';
+        c.source = 'manual';
+      }
+    }
+    return c;
+  }
+
+  // 元素动作执行器表 (v5.0)
+  //   attr: 该动作的属性门 (null = 不写属性, 见 design §D-2 keep)
+  //   apply / revert 必须幂等、不抛异常、不查布局
+  const ACTIONS = {
+    invert: {
+      id: 'invert',
+      attr: 'data-svi-inverted',
+      defaultEnabled: true,
+      apply(el, params, source) { return applyInvertState(el, true, source || 'pixel'); },
+      revert(el) { return applyInvertState(el, false, 'pixel'); }, // 仍过仲裁: 规则驱动的还原不得压过手动结论
+      isActive(el) {
+        return !!el && typeof el.getAttribute === 'function' && el.getAttribute('data-svi-inverted') === 'true';
+      },
+    },
+    keep: {
+      id: 'keep',
+      attr: null, // v5.0 决策: keep 不写属性 (否则全动作关闭时会增加页面属性写入, 破坏 AC-3)
+      defaultEnabled: true,
+      apply(el, params, source) { return applyInvertState(el, false, source || 'pixel'); },
+      revert() { /* keep 无副作用, 无操作 */ },
+      isActive() { return false; },
+    },
+  };
+
+  // 有序来源表。stage: 'override' (快照前) | 'rule' (快照后)
+  // 顺序即优先级, 不得重排; 新增来源只改本表, 不改调用点 (v5.0 AC-1 唯一性)。
+  const SOURCES = [
+    // —— stage 'override' (决策快照之前) ——
+    {
+      id: 'manual', stage: 'override',
+      resolve(el, ctx) {
+        const src = ctx && ctx.src;
+        if (!src) return null;
+        const ov = state.manualOverrides[manualOverrideKey(profileKey(), src)];
+        if (ov === 'invert') return { verdict: 'invert', reason: 'manual', force: true };
+        if (ov === 'restore') return { verdict: 'keep', reason: 'manual', force: true };
+        return null;
+      },
+    },
+    {
+      id: 'elementRule', stage: 'override',
+      resolve(el, ctx) {
+        const erule = firstMatchingElementRule(el, (ctx && ctx.elementRules) || []);
+        if (!erule) return null;
+        return { verdict: erule.action === 'invert' ? 'invert' : 'keep', reason: 'element-rule', force: true };
+      },
+    },
+
+    // —— stage 'rule' (决策快照之后; 顺序严格 learned → seedProtect → faviconSkip → seedForceInvert) ——
+    //   注意 favicon 判定夹在 protect 与 forceInvert 之间, 是现行代码的实际顺序, 不得合并或重排。
+    {
+      id: 'learned', stage: 'rule',
+      resolve(el, ctx) {
+        const r = ruleLearner.decideFor(profileKey(), el);
+        if (r === 'invert') return { verdict: 'invert', reason: 'learned' };
+        if (r === 'protect') return { verdict: 'keep', reason: 'learned' };
+        return null;
+      },
+    },
+    {
+      id: 'seedProtect', stage: 'rule',
+      resolve(el, ctx) {
+        if (safeMatches(el, (ctx && ctx.protect) || [])) return { verdict: 'keep', reason: 'protected' };
+        return null;
+      },
+    },
+    {
+      id: 'faviconSkip', stage: 'rule',
+      resolve(el, ctx) {
+        const src = ctx && ctx.src;
+        if (src && /\.(ico|cur)(\?.*)?$/i.test(src)) return { verdict: 'skip', reason: 'favicon' };
+        return null;
+      },
+    },
+    {
+      id: 'seedForceInvert', stage: 'rule',
+      resolve(el, ctx) {
+        if (safeMatches(el, (ctx && ctx.forceInvert) || [])) return { verdict: 'invert', reason: 'seed-force' };
+        return null;
+      },
+    },
+  ];
+
+  function resolveStage(el, ctx, stage) {
+    for (let i = 0; i < SOURCES.length; i++) {
+      const s = SOURCES[i];
+      if (s.stage !== stage) continue;
+      let r = null;
+      try { r = s.resolve(el, ctx || {}); } catch (e) { r = null; }
+      if (r) {
+        if (!r.source) r.source = s.id;
+        return r;
+      }
+    }
+    return null;
+  }
+
   // 反色状态写点唯一收口 (v4.6 C3): 所有决策来源的 data-svi-inverted 写入/摘除一律经此门。
   // 规则 (v4.6 C2): 非 manual 来源写入前先解析手动结论 —— 手动结论存在则以其为准 (幂等占优),
   // 杜绝 fx 投递回调 / canvas 首扫 / 重扫把用户 Alt+点击结论拉回。
   // 例外: reason='manual' (手动本身) 与 'fx-mutex' (fx 投递与滤镜互斥的机械摘除) 直写。
   // 返回实际生效的原因码 ('manual' = 发生了手动占优改写)。
+  // v5.0: 仲裁逻辑提升至 arbitrate() (单一实现), 本函数改为其调用方。
   function applyInvertState(el, wantInvert, reason) {
     // 守卫放宽为能力检测: 测试桩/跨壳元素可能没有 nodeType (只要求可读写属性)
     if (!el || typeof el.setAttribute !== 'function' || typeof el.getAttribute !== 'function') return reason || '';
-    let want = !!wantInvert;
-    let why = reason || 'pixel';
-    if (why !== 'manual' && why !== 'fx-mutex') {
-      const manual = manualStateFor(el);
-      if (manual !== null) {
-        want = manual;
-        why = 'manual';
-      }
-    }
+    const c = arbitrate(el, {
+      verdict: wantInvert ? 'invert' : 'keep',
+      reason: reason,
+    });
+    const want = c.verdict === 'invert';
+    const why = c.reason;
     try {
       const cur = el.getAttribute('data-svi-inverted') === 'true';
       if (cur !== want) {
@@ -1813,6 +1952,8 @@
     } catch (e) { /* ignore */ }
     return why;
   }
+  // v4.6 baseline 原实现见 git 历史 (commit 3dcbb1a 的 applyInvertState) —— 未以注释保留:
+  // 其内部的 `/* ignore */` 会提前闭合外层块注释, 属已知语法陷阱。
 
   function showToast(msg) {
     let toast = null;
@@ -5573,22 +5714,19 @@
         if (img.getAttribute && img.getAttribute('data-svi-checked-src') === src) return;
       } catch (e) { /* ignore */ }
 
-      // 1. 手动覆盖记忆最高优先 (Alt+点击 的持久化决策) —— 刻意先于决策快照:
-      //    上一会话/他元素写入的覆盖必须压过本会话已落的快照决策 (设计管线第 1 步)
-      const ov = state.manualOverrides[manualOverrideKey(profileKey(), src)];
-      if (ov === 'invert') {
-        this.applyDecision(img, src, this.recordDecision(src, 'invert', 'manual', true));
-        return;
-      }
-      if (ov === 'restore') {
-        this.applyDecision(img, src, this.recordDecision(src, 'keep', 'manual', true));
-        return;
-      }
-
-      // 1.5 用户元素规则 (v3.3 显式配置, 优先于快照/学习/种子): 命中即强制决策并刷新快照
-      const erule = firstMatchingElementRule(img, profile.elementRules);
-      if (erule) {
-        this.applyDecision(img, src, this.recordDecision(src, erule.action === 'invert' ? 'invert' : 'keep', 'element-rule', true));
+      // 1 / 1.5 覆盖段 —— v5.0: 经 SOURCES stage='override' 统一解析
+      //   顺序不变: 手动覆盖记忆 (Alt+点击 的持久化决策) → 用户元素规则 (v3.3 显式配置)。
+      //   手动覆盖刻意先于决策快照: 上一会话/他元素写入的覆盖必须压过本会话已落的快照决策。
+      //   两者均为 force 刷新 (用户显式意图优先于既有快照)。
+      const srcCtx = {
+        src: src,
+        elementRules: profile.elementRules,
+        protect: profile.protect,
+        forceInvert: profile.forceInvert,
+      };
+      const cov = resolveStage(img, srcCtx, 'override');
+      if (cov) {
+        this.applyDecision(img, src, this.recordDecision(src, cov.verdict, cov.reason, true));
         return;
       }
 
@@ -5622,40 +5760,23 @@
         }
       }
 
-      // 2. 自学习规则 (tag+#id+首类 词干聚合, 命中 ≥ learnHits 生效; 优先于内置种子规则)
-      const learned = ruleLearner.decideFor(profileKey(), img);
-      if (learned === 'invert') {
-        if (maskedVeto()) return; // v4.6: 遮罩否决 (合成观感已暗, 自动反色让位)
-        this.applyDecision(img, src, this.recordDecision(src, 'invert', 'learned'));
-        return;
-      }
-      if (learned === 'protect') {
-        this.applyDecision(img, src, this.recordDecision(src, 'keep', 'learned'));
-        return;
-      }
-
-      // 3. 种子规则: 保护选择器 (头像/图标/播放器内部等永不反色)
-      if (safeMatches(img, profile.protect)) {
-        this.applyDecision(img, src, this.recordDecision(src, 'keep', 'protected'));
-        return;
-      }
-
-      // favicon 类直接跳过 (v3.1 修复: 旧正则含转义反斜杠, 恒不匹配)
-      if (/\.(ico|cur)(\?.*)?$/i.test(src)) {
-        this.applyDecision(img, src, this.recordDecision(src, 'skip', 'favicon'));
-        return;
-      }
-
-      // 4. 种子强制反色选择器 (GitHub markdown/camo 等) —— v3.1 顺序修复 (F3):
-      //    强制反色先于小元素/策略门, 首个处理通道 (含 eager 首扫) 即生效,
-      //    同一图片在任何通道得到同一决策, 不再随处理轮次翻转
-      if (safeMatches(img, profile.forceInvert)) {
-        if (maskedVeto()) return; // v4.6: 遮罩否决优先于种子强制反色 (蒙层下强制反色同样破坏合成)
-        if (this.cache.size >= this.maxCacheSize) {
-          this.cache.delete(this.cache.keys().next().value);
+      // 2 / 3 / 3.5 / 4 规则段 —— v5.0: 经 SOURCES stage='rule' 统一解析
+      //   顺序不变: 自学习规则 → 种子保护 → favicon 跳过 → 种子强制反色。
+      //   (对比度: 学习规则命中 ≥ learnHits 生效, 优先于内置种子规则; 种子强制反色先于
+      //    小元素/策略门 —— v3.1 顺序修复 F3, 使同一图片在任何通道得同一决策)
+      const crule = resolveStage(img, srcCtx, 'rule');
+      if (crule) {
+        // v4.6 遮罩否决: 祖先暗色蒙层使合成观感已暗, 本段一切"自动反色"结论让位
+        // (手动覆盖与元素规则不受影响 —— 它们属 override 段, 已在此前返回)
+        if (crule.verdict === 'invert' && maskedVeto()) return;
+        if (crule.reason === 'seed-force') {
+          // 种子强制反色需预热结论缓存 (后续同 src 元素不再重算)
+          if (this.cache.size >= this.maxCacheSize) {
+            this.cache.delete(this.cache.keys().next().value);
+          }
+          this.cache.set(src, true);
         }
-        this.cache.set(src, true);
-        this.applyDecision(img, src, this.recordDecision(src, 'invert', 'seed-force'));
+        this.applyDecision(img, src, this.recordDecision(src, crule.verdict, crule.reason));
         return;
       }
 
@@ -10417,6 +10538,11 @@
     closestContextHit,
     // v4.6 纯函数导出 (单测契约): 暗色遮罩上下文检测 (任务 v4.6-4)
     maskedDarkContext,
+    // v5.0 Action Registry 契约 (单测契约; 下游任务 v5-2 / v5-3 / v5-5 依赖)
+    ACTIONS,
+    SOURCES,
+    resolveStage,
+    arbitrate,
     ImageInvertEngine,
     // v3.2 纯函数导出 (单测契约): 视频画面调节滤镜链构建
     buildVideoTuneFilter,

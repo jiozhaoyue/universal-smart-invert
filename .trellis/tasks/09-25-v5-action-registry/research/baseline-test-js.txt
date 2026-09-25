@@ -1,0 +1,56 @@
+Average detection time per frame: 0.0017 ms
+Average 8x8 image detection time: 0.00075 ms
+✓ All 22 unit, benchmark, and multi-light-color tests passed successfully!
+[ch-dbg] svi2 identity-changed: true dormant: false listener: true top-frame-capable: true
+✓ v4.5 popup message channel tests passed (snapshot / pref whitelist / site power)
+✓ v3.2 unit tests passed: buildVideoTuneFilter (disabled/neutral/partial/clamp)
+✓ v4.2 unit tests passed: applyDynamicThemeAdjust (identity/tone/brightness/contrast/clamp)
+✓ v4.2 unit tests passed: scheduleActiveNow (off/inside/wrapped-outside)
+✓ v4.5 unit tests passed: closestContextHit ignores document-root framework classes
+✓ v4.5 unit tests passed: elementRules merge idempotency + pack action vocabulary
+✓ v4.5 unit tests passed: avatar URL-path meta-icon classification
+✓ v3.0 core unit tests passed: transformPixel / mergeSegments / lookupSegment / selectorStem / RuleLearner / Store / mediaDominantViewport / rect / hash32
+✓ v4.6 unit tests passed: maskedDarkContext four-case matrix (A/E/F detect, B/C clean) + veil forms + budget cap
+✓ v3.1 unit tests passed: imagePolicy defaults / passesImagePolicy matrix / countGridGroup boundary / decideImage ordering + decide-once + failure budget
+[SmartInvert] chrome.storage.sync 配额受限, 已降级到 chrome.storage.local (数据不丢失)
+[SmartInvert] LuminanceDetector init failed: TypeError: this.canvas.getContext is not a function
+    at new LuminanceDetector (universal-smart-invert.user.js (popup channel test):3634:30)
+    at universal-smart-invert.user.js (popup channel test):10549:18
+    at finish (universal-smart-invert.user.js (popup channel test):1640:7)
+    at Timeout.<anonymous> (universal-smart-invert.user.js (popup channel test):1658:28)
+    at listOnTimeout (node:internal/timers:605:17)
+    at process.processTimers (node:internal/timers:541:7)
+[SmartInvert] UI init failed: TypeError: document.body.appendChild is not a function
+    at UIController.buildUI (universal-smart-invert.user.js (popup channel test):8070:21)
+    at UIController.bindStateMachine (universal-smart-invert.user.js (popup channel test):7937:14)
+    at universal-smart-invert.user.js (popup channel test):10607:22
+    at finish (universal-smart-invert.user.js (popup channel test):1640:7)
+    at Timeout.<anonymous> (universal-smart-invert.user.js (popup channel test):1658:28)
+    at listOnTimeout (node:internal/timers:605:17)
+    at process.processTimers (node:internal/timers:541:7)
+[SmartInvert] LuminanceDetector init failed: TypeError: this.canvas.getContext is not a function
+    at new LuminanceDetector (universal-smart-invert.user.js (v4.6 local-first tests):3634:30)
+    at universal-smart-invert.user.js (v4.6 local-first tests):10549:18
+    at finish (universal-smart-invert.user.js (v4.6 local-first tests):1640:7)
+    at Timeout.<anonymous> (universal-smart-invert.user.js (v4.6 local-first tests):1658:28)
+    at listOnTimeout (node:internal/timers:605:17)
+    at process.processTimers (node:internal/timers:541:7)
+[SmartInvert] LuminanceDetector init failed: TypeError: this.canvas.getContext is not a function
+    at new LuminanceDetector (universal-smart-invert.user.js (v4.6 memory-gate boot):3634:30)
+    at universal-smart-invert.user.js (v4.6 memory-gate boot):10549:18
+    at whenBodyReady (universal-smart-invert.user.js (v4.6 memory-gate boot):1626:7)
+    at bootEngines (universal-smart-invert.user.js (v4.6 memory-gate boot):10524:5)
+    at universal-smart-invert.user.js (v4.6 memory-gate boot):10623:5
+    at universal-smart-invert.user.js (v4.6 memory-gate boot):10664:3
+    at Script.runInThisContext (node:vm:137:12)
+    at Object.runInThisContext (node:vm:317:38)
+    at D:\Repo\Github-repo\Pubilc\Dark-viewer\test.js:1538:6
+    at runNextTicks (node:internal/process/task_queues:65:5)
+✓ v4.6 unit tests passed: Alt+click manual verdict survives fx callback / canvas first-scan / sibling sync / applyInvertState gate
+[SmartInvert] chrome.storage.sync 配额受限, 已降级到 chrome.storage.local (数据不丢失)
+✓ v4.6 unit tests passed: localEvidence tiers / tier-B conservative verdict / pending wake & tier upgrade / decide-once stability / rollback switch / eager main path / network-path convergence
+✓ v3.0 Store quota-degrade regression passed (sync → local fallback)
+[SmartInvert] chrome.storage.sync 配额受限, 已降级到 chrome.storage.local (数据不丢失)
+✓ v3.0 Store chunk-removal + byte-budget regression passed
+✓ v3.0 Store chrome.storage.sync mock tests passed (chunking / mirror / debounce / export-import / remove)
+✓ All unit, benchmark, multi-light-color, and v2.0 site-engine tests passed successfully!

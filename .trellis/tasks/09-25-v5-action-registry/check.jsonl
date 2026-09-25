@@ -1,0 +1,8 @@
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "检查项: 逐条核对 Forbidden/Required Patterns。重点 (1) 新动作不得把 runtime 状态写入存储; (2) 遮罩不得用 innerHTML 插值用户颜色/URL; (3) 不得新增全页 blanket filter; (4) 新增 MutationObserver 必须合并+预算+hidden 跳过; (5) 新纯逻辑 (resolveAction 优先级矩阵、遮罩预设解析) 必须挂 window.__svi 并单测真代码; (6) 引擎 init 隔离不得被新动作破坏。"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "检查项: 确认收口后不存在第二处独立优先级链 (父 PRD AC-1 的代码级核查), 且 hide/mask/dim 的执行器没有各自复制一份仲裁或属性写入逻辑。"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "检查项: 新增的 action 枚举与属性门在每个消费方都被处理 —— 偏好 normalize / 决策层 / 执行器 / CSS / UI 回显 / 导出格式 / 扩展构建产物。特别核查 UI 是否直接读了原始 payload 字段而非经 Registry。"}
+{"file": ".trellis/tasks/09-25-v5-media-governance/prd.md", "reason": "检查项: AC-1 统一抽象落地 (代码级核查), AC-2 六动作各有开关且标注作用域与生效时机, AC-3 全关时与 v4.6.1 行为一致且无新增属性写入 (需证据留档), AC-6 遮罩不被误用为常驻层。"}
+{"file": ".trellis/tasks/09-25-v5-action-registry/prd.md", "reason": "本片验收标准逐条核对: R1 resolveAction 优先级矩阵单测、R2 hide 三种来源、R3 mask 三档预设与 hover/Shift+hover、R4 dim 参数边界与互斥、R5 peek 属性门与 hoverRestore 映射、R6 开关矩阵与安全模式。R6 的面板回显契约是 v4.5 修过的缺陷点, 必须专项复验。"}
+{"file": ".trellis/tasks/09-25-v5-action-registry/design.md", "reason": "检查项: 实现是否偏离设计。重点 (1) resolveAction 是否被误改成 async 或吞掉像素管线 (D-1); (2) keep/peek 是否被写入多余属性破坏 AC-3 (D-2); (3) 手动仲裁是否扩大到 fx-mutex 之外 (D-3); (4) 遮罩是否误用 inline style (D-5); (5) 是否新增了存储键 (D-6); (6) 是否引入逐元素 getComputedStyle (D-7 性能红线)。"}
+{"file": ".trellis/tasks/09-25-v5-action-registry/implement.md", "reason": "检查项: 四个回滚点 (R1-R4) 的验证门禁是否都真实跑过; A4/A10 的「与 P0 基线逐项一致」是否有留档证据; 阶段 D 的规格与文档更新是否完成; 复选框是否随执行实时勾选 (不得事后补勾)。"}
+{"file": ".trellis/tasks/09-25-v5-mask-guard/prd.md", "reason": "检查项: registry.maskPresets 是否作为唯一定义处导出, v5-5 未另行定义风格 (跨任务契约完整性)。"}

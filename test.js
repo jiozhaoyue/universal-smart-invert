@@ -1753,4 +1753,187 @@ setTimeout(() => {
   console.log('✓ v4.6 unit tests passed: maskedDarkContext four-case matrix (A/E/F detect, B/C clean) + veil forms + budget cap');
 })();
 
+// ============================================================
+// v5.0 Action Registry 单测 (来源表顺序 / resolveStage 短路 / arbitrate 仲裁 / ACTIONS 契约)
+// 契约来源: .trellis/tasks/09-25-v5-action-registry/design.md §D-1 / §D-2 / §D-3
+// 任务: v5-1 (PRD R1 / AC-1 / AC-3)
+// ============================================================
+(function () {
+  const { ACTIONS, SOURCES, resolveStage, arbitrate } = svi;
+
+  // ---- 1. 来源表结构与顺序 (AC-1 唯一性: 顺序必须逐字等于现行 decideImage 优先级链) ----
+  assert.deepStrictEqual(
+    SOURCES.map((s) => s.id),
+    ['manual', 'elementRule', 'learned', 'seedProtect', 'faviconSkip', 'seedForceInvert'],
+    'SOURCES 顺序必须与现行优先级链一致 (favicon 夹在 protect 与 forceInvert 之间)'
+  );
+  assert.deepStrictEqual(
+    SOURCES.map((s) => s.stage),
+    ['override', 'override', 'rule', 'rule', 'rule', 'rule'],
+    'stage: 前两条属决策快照之前 (override), 后四条属快照之后 (rule)'
+  );
+  assert.strictEqual(new Set(SOURCES.map((s) => s.id)).size, SOURCES.length, '来源 id 必须唯一');
+  assert.ok(SOURCES.every((s) => typeof s.resolve === 'function'), '每条来源必须有 resolve');
+
+  // ---- 2. ACTIONS 契约 (AC-3: keep 无属性门) ----
+  assert.strictEqual(ACTIONS.invert.attr, 'data-svi-inverted', 'invert 属性门');
+  assert.strictEqual(ACTIONS.keep.attr, null, 'keep 必须无属性门 (否则全动作关闭时会增加页面属性写入, 破坏 AC-3)');
+  assert.strictEqual(ACTIONS.invert.defaultEnabled, true, 'invert 默认开 (现状)');
+  assert.strictEqual(ACTIONS.keep.defaultEnabled, true, 'keep 默认开 (现状)');
+  assert.ok(!('hide' in ACTIONS) && !('mask' in ACTIONS) && !('dim' in ACTIONS) && !('peek' in ACTIONS),
+    '阶段 A 不得出现未落地动作 (hide/mask/dim/peek 属阶段 B)');
+  assert.ok(ACTIONS.invert.isActive({ getAttribute: () => 'true' }), 'invert.isActive 读属性门');
+  assert.strictEqual(ACTIONS.keep.isActive({ getAttribute: () => 'true' }), false, 'keep 恒为非激活');
+
+  // ---- helpers ----
+  function mkEl(opts) {
+    const o = opts || {};
+    const attrs = Object.assign({}, o.attrs);
+    return {
+      tagName: o.tagName || 'IMG',
+      id: o.id || '',
+      className: o.className || '',
+      getAttribute(k) { return Object.prototype.hasOwnProperty.call(attrs, k) ? attrs[k] : null; },
+      setAttribute(k, v) { attrs[k] = String(v); },
+      removeAttribute(k) { delete attrs[k]; },
+      matches(sel) {
+        const wanted = String(sel).split(',').map((s) => s.trim());
+        return (o.matchSelectors || []).some((s) => wanted.indexOf(s) >= 0);
+      },
+      _attrs: attrs,
+    };
+  }
+
+  const host = svi.profileKey();
+  const urlManual = 'https://mail.163.com/manual.png';
+  const urlNoOv = 'https://mail.163.com/no-override.png';
+  const urlW = 'https://mail.163.com/w.png';
+
+  // ---- 3. resolveStage: override 段短路顺序 ----
+  // 3a. manual 命中 → 不再查 elementRule
+  svi.prefs.manualOverrides[svi.manualOverrideKey(host, urlManual)] = 'invert';
+  const rManual = resolveStage(mkEl({ matchSelectors: ['.my-rule'] }), {
+    src: urlManual,
+    elementRules: [{ selector: '.my-rule', action: 'protect' }],
+    protect: [],
+    forceInvert: [],
+  }, 'override');
+  assert.strictEqual(rManual.verdict, 'invert', 'manual 命中必须判 invert (压过 elementRule)');
+  assert.strictEqual(rManual.source, 'manual', 'source 由表自动填充');
+  assert.strictEqual(rManual.reason, 'manual', 'reason=manual');
+  assert.strictEqual(rManual.force, true, 'manual 必须 force (刷新既有快照)');
+
+  // 3b. manual 未命中 → elementRule 命中
+  const rEr = resolveStage(mkEl({ matchSelectors: ['.my-rule'] }), {
+    src: urlNoOv,
+    elementRules: [{ selector: '.my-rule', action: 'protect' }],
+    protect: [],
+    forceInvert: [],
+  }, 'override');
+  assert.strictEqual(rEr.verdict, 'keep', 'elementRule protect → keep');
+  assert.strictEqual(rEr.source, 'elementRule', 'source=elementRule');
+  assert.strictEqual(rEr.reason, 'element-rule', 'reason=element-rule');
+  assert.strictEqual(rEr.force, true, 'elementRule 必须 force (v3.3 显式配置优先于快照)');
+
+  // 3c. 皆未命中 → null (交回快照)
+  assert.strictEqual(
+    resolveStage(mkEl({}), { src: urlNoOv, elementRules: [], protect: [], forceInvert: [] }, 'override'),
+    null, 'override 段无人认领必须返回 null'
+  );
+
+  // ---- 4. resolveStage: rule 段短路顺序 ----
+  const ctxRule = { src: 'https://mail.163.com/x.png', protect: ['.seed-protect'], forceInvert: ['.seed-force'] };
+
+  // 4a. learned 命中 (hits ≥ learnHits) → 不再查种子
+  svi.RuleLearner.data = { [host]: { rules: [{ stem: 'img.learnt', action: 'protect', hits: 5, lastAt: Date.now() }] } };
+  const rLearned = resolveStage(mkEl({ className: 'learnt', matchSelectors: ['.seed-protect'] }), ctxRule, 'rule');
+  assert.strictEqual(rLearned.verdict, 'keep', 'learned protect → keep');
+  assert.strictEqual(rLearned.source, 'learned', 'source=learned');
+  assert.strictEqual(rLearned.reason, 'learned', 'reason=learned');
+
+  // 4b. learned 未命中 → 种子保护
+  const rProtect = resolveStage(mkEl({ className: 'other', matchSelectors: ['.seed-protect'] }), ctxRule, 'rule');
+  assert.strictEqual(rProtect.source, 'seedProtect', 'learned 未命中时落到 seedProtect');
+  assert.strictEqual(rProtect.verdict, 'keep', '种子保护 → keep');
+  assert.strictEqual(rProtect.reason, 'protected', 'reason=protected');
+
+  // 4c. protect 先于 forceInvert
+  const rBoth = resolveStage(mkEl({ className: 'other', matchSelectors: ['.seed-protect', '.seed-force'] }), ctxRule, 'rule');
+  assert.strictEqual(rBoth.source, 'seedProtect', '同时命中时 protect 必须先于 forceInvert');
+
+  // 4d. favicon 跳过
+  const ctxFav = { src: 'https://mail.163.com/favicon.ico', protect: [], forceInvert: ['.seed-force'] };
+  const rFav = resolveStage(mkEl({ className: 'other' }), ctxFav, 'rule');
+  assert.strictEqual(rFav.verdict, 'skip', 'favicon 必须 skip');
+  assert.strictEqual(rFav.reason, 'favicon', 'reason=favicon');
+  assert.strictEqual(rFav.source, 'faviconSkip', 'source=faviconSkip');
+
+  // 4e. favicon 先于 seedForceInvert (现行代码的实际顺序, 不得重排)
+  const rFav2 = resolveStage(mkEl({ className: 'other', matchSelectors: ['.seed-force'] }), ctxFav, 'rule');
+  assert.strictEqual(rFav2.source, 'faviconSkip', 'favicon 必须先于 seedForceInvert');
+
+  // 4f. 种子强制反色 (仅当 protect / favicon 均未命中)
+  const ctxForce = { src: 'https://mail.163.com/doc.png', protect: ['.seed-protect'], forceInvert: ['.seed-force'] };
+  const rForce = resolveStage(mkEl({ className: 'other', matchSelectors: ['.seed-force'] }), ctxForce, 'rule');
+  assert.strictEqual(rForce.verdict, 'invert', '种子强制反色 → invert');
+  assert.strictEqual(rForce.reason, 'seed-force', 'reason=seed-force');
+  assert.ok(!rForce.force, 'seedForceInvert 不得 force (现行 recordDecision 不带 force)');
+
+  // 4g. rule 段皆未命中 → null (交回小元素门/策略门/像素)
+  assert.strictEqual(
+    resolveStage(mkEl({ className: 'other' }), { src: 'https://mail.163.com/y.png', protect: [], forceInvert: [] }, 'rule'),
+    null, 'rule 段无人认领必须返回 null'
+  );
+
+  // ---- 5. arbitrate: 手动结论幂等占优 + 两条例外 ----
+  // 5a. 非 manual 来源遇到元素手动结论 → 以手动为准
+  const aA = arbitrate(mkEl({ attrs: { 'data-svi-manual': 'restore' } }), { verdict: 'invert', reason: 'pixel' });
+  assert.strictEqual(aA.verdict, 'keep', '手动 restore 必须压过像素 invert');
+  assert.strictEqual(aA.reason, 'manual', '占优后 reason 必须改判 manual');
+  assert.strictEqual(aA.source, 'manual', '占优后 source 必须改判 manual (供 v5-2/v5-3 聚合)');
+
+  // 5b. reason='manual' 自身是直写例外
+  const aB = arbitrate(mkEl({ attrs: { 'data-svi-manual': 'restore' } }), { verdict: 'invert', reason: 'manual' });
+  assert.strictEqual(aB.verdict, 'invert', 'reason=manual 是直写例外, 不得被手动结论改写');
+
+  // 5c. reason='fx-mutex' 是直写例外 (v4.6 实测得出, 不得扩大)
+  const aC = arbitrate(mkEl({ attrs: { 'data-svi-manual': 'invert' } }), { verdict: 'keep', reason: 'fx-mutex' });
+  assert.strictEqual(aC.verdict, 'keep', 'fx-mutex 是直写例外');
+
+  // 5d. 无手动结论 → 原样透传
+  const aD = arbitrate(mkEl({}), { verdict: 'invert', reason: 'pixel', force: true, source: 'pixel' });
+  assert.strictEqual(aD.verdict, 'invert', '透传 verdict');
+  assert.strictEqual(aD.reason, 'pixel', '透传 reason');
+  assert.strictEqual(aD.force, true, '透传 force');
+  assert.strictEqual(aD.source, 'pixel', '透传 source');
+
+  // 5e. 手动 'invert' 方向同样占优
+  const aE = arbitrate(mkEl({ attrs: { 'data-svi-manual': 'invert' } }), { verdict: 'keep', reason: 'protected' });
+  assert.strictEqual(aE.verdict, 'invert', '手动 invert 必须压过种子保护 keep');
+
+  // ---- 6. 写点行为: ACTIONS.invert.apply 经 arbitrate, 手动结论不得被覆盖 ----
+  svi.prefs.manualOverrides[svi.manualOverrideKey(host, urlW)] = 'restore';
+  const elW = mkEl({});
+  elW.currentSrc = urlW;
+  elW.src = urlW;
+  const why = ACTIONS.invert.apply(elW, null, 'pixel');
+  assert.strictEqual(elW.getAttribute('data-svi-inverted'), null, '手动 restore 存在时 invert.apply 不得写入反色属性');
+  assert.strictEqual(why, 'manual', '返回值必须报出发生了手动占优 (why=manual)');
+
+  // keep.apply 走同一仲裁 (不得因 keep 而绕过手动结论)
+  const elK = mkEl({});
+  elK.currentSrc = urlManual; // 该 url 的手动结论为 invert
+  elK.src = urlManual;
+  ACTIONS.keep.apply(elK, null, 'pixel');
+  assert.strictEqual(elK.getAttribute('data-svi-inverted'), 'true', '手动 invert 存在时 keep.apply 必须被判为反色');
+
+  // ---- 清理: 还原偏好与学习数据, 避免影响后续用例 ----
+  delete svi.prefs.manualOverrides[svi.manualOverrideKey(host, urlManual)];
+  delete svi.prefs.manualOverrides[svi.manualOverrideKey(host, urlW)];
+  delete svi.prefs.manualOverrides[svi.manualOverrideKey(host, urlNoOv)];
+  svi.RuleLearner.data = {};
+
+  console.log('✓ v5.0 unit tests passed: Action Registry (SOURCES 顺序/stage 分段/resolveStage 短路/arbitrate 两例外/keep 无属性门)');
+})();
+
 

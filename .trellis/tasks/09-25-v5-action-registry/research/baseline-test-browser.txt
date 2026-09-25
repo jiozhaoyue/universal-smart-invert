@@ -1,0 +1,128 @@
+[Ext Smoke] node-only extension smoke: gen-icons -> build-extension -> pack ...
+[gen-icons] generated deterministic RGBA PNG icons:
+  D:\Repo\Github-repo\Pubilc\Dark-viewer\extension\icons\icon16.png (210 bytes)
+  D:\Repo\Github-repo\Pubilc\Dark-viewer\extension\icons\icon32.png (328 bytes)
+  D:\Repo\Github-repo\Pubilc\Dark-viewer\extension\icons\icon48.png (455 bytes)
+  D:\Repo\Github-repo\Pubilc\Dark-viewer\extension\icons\icon128.png (1260 bytes)
+[build-extension] userscript : universal-smart-invert.user.js
+[build-extension] version    : 4.6.1
+[build-extension] name       : 全网通用智能视频与图片反色 (Universal Smart Video & Image Invert)
+[build-extension] description: 全网通用智能视频与图片反色脚本 (v4.6, AGPL-3.0 开源)。新增: 本地优先判定 (所见即所得, 弱网/断网下按本地已渲染内容抢先判定, 不再等资源加载完成), Alt+点击一次生效的手动结论防覆盖层, 暗色遮罩上下文感知 ... [clipped to 132 chars]
+[build-extension] wrote      : extension\content.js (388125 bytes, 10735 lines)
+[build-extension] wrote      : extension\manifest.json
+[build-extension] wrote      : extension\popup.html, extension\popup.js
+[build-extension] icons OK   : icon16.png, icon32.png, icon48.png, icon128.png
+[build-extension] prelude    : EXT_MODE=true (wrapper scope) + GM_xmlhttpRequest/GM.xmlHttpRequest/GM_addStyle shims; Store uses chrome.storage natively
+[pack] packed 8 files (440980 bytes) from extension/:
+  content.js
+  icons/icon128.png
+  icons/icon16.png
+  icons/icon32.png
+  icons/icon48.png
+  manifest.json
+  popup.html
+  popup.js
+[pack] output  : dist\universal-smart-invert-extension-v4.6.1.zip
+[pack] verified: central directory parses, 8 entries, stored-mode, CRC OK
+[Ext Smoke] OK — manifest v4.6.1; content.js 388125 bytes, syntax OK; zip 440980 bytes, 8 entries, central directory parses
+[TestServer] Main bench at http://127.0.0.1:8765 (login page: /login-page)
+[TestServer] Cross-origin CORS SVG host at http://127.0.0.1:8766
+[Browser] Launching Headless Chrome: C:\Program Files\Google\Chrome\Application\chrome.exe
+[Browser] Connected to CDP WebSocket: ws://127.0.0.1:9222/devtools/page/5E909F8A3946429CCE1ADD4E84547E39
+[Test] Navigating to main bench page ...
+[Test] Waiting for image analysis to complete in Chrome...
+
+[Browser Test Results — Scenario 1: engines + UI + stats]
+----------------------------------------------------
+1. Pure White Diagram:       Inverted = true (Expected: true)
+2. Light Gray Chart:         Inverted = true (Expected: true)
+3. Warm Cream Slide:         Inverted = true (Expected: true)
+4. Pale Blue Flowchart:      Inverted = true (Expected: true)
+5. Wiki/Thumb URL Diagram:   Inverted = true (Expected: true)
+6. Dark Scenery Photo:       Inverted = false (Expected: false)
+7. High-Sat Colorful Banner: Inverted = false (Expected: false)
+8. CORS SVG (sized):         Inverted = true (Expected: true)
+9. CORS SVG (no size):       Inverted = true (Expected: true)
+10. BG-Image Thumb div:      data-svi-bginv = true (Expected: true)
+Icon grid (20 tiny repeats): 0/20 inverted (Expected: 0)
+Stats key parsed:            true imagesAnalyzed = 16 (Expected: parsed + >=1)
+----------------------------------------------------
+UI Float Pill:               ✓ Present
+UI Settings Modal:           ✓ Present
+UI Color Chips (Presets):    6 chips loaded
+UI Color Picker:             ✓ Present
+UI Collapsible Accordion:    ✗ Missing
+UI Panel Action Buttons:     4 (Expected: 4, incl. 背景替换)
+Modal Site Section:          ✓ Present
+Modal Shield Section:        ✓ Present
+Modal Stats Section:         ✓ Present
+----------------------------------------------------
+
+[Test] Scenario 1b: element rules (protect / invert) ...
+[Test] Scenario 2: toggling 视频反色 via UI button ...
+Toggle result: clicked=true label "视频:关" -> "视频:开" runtime.invertActive=true
+[Test] Scenario 2b: Alt+click manual override on dark photo ...
+Alt+click: img-dark inverted=true overrides=1 darkKey=true
+[Test] Scenario 2b: reloading main page to verify override survival ...
+After reload: img-dark inverted=true (Expected: true, decision remembered)
+[Test] Scenario 3: navigating to /login-page (bgReplace pre-seeded) ...
+Login page: bodyLum=20 (Expected < 120) loginLum=255 (Expected > 200) bgrOn=true runtimeInvertActive=false
+[Test] Scenario 4: navigating to /fx-luma-page (luma fx) ...
+Luma fx result: {"hasFxAttr":true,"cssInverted":false,"fxStyleHasContentRule":true,"contentComputed":"url(\"blob:http://127.0.0.1:8765/b48b7486-104b-43c6-ab97-6334b7794025\")","hasBlob":true,"whiteRegion":[0,0,0],"blueRegion":[30,80,200],"photoHasFx":false}
+Hover state: {"hoverClass":true,"content":"normal"}
+[Test] Scenario 5: navigating to /fx-key-page (key fx) ...
+Key fx result: {"hasBlob":true,"redRegion":[0,255,255],"whiteRegion":[255,255,255]}
+[Test] Scenario 6: navigating to /video-fx-page (WebGL overlay luma) ...
+Overlay ready: true
+Overlay readback: {"found":true,"w":640,"h":360,"internalCapped":true,"leftWhite":[13,13,13],"rightBlue":[38,79,178],"cssFilterOnVideo":"(none)"}
+PiP stream: {"tracks":1,"kind":"video"}
+[Test] Scenario 7: navigating to /video-tl-page (timeline record) ...
+Recorded timeline: {"keyCount":1,"segs":[[0.551459,2.149867]]}
+[Test] Scenario 7: reloading to verify reference-mode auto-arm ...
+[Test] Scenario 8: navigating to /learn-page (rule learning) ...
+RuleLearner after 3 corrections: {"invertedBefore":0,"rules":[{"stem":"img.thumb-x","action":"invert","hits":3,"lastAt":1790328041745}]}
+After reload: {"learn-1":true,"learn-2":true,"learn-3":true,"learn-4":true,"smartSection":true,"smartText":"🌐 本站能力🖼️图片反色跟随全局 · 开🎬视频反色跟随全局 · 开🌙背景替换跟随全局 · 开本站图片特效仅作用于当前站点的图片特效模式跟随全局完整反色亮度反色键色反色区域反色灰度化怀旧泛黄提亮自定义元素级规则按元素特征强制反色或保持原色，优先于自动判断与学习规则。暂无元素规则 —— 添加后对匹配元素强制生效。本站全部站点强制反色保持原色局部改色添加规则学习规则内置种子规则内置站点规则库作为兜底层，学习规则优先于它学习命中阈值同一特征手动修正达此次数后自动生效次本站已学习规则（Alt+点击修正积累）：img.thumb-x反色3 次 · 已生效删除时间线记忆: 本站已记忆 1 个视频 / 1 个反色片段 (模式: reference)。🔄 重扫本页背景"}
+[Test] Scenario 9: navigating to /media-page (media coverage) ...
+Media coverage: {"canvasInverted":true,"posterLight":true,"shadowImgInverted":true,"svgImageInverted":true,"inputImageInverted":true,"overlayCanvasTouched":false}
+[Test] Scenario 10: navigating to /storage-page (storage migration) ...
+Storage: {"sviPrefsParses":true,"markerStatsEnabled":true,"markerBgReplace":true,"noManualOverrides":true,"legacyV4Untouched":true,"overridesKey":false,"backend":"local","describeCount":4,"storageSection":true,"badgeText":"页面本地存储","exportParses":true,"timelineDeleted":true}
+[Test] Scenario 11: file:// page ...
+[Test] file URL: file:///C:/Users/caocaobi/AppData/Local/Temp/svi-file-test-LtrR0G/page.html
+file:// result: {"booted":true,"version":"4.6.1","hasPill":true,"hasStorageSection":true,"imgTagged":true,"runtimeBlockedFlag":true} pageErrors = 0
+[Test] Scenario 12: coexistence handshake (us first) ...
+[Chrome Console] [SmartInvert] 检测到另一实例 (userscript/插件) 已接管本页, 本实例休眠启动
+Coexistence us-first: {"owner":"us","usBooted":true,"extDormant":true,"singleUI":1}
+[Test] Scenario 12: coexistence handshake (ext first) ...
+[Chrome Console] [SmartInvert] 检测到另一实例 (userscript/插件) 已接管本页, 本实例休眠启动
+Coexistence ext-first: {"owner":"ext","extBooted":true,"usDormant":true,"singleUI":1}
+[Test] Scenario 13: navigating to /github-page (eager pass, no scrolling) ...
+GitHub-like pre-scroll state: {"scrollY":0,"shots":{"gh-shot-1":{"inverted":true,"checked":true,"top":1455},"gh-shot-2":{"inverted":true,"checked":true,"top":1815},"gh-shot-3":{"inverted":true,"checked":true,"top":2176},"gh-logo":{"inverted":true,"checked":true,"top":111}},"badgeCount":15,"badgesInverted":0,"badgesChecked":15,"badgeFirstPassReason":"tiny"}
+After seed rule + rescan: {"badgesInverted":15,"badgeReason":"seed-force","shots":[true,true,true,true],"snapshot":"1111111111111111111"}
+[Test] Scenario 14: navigating to /policy-page (balanced) ...
+Policy balanced: {"policy":"balanced","coverCount":12,"covers":[{"inverted":false,"checked":true},{"inverted":false,"checked":true},{"inverted":false,"checked":true},{"inverted":false,"checked":true},{"inverted":false,"checked":true},{"inverted":false,"checked":true},{"inverted":false,"checked":true},{"inverted":false,"checked":true},{"inverted":false,"checked":true},{"inverted":false,"checked":true},{"inverted":false,"checked":true},{"inverted":false,"checked":true}],"coverReason":"policy","card":{"inverted":false,"checked":true},"cardReason":"policy","diagram":{"inverted":true,"checked":true}}
+[Test] Scenario 14b: /policy-page?policy=aggressive ...
+Policy aggressive: {"policy":"aggressive","coversInverted":12,"diagramInverted":true}
+[Test] Scenario 15a: /hover-page?restore=0&fx=full (hoverRestore=false, CSS filter path) ...
+CSS path hover filter: invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9)
+BG path hover filter (restore=0): invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9)
+[Test] Scenario 15b: /hover-page?restore=0&fx=luma (hoverRestore=false, fx content:url path) ...
+fx path hover: {"hoverClass":false,"content":"url(\"blob:http://127.0.0.1:8765/1f069a61-f49d-42de-a316-b6b3703d5dc8\")"}
+[Test] Scenario 15c: /hover-page?restore=1&fx=full (hoverRestore back ON, CSS path restores) ...
+BG path hover filter (restore=1): none
+[Test] Scenario 16: navigating to /viewer-page (viewer extension sim) ...
+Viewer Alt+click 1: {"wasInverted":true,"afterFirst":false,"overrideRecorded":true}
+[Test] Scenario 17: navigating to main page, opening 当前页媒体 section ...
+Media section: {"section":true,"rows":30}
+Media toggle: {"found":true,"before":{"stateText":"已反色","inverted":true},"afterInverted":false}
+[Test] Scenario 18: navigating to /tune-page (video tune) ...
+[Test] Scenario 19: site power hot-apply (disable → instant teardown → re-enable) ...
+[Test] Scenario 20: font override + text stroke (global tab) ...
+[Test] Scenario 20b: settings row sync audit ...
+Row sync audit: {"hoverRestore":{"pref":true,"shown":true},"generalLight":{"pref":true,"shown":true},"policy":{"pref":"balanced","shown":"balanced"},"imgFxMode":{"pref":"full","shown":"full"},"videoFxMode":{"pref":"off","shown":"off"},"timelineMode":{"pref":"reference","shown":"reference"}}
+[Test] Scenario 21: dynamic dark theme tone/brightness (bgReplace) ...
+[Test] Scenario 22: time-window scheduler hot switching ...
+[Test] Scenario 23: element-rule recolor (partial light-part change) ...
+[Test] Scenario 24: flash-black guard self-cleanup ...
+
+🎉 ALL BROWSER AUTOMATION TESTS PASSED 100% SUCCESFULLY!
+
