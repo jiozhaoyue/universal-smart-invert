@@ -307,6 +307,11 @@
     regionGridN: 16,             // 降采样网格 N×N (8 ~ 32; 越大越细, 耗时越高)
     regionMinAreaRatio: 0.03,    // 最小连通域面积门 (占全图比例) —— D3「保守大块」
     regionKRects: 3,             // 矢量快路径的矩形数上限 K (0 ~ 8; 0 = 只保留退化的零矩形表达)
+    // v6.2 区域渲染层 (部分反色) —— 默认全关
+    regionRender: false,         // 部分反色渲染总开关 (关时零覆盖层/零新增节点)
+    regionHeartbeatMs: 1000,     // 视频/GIF 掩码重算心跳 (200 ~ 5000)
+    regionOverlayMax: 8,         // 全局覆盖层上限 (1 ~ 50)
+    regionStaticOnly: false,     // 仅静态图 (视频/GIF 不挂覆盖层, 规避场景渐变时的掩码滞后)
   };
 
   // 运行时状态 (仅存于内存, 每个标签页独立, 绝不写入存储 —— 标签页隔离)
@@ -1092,6 +1097,11 @@
     merged.regionGridN = Math.round(clampNumber(merged.regionGridN, 8, 32, 16));
     merged.regionMinAreaRatio = clampNumber(merged.regionMinAreaRatio, 0.01, 0.25, 0.03);
     merged.regionKRects = Math.round(clampNumber(merged.regionKRects, 0, 8, 3));
+    // v6.2 区域渲染层 (默认全关; 与 DEFAULT_PREFS / 面板默认值三处一致由 test.js 断言把关)
+    merged.regionRender = merged.regionRender === true;
+    merged.regionHeartbeatMs = Math.round(clampNumber(merged.regionHeartbeatMs, 200, 5000, 1000));
+    merged.regionOverlayMax = Math.round(clampNumber(merged.regionOverlayMax, 1, 50, 8));
+    merged.regionStaticOnly = merged.regionStaticOnly === true;
     // 标签页隔离: 运行时状态绝不入库
     delete merged.invertActive;
 
@@ -1278,7 +1288,7 @@
   function stripSviSideEffects() {
     try {
       document.querySelectorAll(
-        '[data-svi-inverted], [data-svi-bginv], [data-svi-checked-src], [data-svi-fx], [data-svi-fx-off], [data-svi-checked], [data-svi-bgr-bg], [data-svi-bgr-bd], [data-svi-bgr-fg]'
+        '[data-svi-inverted], [data-svi-bginv], [data-svi-checked-src], [data-svi-fx], [data-svi-fx-off], [data-svi-checked], [data-svi-bgr-bg], [data-svi-bgr-bd], [data-svi-bgr-fg], [data-svi-region]'
       ).forEach((el) => {
         el.removeAttribute('data-svi-inverted');
         el.removeAttribute('data-svi-bginv');
@@ -1289,8 +1299,13 @@
         el.removeAttribute('data-svi-bgr-bg');
         el.removeAttribute('data-svi-bgr-bd');
         el.removeAttribute('data-svi-bgr-fg');
+        el.removeAttribute('data-svi-region');
       });
       document.querySelectorAll('.svi-fx-overlay').forEach((el) => { try { el.remove(); } catch (e) { /* ignore */ } });
+      // v6.2: 区域反色覆盖层与它的 <clipPath> 定义一并拆除
+      //   (clipPath 容器就挂在覆盖层内部, 所以 remove() 覆盖层即同时回收定义 —— 生命周期天然随层)
+      document.querySelectorAll('.svi-region-overlay').forEach((el) => { try { el.remove(); } catch (e) { /* ignore */ } });
+      try { RegionRenderEngine.unmountAll('site-off'); } catch (e) { /* ignore */ }
       document.querySelectorAll('.svi-playing, .svi-fx-hover').forEach((el) => {
         try { el.classList.remove('svi-playing', 'svi-fx-hover'); } catch (e) { /* ignore */ }
       });
@@ -4553,6 +4568,20 @@
         overflow: hidden;
       }
 
+      /* v6.2 区域反色覆盖层 (部分反色)。载体是**独立 DOM 层**, 不碰站点元素的 ::after ——
+         几何对齐与伪元素冲突两条理由见 design D1。滤镜串走同一个 CSS 变量,
+         故与整图路径**逐字符一致**由构造保证 (PRD R1 的 AC)。
+         z-index 取最小可用值 1; 不设 transform/opacity, 避免自己创造 stacking context。
+         pointer-events: none 是硬要求 (绝不挡媒体控件)。 */
+      .svi-region-overlay {
+        position: absolute;
+        pointer-events: none !important;
+        border-radius: inherit;
+        z-index: 1;
+        backdrop-filter: var(--svi-img-filter, invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.90));
+        -webkit-backdrop-filter: var(--svi-img-filter, invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.90));
+      }
+
       /* 视频海报反色 (播放后由 play 事件移除滤镜) */
       html.svi-img-invert-on video[data-svi-poster="light"]:not(.svi-playing),
       body.svi-img-invert-on video[data-svi-poster="light"]:not(.svi-playing) {
@@ -5193,8 +5222,18 @@
 
       this.currentVideo.style.setProperty('transition', transitionVal, 'important');
       if (runtime.invertActive) {
+        // v6.2 区域渲染: 部分反色接管该视频 (元素本体不得再有滤镜, R1)。
+        //   顺序在 GPU 覆盖层判定之后 —— 那条路是用户显式选的视频特效, 优先级更高 (design D4)。
+        try {
+          if (regionRenderTryMount(this.currentVideo, getMediaSrc(this.currentVideo))) {
+            this.currentVideo.style.removeProperty('filter');
+            return;
+          }
+        } catch (e) { /* ignore → 落回整图路径 */ }
+        regionRenderUnmount(this.currentVideo, 'fallback');
         this.currentVideo.style.setProperty('filter', filterString, 'important');
       } else {
+        regionRenderUnmount(this.currentVideo, 'keep');
         this.currentVideo.style.removeProperty('filter');
       }
     }
@@ -5463,6 +5502,9 @@
         return;
       }
       runtime.invertActive = active;
+      // v6.2: 反色状态发生变化 = v5-4 意义上的"场景变了" → 通知区域层重算掩码 (节流在引擎里)。
+      //   放在这里是因为这是**所有**视频状态迁移的唯一收口; 关开关时这一行只是一次布尔判断。
+      try { if (active) regionRenderOnSceneChange(video); } catch (e) { /* ignore */ }
       if (active) {
         if (this.timeline) this.timeline.recordStart(video);
       } else {
@@ -6890,6 +6932,13 @@
 
   function regionCacheClear() {
     regionCache.clear();
+    regionBySrc.clear();
+  }
+
+  // 定点失效一个键 (重算调度必须先失效再重算, 否则会命中旧值 —— 那正是"沿用"的语义)
+  function regionCacheDelete(key) {
+    if (!key) return false;
+    return regionCache.delete(String(key));
   }
 
   // 降级原因 → StatsManager 计数键 (固定键集, 不动态拼名 —— 对齐 freshCounters 的既有约定)
@@ -7008,6 +7057,20 @@
     return regionMaskKey(profileKey(), stem, nw, nh);
   }
 
+  // 元素 → 掩码的直接关联。**为什么需要它**: 渲染层要用"这次判定刚算出来的那份掩码",
+  //   而按字符串键 (host|词干|固有尺寸) 重新查表会**漂移** —— 判定时机可能早于图片加载完成,
+  //   那时 naturalWidth/Height 还是 0, 键与挂载时机算出来的不同 → 查不到 → 覆盖层静默不挂。
+  //   实测踩到 (implement.md 偏离 3): 同一张 SVG 被 object-fit 盒与 transform 祖先包着的那两张
+  //   决策为 'region' 却拿不到层。按元素直连就没有这个问题 (WeakMap, 元素消失即自动回收)。
+  const regionByElement = (typeof WeakMap === 'function') ? new WeakMap() : null;
+  // src → 掩码。**为什么还需要这一层**: decideImage 的决策是**按 src 复用**的
+  //   (decisionBySrc), 同一张图出现在第二个元素上时直接重放结论、不会再算一次网格,
+  //   于是"元素直连"和"按字符串键"都查不到那份掩码 → 第二个元素静默不挂层。
+  //   实测踩到 (implement.md 偏离 3): 同一张 SVG 被 object-fit 盒 / transform 祖先包着的两张
+  //   决策为 'region' 却没有覆盖层。掩码本身只由**图像内容**决定, 与元素无关, 故按 src 直连是成立的。
+  const regionBySrc = new Map();
+  const REGION_SRC_MAP_MAX = 200;
+
   // 区域结论的 reason 决断 —— 接缝的全部内容。
   //   本片**不渲染** (覆盖层属 v6-2), 所以这里的唯一作用是把来源标签从 'pixel' 换成 'region':
   //   反色结论本身与整图路径逐字一致, 用户可见变化为零, 只有在诊断计数与撤销栈里能看到来源。
@@ -7015,10 +7078,22 @@
   //   grid 缺失 (像素结论来自决策缓存) 时**只查表不构建** —— 绝不为了一个标签重算分割,
   //   那会让 decide-once 的缓存快路径凭空变贵。
   //   注意 reason 码不改 SOURCES 表形状: 'region' 只是像素路径内部的一支 (source 仍是 'pixel')。
-  function regionReasonFor(el, grid) {
+  function regionReasonFor(el, grid, src) {
     if (state.regionSegment !== true) return 'pixel';
     const key = regionMaskKeyFor(el);
     const mask = grid ? regionMaskTake(grid, { key: key }) : regionCache.get(key);
+    if (mask && regionByElement) {
+      // 判定与掩码同时落两份"直连": 元素级 (本次决策) + src 级 (同图的其他元素复用决策时用)
+      try { regionByElement.set(el, mask); } catch (e) { /* ignore */ }
+      if (src && mask.source === 'region') {
+        try {
+          regionBySrc.set(String(src), mask);
+          while (regionBySrc.size > REGION_SRC_MAP_MAX) {
+            regionBySrc.delete(regionBySrc.keys().next().value);
+          }
+        } catch (e) { /* ignore */ }
+      }
+    }
     return (mask && mask.source === 'region') ? 'region' : 'pixel';
   }
 
@@ -7757,6 +7832,13 @@
       // v6.0: 区域掩码缓存随全量重扫一并清空 —— 缓存键里**没有**网格粒度与各阈值,
       //   参数变更必须靠这里失效 (design §8 的键形状如此规定); 漏了这一步会让「改参数没反应」。
       regionCacheClear();
+      // v6.2: 渲染层的祖先链探测缓存与已挂覆盖层同样随参数变更失效/重挂
+      //   (例如用户在「用户脚本面板」里刚打开 regionRender, 必须能立刻生效)
+      try {
+        RegionRenderEngine.epoch++;
+        RegionRenderEngine.rootCache = (typeof WeakMap === 'function') ? new WeakMap() : null;
+        RegionRenderEngine.unmountAll('cache-reset');
+      } catch (e) { /* ignore */ }
       const root = document.body || document.documentElement;
       if (!root) return;
       try {
@@ -8183,6 +8265,13 @@
         return;
       }
       if (fx) fx.clearFor(el);
+      // v6.2 区域渲染: 部分反色**接管**该元素的渲染 (元素本体不得再有滤镜)。
+      //   顺序刻意在 fx 互斥之后: 用户显式配置的图片特效优先于自动区域分割 (design D4)。
+      //   regionRenderTryMount 只在「开关开启 且 已有该元素的区域掩码」时才成功;
+      //   任何失败 (无掩码 / 祖先截断 / 与滤镜互斥 / 无定位祖先 / 预算超限) 都**返回 false**,
+      //   于是自然落回下面的整图路径 —— 这就是「绝不静默失效」的落地方式。
+      if (wantInvert && regionRenderTryMount(el, src)) return;
+      if (!wantInvert) regionRenderUnmount(el, 'keep');
       applyInvertState(el, wantInvert, 'pixel');
     }
 
@@ -8459,7 +8548,7 @@
       if (this.cache.has(src)) {        const isLight = this.cache.get(src);
         if (isLight && maskedVeto()) return; // v4.6: 遮罩否决 (缓存像素判定为亮时仍需过蒙层上下文)
         // v6.0: 缓存快路径只**查**区域掩码表决定来源标签, 不构建 (见 regionReasonFor)
-        this.applyDecision(img, src, this.recordDecision(src, isLight ? 'invert' : 'keep', regionReasonFor(img, null)));
+        this.applyDecision(img, src, this.recordDecision(src, isLight ? 'invert' : 'keep', regionReasonFor(img, null, src)));
         return;
       }
 
@@ -8529,7 +8618,7 @@
       if (r.isLight && maskedVeto()) return; // v4.6: 遮罩否决 (合成观感已暗, 不反色; 不入复检网避免翻转)
 
       // v6.0 阶段 6 接缝: 区域模式开启且掩码有效 → 来源标签记为 'region' (结论不变, 不渲染)
-      this.applyDecision(img, src, this.recordDecision(src, r.isLight ? 'invert' : 'keep', regionReasonFor(img, r.grid)));
+      this.applyDecision(img, src, this.recordDecision(src, r.isLight ? 'invert' : 'keep', regionReasonFor(img, r.grid, src)));
 
       // v4.3 智能纠错 (复检网): 像素反色决策限时复检 —— 分类翻转则改写缓存/作废旧快照并重扫,
       // "反错的白色"不再永远错下去 (有界: 每源至多一次, 队列上限 12)
@@ -10342,6 +10431,712 @@
   }
 
   // ==========================================
+  // 20.5 v6.2 区域渲染层 (RegionRenderEngine) —— 把 RegionMask 渲染成可见的部分反色
+  //   设计: .trellis/tasks/09-25-v6-partial-render/design.md (D1~D7)
+  //   契约: .trellis/spec/frontend/region-mask-contract.md (**冻结**) —— 本层只消费不重实现分割
+  //
+  //   为什么用 backdrop-filter: 它在**合成器层**采样, 不读像素 —— 跨域图 / 跨域视频 / DRM 视频
+  //   同样能反色 (克隆层方案会因缺 crossorigin 直接失败, 且动图会从第 0 帧重播)。
+  //   探针实测 (dev/probe-partial-backdrop.js): 带 clip-path / mask-image 的覆盖层上
+  //   backdrop-filter 只反色选区, video 与 img 行为逐项一致。
+  //
+  //   默认关闭 (regionRender=false): 关闭时零覆盖层、零属性写入、零新增节点。
+  // ==========================================
+
+  // 覆盖层降级原因码 → 计数键 (固定键集, 对齐 freshCounters 的既有约定)
+  const REGION_RENDER_DEGRADES = {
+    'ancestor-filter': 'regionRenderDegradeAncestorFilter',
+    'ancestor-opacity': 'regionRenderDegradeAncestorOpacity',
+    'ancestor-blend': 'regionRenderDegradeAncestorBlend',
+    'ancestor-backdrop': 'regionRenderDegradeAncestorBackdrop',
+    'no-positioned-ancestor': 'regionRenderDegradeNoPositioned',
+    'mutex-fx': 'regionRenderDegradeMutexFx',
+    'mutex-tune': 'regionRenderDegradeMutexTune',
+    'overlay-budget': 'regionRenderDegradeOverlayBudget',
+    'no-mask': 'regionRenderDegradeNoMask',
+    'not-ready': 'regionRenderDegradeNotReady',
+  };
+
+  // 降级原因的中文说明 (供 toast 与 v6-4 的面板诊断行共用; 单一真源)
+  const REGION_RENDER_DEGRADE_TEXT = {
+    'ancestor-filter': '祖先元素带 filter, 覆盖层采样不到画面',
+    'ancestor-opacity': '祖先元素半透明, 覆盖层采样不到画面',
+    'ancestor-blend': '祖先元素用了混合模式, 覆盖层采样不到画面',
+    'ancestor-backdrop': '祖先元素自身也是 backdrop-filter',
+    'no-positioned-ancestor': '页面没有可用的定位祖先',
+    'mutex-fx': '该元素正在用图片特效',
+    'mutex-tune': '该视频正在用画面调节',
+    'overlay-budget': '覆盖层数量已达上限',
+    'no-mask': '没有可用的区域掩码',
+    'not-ready': '元素尺寸/图像尚未就绪',
+  };
+
+  // ---- 几何映射 (纯函数, 单测契约 / design D2) ----
+
+  // 内容盒在**元素盒坐标系**中的矩形 (px)。语义严格按 CSS object-fit / object-position:
+  //   fill 拉伸铺满 / contain 等比装下(留边) / cover 等比盖满(可溢出被裁) / none 原始尺寸 /
+  //   scale-down 取 none 与 contain 中更小的那个。
+  //   posX/posY 是 object-position 的百分比 (0~1, 默认 0.5) —— 与规范一致:
+  //   偏移量 = (盒尺寸 - 内容尺寸) * 百分比 (所以 cover 时它是负数, 表示裁切的起点)。
+  //   固有尺寸未知 (0) → 退化为 fill (无法算比例, 只能铺满)。
+  function regionContentRect(natW, natH, boxW, boxH, fit, posX, posY) {
+    const w0 = Number(boxW) || 0;
+    const h0 = Number(boxH) || 0;
+    const nw = Number(natW) || 0;
+    const nh = Number(natH) || 0;
+    if (w0 <= 0 || h0 <= 0) return { x: 0, y: 0, w: 0, h: 0 };
+    if (nw <= 0 || nh <= 0) return { x: 0, y: 0, w: w0, h: h0 };
+    const f = fit || 'fill';
+    let w = w0;
+    let h = h0;
+    if (f !== 'fill') {
+      const scaleContain = Math.min(w0 / nw, h0 / nh);
+      const scaleCover = Math.max(w0 / nw, h0 / nh);
+      let s;
+      if (f === 'contain') s = scaleContain;
+      else if (f === 'cover') s = scaleCover;
+      else if (f === 'none') s = 1;
+      else if (f === 'scale-down') s = Math.min(1, scaleContain);
+      else s = null; // 未知关键字 → 按 fill
+      if (s !== null) { w = nw * s; h = nh * s; }
+    }
+    const px = (typeof posX === 'number' && isFinite(posX)) ? posX : 0.5;
+    const py = (typeof posY === 'number' && isFinite(posY)) ? posY : 0.5;
+    return { x: (w0 - w) * px, y: (h0 - h) * py, w: w, h: h };
+  }
+
+  // 把内容盒坐标的掩码**重采样进元素盒坐标网格** —— 两表达共用的唯一映射 (design D2)。
+  //   逐输出格取中心点, 逆映射回掩码网格取最近格 (点采样):
+  //   内容盒之外一律 0 (保持原色) —— 那部分不是图像像素, 反它没有意义。
+  //   为什么"先进元素盒坐标再 100% 铺满", 而不是用 mask-size 百分比:
+  //   letterbox 与裁切需要同时表达缩放**与偏移**, 而 mask-position 的百分比语义
+  //   (相对"多余空间") 与"内容盒偏移"不是同一件事; 统一映射后两种表达只是同一套变换的两个消费者。
+  function regionBoxGrid(mask, rect, elemW, elemH, outN) {
+    const n = Math.max(4, Math.min(64, Math.round(outN || mask.gw || 16)));
+    const cells = new Uint8Array(n * n);
+    if (!mask || !mask.data || !rect || rect.w <= 0 || rect.h <= 0 || elemW <= 0 || elemH <= 0) {
+      return { n: n, cells: cells };
+    }
+    for (let y = 0; y < n; y++) {
+      const cy = ((y + 0.5) / n) * elemH;
+      const my = ((cy - rect.y) / rect.h) * mask.gh;
+      if (my < 0 || my >= mask.gh) continue;
+      const mrow = Math.floor(my) * mask.gw;
+      for (let x = 0; x < n; x++) {
+        const cx = ((x + 0.5) / n) * elemW;
+        const mx = ((cx - rect.x) / rect.w) * mask.gw;
+        if (mx < 0 || mx >= mask.gw) continue;
+        if (mask.data[mrow + Math.floor(mx)]) cells[y * n + x] = 1;
+      }
+    }
+    return { n: n, cells: cells };
+  }
+
+  // 元素盒网格 → 渲染表达。**直接复用 v6-1 的 deriveRegionExpr** (精确矩形分解),
+  //   于是 I7「两表达渲染结果像素级等价」是**构造性成立**的:
+  //   矢量表达就是同一份元素盒网格的 ≤K 个精确矩形, 与位图表达逐格一致。
+  //   (这也让消费方不需要分支: 只读 expr.kind。)
+  function regionRenderExpr(mask, rect, elemW, elemH, opts) {
+    const box = regionBoxGrid(mask, rect, elemW, elemH, opts && opts.n);
+    const expr = deriveRegionExpr(box.cells, box.n, box.n, opts || REGION_DEFAULTS);
+    return { n: box.n, cells: box.cells, expr: expr };
+  }
+
+  // ---- 祖先链探测 (design D3; PRD 标为最高风险) ----
+
+  // 纯函数: 由祖先链上的样式快照判 backdrop root 是否可用。
+  //   为什么这些会让 backdrop-filter 采样不到画面: 它们各自建立新的 **backdrop root**
+  //   (filter / opacity<1 / mix-blend-mode / 自身 backdrop-filter 都是分组隔离属性),
+  //   覆盖层于是只能采样到"该祖先之后"的内容 —— 也就是看不到媒体本身的像素。
+  //   命中即**显式降级** (退回整图判定), 绝不静默失效。
+  function regionRootVerdict(styles) {
+    const list = styles || [];
+    for (let i = 0; i < list.length; i++) {
+      const s = list[i];
+      if (!s) continue;
+      const f = String(s.filter || 'none');
+      if (f && f !== 'none') return { ok: false, reason: 'ancestor-filter' };
+      const o = (s.opacity === '' || s.opacity == null) ? 1 : Number(s.opacity);
+      if (isFinite(o) && o < 1) return { ok: false, reason: 'ancestor-opacity' };
+      const b = String(s.mixBlendMode || 'normal');
+      if (b && b !== 'normal') return { ok: false, reason: 'ancestor-blend' };
+      const bd = String(s.backdropFilter || 'none');
+      if (bd && bd !== 'none') return { ok: false, reason: 'ancestor-backdrop' };
+    }
+    return { ok: true, reason: '' };
+  }
+
+  // ---- 元素级滤镜互斥 (design D4; PRD R7) ----
+  //   优先级: **用户显式配置的元素级滤镜 > 部分反色**。
+  //   图片特效 (luma/grayscale/sepia/custom) 与视频画面调节 (videoTune) 都是元素级 filter,
+  //   与「本层要求元素本体 filter: none」直接冲突。它们是用户逐项选出来的, 不能被自动区域分割静默顶掉。
+  function regionMutexVerdict(el, st) {
+    const s = st || state;
+    const isVideo = !!(el && el.tagName === 'VIDEO');
+    try {
+      if (el && el.getAttribute && el.getAttribute('data-svi-fx') && el.getAttribute('data-svi-fx-off') !== 'true') {
+        return { ok: false, reason: 'mutex-fx' };
+      }
+    } catch (e) { /* ignore */ }
+    // 视频画面调节是元素级 filter 链的一环 (内联 filter = 反色链 + 调节链), 与「本体无 filter」硬冲突。
+    //   真源就是 state.videoTune.enabled —— 不另立属性门 (避免出现两处开关)。
+    if (isVideo && s && s.videoTune && s.videoTune.enabled === true) {
+      return { ok: false, reason: 'mutex-tune' };
+    }
+    return { ok: true, reason: '' };
+  }
+
+  // ---- 渲染引擎: 挂载 / 卸载 / 重算 / 诊断 ----
+
+  const REGION_FILTER_FALLBACK = 'invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.90)';
+
+  const RegionRenderEngine = {
+    mounts: new Map(),        // Element → 记录
+    epoch: 0,                 // 偏好变更递增 → 祖先链探测缓存失效
+    rootCache: (typeof WeakMap === 'function') ? new WeakMap() : null,
+    seq: 0,                   // clipPath id 序号
+
+    enabled() {
+      return state.regionRender === true;
+    },
+
+    maxOverlays() {
+      return Math.max(1, Math.min(50, Math.round(Number(state.regionOverlayMax) || 8)));
+    },
+
+    // 定位基准: 覆盖层要挂在**最近的 positioned 祖先**里, 并用元素的 offsetLeft/Top 对齐。
+    //   没有 positioned 祖先 → 覆盖层会相对 initial containing block 定位, 与元素错位 →
+    //   按 design D5 **不挂载** (绝不为了定位去改站点的 position)。
+    positionedAncestor(el) {
+      try {
+        if (el && el.offsetParent) return el.offsetParent;
+      } catch (e) { /* ignore */ }
+      try {
+        let p = el && el.parentElement;
+        let hops = 0;
+        while (p && hops < 200) {
+          const pos = (typeof getComputedStyle === 'function') ? getComputedStyle(p).position : '';
+          if (pos && pos !== 'static') return p;
+          p = p.parentElement;
+          hops++;
+        }
+      } catch (e) { /* ignore */ }
+      return null;
+    },
+
+    // 祖先链探测 (design D3)。**只在挂载 / 重算时调用**, 帧内同步路径绝不新增查询。
+    rootVerdict(el) {
+      const cached = this.rootCache ? this.rootCache.get(el) : null;
+      if (cached && cached.epoch === this.epoch) return cached.verdict;
+      const styles = [];
+      try {
+        let p = el && el.parentElement;
+        let hops = 0;
+        while (p && hops < 200 && typeof getComputedStyle === 'function') {
+          const cs = getComputedStyle(p);
+          styles.push({
+            filter: cs.filter,
+            opacity: cs.opacity,
+            mixBlendMode: cs.mixBlendMode,
+            backdropFilter: cs.backdropFilter || cs.webkitBackdropFilter,
+          });
+          p = p.parentElement;
+          hops++;
+        }
+      } catch (e) { /* ignore → 按可用处理 */ }
+      const verdict = regionRootVerdict(styles);
+      if (this.rootCache && typeof this.rootCache.set === 'function') {
+        this.rootCache.set(el, { epoch: this.epoch, verdict: verdict });
+      }
+      return verdict;
+    },
+
+    degrade(el, reason) {
+      const key = REGION_RENDER_DEGRADES[reason] || REGION_RENDER_DEGRADES['not-ready'];
+      this.degradeByReason[reason] = (this.degradeByReason[reason] || 0) + 1;
+      this.lastDegradeReason = reason;
+      try { StatsManager.count(key); } catch (e) { /* ignore */ }
+      // 同屏可见地可解释 (PRD R4/R7 的「绝不静默失效」): 每个原因**每会话只提示一次** ——
+      //   一页可能有几十张图命中同一个原因, 不做去重就是 toast 风暴。
+      try {
+        if (!this._notified[reason]) {
+          this._notified[reason] = 1;
+          showToast('部分反色已降级为整图反色: ' + (REGION_RENDER_DEGRADE_TEXT[reason] || reason));
+        }
+      } catch (e) { /* ignore */ }
+      return false;
+    },
+    _notified: {},
+    degradeByReason: {},
+    lastDegradeReason: '',
+    lastRecalcReason: '',
+
+    // 挂载: 返回 true = 本层已接管渲染 (调用方**不得**再写元素级反色)。
+    mount(el, mask, src) {
+      if (!this.enabled() || !el) return false;
+      if (!mask || mask.source !== 'region') { return this.degrade(el, 'no-mask'); }
+      const v = validateRegionMask(mask);
+      if (!v.ok) { return this.degrade(el, 'no-mask'); }
+
+      const mutex = regionMutexVerdict(el);
+      if (!mutex.ok) return this.degrade(el, mutex.reason);
+
+      const anc = this.positionedAncestor(el);
+      if (!anc) return this.degrade(el, 'no-positioned-ancestor');
+
+      const root = this.rootVerdict(el);
+      if (!root.ok) return this.degrade(el, root.reason);
+
+      if (this.mounts.size >= this.maxOverlays() && !this.mounts.has(el)) {
+        return this.degrade(el, 'overlay-budget');
+      }
+
+      // —— 几何: 元素盒 + 内容盒 → 元素盒坐标网格 ——
+      let elemW = 0;
+      let elemH = 0;
+      let natW = 0;
+      let natH = 0;
+      let fit = 'fill';
+      let posX = 0.5;
+      let posY = 0.5;
+      try {
+        elemW = el.clientWidth || el.offsetWidth || 0;
+        elemH = el.clientHeight || el.offsetHeight || 0;
+        natW = el.naturalWidth || el.videoWidth || el.width || 0;
+        natH = el.naturalHeight || el.videoHeight || el.height || 0;
+        if (typeof getComputedStyle === 'function') {
+          const cs = getComputedStyle(el);
+          fit = cs.objectFit || 'fill';
+          const pos = String(cs.objectPosition || '50% 50%').split(/\s+/);
+          const frac = (t) => {
+            if (!t) return null;
+            if (t === 'left' || t === 'top') return 0;
+            if (t === 'center') return 0.5;
+            if (t === 'right' || t === 'bottom') return 1;
+            const m = /^(-?[\d.]+)%$/.exec(t);
+            if (m) return Math.max(0, Math.min(1, Number(m[1]) / 100));
+            return null;
+          };
+          const fx = frac(pos[0]);
+          const fy = frac(pos[1]);
+          if (fx != null) posX = fx;
+          if (fy != null) posY = fy;
+        }
+      } catch (e) { /* ignore */ }
+      if (elemW <= 0 || elemH <= 0 || natW <= 0 || natH <= 0) return this.degrade(el, 'not-ready');
+
+      const rect = regionContentRect(natW, natH, elemW, elemH, fit, posX, posY);
+      const built = regionRenderExpr(mask, rect, elemW, elemH, { n: mask.gw, kRects: state.regionKRects });
+
+      // —— 覆盖层节点 (复用既有 .svi-fx-overlay 的纪律: absolute / pointer-events:none / 最小 z-index) ——
+      let rec = this.mounts.get(el);
+      const doc = (typeof document !== 'undefined') ? document : null;
+      if (!doc || typeof doc.createElement !== 'function') return this.degrade(el, 'not-ready');
+      let node = rec && rec.node;
+      if (!node || !node.isConnected) {
+        node = doc.createElement('div');
+        node.className = 'svi-region-overlay';
+        node.setAttribute('aria-hidden', 'true');
+      }
+      node.style.position = 'absolute';
+      node.style.left = el.offsetLeft + 'px';
+      node.style.top = el.offsetTop + 'px';
+      node.style.width = elemW + 'px';
+      node.style.height = elemH + 'px';
+      node.style.pointerEvents = 'none';
+      node.style.zIndex = '1';
+      node.style.borderRadius = 'inherit';
+      // 滤镜串**只引用变量**, 不写字面量 —— 与整图路径逐字符一致由构造保证 (PRD R1 的 AC)
+      node.style.backdropFilter = 'var(--svi-img-filter, ' + REGION_FILTER_FALLBACK + ')';
+
+      // —— 掩码表达 (design D2 / 偏离 1: 用同步 data URL, 不用异步 blob) ——
+      let maskEl = null;
+      // 复用节点时先清空子节点: 里面只放 clipPath 容器, 不清会一次挂载叠一份定义
+      try { while (node.firstChild) node.removeChild(node.firstChild); } catch (e) { /* ignore */ }
+      if (built.expr.kind === 'bitmap') {
+        const url = this.encodeBitmap(built.cells, built.n, doc);
+        if (!url) return this.degrade(el, 'not-ready');
+        node.style.setProperty('-webkit-mask-image', 'url("' + url + '")');
+        node.style.setProperty('mask-image', 'url("' + url + '")');
+        node.style.setProperty('-webkit-mask-size', '100% 100%');
+        node.style.setProperty('mask-size', '100% 100%');
+        node.style.setProperty('mask-repeat', 'no-repeat');
+        node.style.clipPath = 'none';
+        node.maskUrl = url;
+      } else {
+        maskEl = this.makeClip(built.expr, doc);
+        node.style.setProperty('mask-image', 'none');
+        node.style.setProperty('-webkit-mask-image', 'none');
+        node.style.clipPath = 'url(#' + maskEl.id + ')';
+        node.maskUrl = '';
+        // **clipPath 必须挂在被裁剪元素之外** (放成同级兄弟, 而不是塞进覆盖层内部)。
+        //   实测教训 (implement.md 偏离 3): 把定义放进被 `clip-path: url(#…)` 引用的那个元素里,
+        //   Chromium 会解析不到 → 整块元素盒被反色 (看起来"掩码没生效"), 而位图路是对的。
+        //   生命周期仍归覆盖层记录管: unmount 里连同 svg 一起摘除。
+      }
+
+      if (node.parentNode !== anc) {
+        // 元素换了定位祖先 (站点重排/移动) → 覆盖层必须跟着搬, 否则 containing block 变了会整体错位
+        try { anc.appendChild(node); } catch (e) { return this.degrade(el, 'not-ready'); }
+      }
+      // 矢量表达的 clipPath 容器: 与覆盖层同级 (必须在被裁剪元素之外才解析得到)
+      if (maskEl && maskEl.svg.parentNode !== anc) {
+        try { anc.appendChild(maskEl.svg); } catch (e) { /* ignore */ }
+      }
+
+      // —— 元素本体不得再有反色滤镜 (R1): 撤销属性门, 让覆盖层独担 ——
+      try { applyInvertState(el, false, 'region-render'); } catch (e) { /* ignore */ }
+      try { el.setAttribute('data-svi-region', 'true'); } catch (e) { /* ignore */ }
+
+      rec = {
+        el: el, node: node, clip: maskEl, src: src || '',
+        key: mask.key || '', epoch: this.epoch,
+        lastCalcAt: Date.now(), recalc: 'mount',
+        // 判定指纹: 重算调度用它判断"这一轮判定有没有变" (变了才动 DOM)
+        maskData: String(mask.key || '') + '|' + regionCoverage(mask.data).toFixed(4),
+      };
+      this.mounts.set(el, rec);
+      try { StatsManager.count('regionOverlaysMounted'); } catch (e) { /* ignore */ }
+      // 事件与清扫只在"有层"时存在: 第一层挂上才装监听/定时器, 最后一层拆掉就全撤 (零层零开销)
+      try { this.watchMediaEvents(); } catch (e) { /* ignore */ }
+      // 视频/GIF 才需要重算调度; 静态图零定时器
+      try { this.scheduleFor(el, src); } catch (e) { /* ignore */ }
+      return true;
+    },
+
+    // 元素盒网格 → PNG data URL (同步; 见 design 偏离 1)。255 = 反色 (显示被 backdrop 反色的像素)。
+    //   **关键**: CSS `mask-image` 的默认 `mask-mode: match-source` 对栅格图走 **alpha 通道** ——
+    //   不是亮度! 所以"不反色"的格必须写成 **alpha=0** (透明), 光把 RGB 涂黑是没用的:
+    //   alpha 全 255 等于整块遮罩, 覆盖层会把整个元素盒都反色 (实测踩到, 见 implement.md 偏离 2)。
+    encodeBitmap(cells, n, doc) {
+      try {
+        const cv = doc.createElement('canvas');
+        cv.width = n;
+        cv.height = n;
+        const ctx = cv.getContext('2d');
+        if (!ctx) return '';
+        const img = ctx.createImageData(n, n);
+        for (let i = 0; i < cells.length; i++) {
+          const on = cells[i] ? 255 : 0;
+          img.data[i * 4] = 255;          // RGB 统一白: 决定遮罩的是 alpha
+          img.data[i * 4 + 1] = 255;
+          img.data[i * 4 + 2] = 255;
+          img.data[i * 4 + 3] = on;       // 反色处不透明, 其余全透明
+        }
+        ctx.putImageData(img, 0, 0);
+        return cv.toDataURL('image/png');
+      } catch (e) { return ''; }
+    },
+
+    // 矢量表达 → <clipPath clipPathUnits="objectBoundingBox"> + clip-path: url(#id)
+    //   **必须是单个 <path> 带 clip-rule:evenodd**, 不能写成「一个整盒 rect + 若干洞 rect」:
+    //   clipPath 内**多个子元素之间是取并集** —— 「整盒 ∪ 洞」= 整盒, 于是掩码完全不生效
+    //   (实测踩到: 色块被一起反色, 而同时用 mask-image 的位图路是对的, 见 implement.md 偏离 3)。
+    //   单条 path 内的子路径之间才按 clip-rule 计算: 洞在外框内部 → 交叉数为偶 → 被挖掉 ✓
+    //   (这与探针 dev/probe-partial-backdrop.js 的 sviDonut 用例同构)。
+    //   holes = 「整盒 ∖ 洞」; islands = 「只有孤岛」→ 两种都是同一份 path, 只差外框那一段。
+    makeClip(expr, doc) {
+      const ns = 'http://www.w3.org/2000/svg';
+      const id = 'svi-region-clip-' + (++this.seq);
+      const svg = doc.createElementNS(ns, 'svg');
+      svg.setAttribute('width', '0');
+      svg.setAttribute('height', '0');
+      svg.setAttribute('aria-hidden', 'true');
+      svg.style.position = 'absolute';
+      const cp = doc.createElementNS(ns, 'clipPath');
+      cp.setAttribute('id', id);
+      cp.setAttribute('clipPathUnits', 'objectBoundingBox');
+      const rects = expr.kind === 'holes' ? expr.holes : expr.polys;
+      const seg = [];
+      if (expr.kind === 'holes') seg.push('M0 0 H1 V1 H0 Z'); // 外框 (顺时针)
+      for (let i = 0; i < rects.length; i++) {
+        const q = rects[i];
+        seg.push('M' + q.x + ' ' + q.y + ' H' + (q.x + q.w) + ' V' + (q.y + q.h) + ' H' + q.x + ' Z');
+      }
+      const path = doc.createElementNS(ns, 'path');
+      path.setAttribute('d', seg.join(' '));
+      path.setAttribute('clip-rule', 'evenodd');
+      cp.appendChild(path);
+      svg.appendChild(cp);
+      return { id: id, svg: svg, node: cp, d: seg.join(' ') };
+    },
+
+    unmount(el, why) {
+      const rec = this.mounts.get(el);
+      if (!rec) return false;
+      // 先停调度 (定时器与 seek 监听), 再拆节点 —— 顺序反了会让定时器回来操作已拆的层
+      try { clearInterval(rec.timer); } catch (e) { /* ignore */ }
+      try { if (rec.onSeek && el && el.removeEventListener) el.removeEventListener('seeked', rec.onSeek); } catch (e) { /* ignore */ }
+      this.mounts.delete(el);
+      try { if (rec.node && rec.node.parentNode) rec.node.parentNode.removeChild(rec.node); } catch (e) { /* ignore */ }
+      try { if (rec.clip && rec.clip.svg && rec.clip.svg.parentNode) rec.clip.svg.parentNode.removeChild(rec.clip.svg); } catch (e) { /* ignore */ }
+      try { if (el && el.removeAttribute) el.removeAttribute('data-svi-region'); } catch (e) { /* ignore */ }
+      try { StatsManager.count('regionOverlaysUnmounted'); } catch (e) { /* ignore */ }
+      this.lastUnmountReason = why || '';
+      if (this.mounts.size === 0) { try { this.unwatchMediaEvents(); } catch (e) { /* ignore */ } }
+      return true;
+    },
+
+    unmountAll(why) {
+      const els = Array.from(this.mounts.keys());
+      for (let i = 0; i < els.length; i++) this.unmount(els[i], why || 'all');
+      return els.length;
+    },
+    lastUnmountReason: '',
+
+    // 重算: 几何与掩码都可能变 (元素尺寸变了 / 视频换了场景 / 缓存被淘汰)
+    //   为什么要真正**重采样**: 主场景是视频/GIF —— 掩码的对象就是"当前这一帧的画面"。
+    //   走 analyzeSrc(wantGrid) 拿到新网格 → 显式失效同键缓存项 → regionMaskTake 重新分割,
+    //   再与旧掩码比对: 一模一样就不动 DOM (省一次重挂, 也避免闪烁)。
+    async recalc(el, why) {
+      const rec = this.mounts.get(el) || (this._suspended && this._suspended.get(el)) || null;
+      if (!rec) return false;
+      this.lastRecalcReason = why || 'manual';
+      // 键优先用**当下**重算的 (元素可能已加载完成/尺寸变了), 旧键只作兜底
+      let liveKey = '';
+      try { liveKey = regionMaskKeyFor(el); } catch (e) { /* ignore */ }
+      const key = liveKey || rec.key;
+      let grid = null;
+      try {
+        const r = await analyzeSrc(rec.src, el, getEvalPrefs(), true);
+        grid = r && r.grid;
+      } catch (e) { /* ignore → 退化为沿用旧掩码 */ }
+      let mask = null;
+      try {
+        if (grid) {
+          regionCacheDelete(key); // 显式失效: 重算调度要的是**重新判定**, 不是"命中就沿用"
+          mask = regionMaskTake(grid, { key: key });
+        } else {
+          mask = regionCache.get(key) || null;
+        }
+      } catch (e) { /* ignore */ }
+      try { StatsManager.count('regionRecalcs'); } catch (e) { /* ignore */ }
+      if (!mask || mask.source !== 'region') { this.unmount(el, 'no-mask'); return false; }
+      const prevData = rec.maskData || '';
+      const nextData = String(key) + '|' + regionCoverage(mask.data).toFixed(4);
+      rec.maskData = nextData;
+      if (prevData === nextData && this.mounts.has(el)) {
+        // 判定没变 → 只更新几何 (尺寸可能变了), 不重挂
+        return this.mount(el, mask, rec.src);
+      }
+      this.unmount(el, 'recalc');
+      return this.mount(el, mask, rec.src);
+    },
+
+    // ---- 视频/GIF 重算调度 (R6 / design D6) ----
+    //   为什么必须低频: 掩码重算要重新采样一帧 (analyzeSrc), 逐帧做等于把判定拖进热路径。
+    //   帧间沿用旧掩码是**安全的** —— backdrop-filter 由合成器逐帧重采样 (探针已验),
+    //   所以滞后的只是"哪块该反", 反色本身仍是实时的。
+    isVideo(el) { return !!(el && el.tagName === 'VIDEO'); },
+
+    // 动图判定: 优先用 v5-4 已经落库的判定原因 (animated-*), 否则退化为扩展名启发式
+    isAnimated(el, src) {
+      try {
+        const eng = (window.__svi && window.__svi.engines) ? window.__svi.engines.image : null;
+        const d = (eng && eng.decisionBySrc && src) ? eng.decisionBySrc.get(src) : null;
+        if (d && d.reason && String(d.reason).indexOf('animated-') === 0) return true;
+      } catch (e) { /* ignore */ }
+      return /\.gif(\?|#|$)/i.test(String(src || ''));
+    },
+
+    scheduleFor(el, src) {
+      const rec = this.mounts.get(el);
+      if (!rec) return false;
+      // 「仅静态图」降级开关: 视频/GIF 不挂覆盖层 (规避场景渐变时的掩码滞后 —— 这是 D5 的已知代价)
+      if (state.regionStaticOnly === true && (this.isVideo(el) || this.isAnimated(el, src))) return false;
+      if (!this.isVideo(el) && !this.isAnimated(el, src)) return false; // 静态图无需调度
+      this.watchMediaEvents();
+      const period = Math.max(200, Math.min(5000, Math.round(Number(state.regionHeartbeatMs) || 1000)));
+      try { clearInterval(rec.timer); } catch (e) { /* ignore */ }
+      rec.timer = setInterval(() => { this.recalc(el, 'heartbeat'); }, period);
+      if (this.isVideo(el)) {
+        rec.onSeek = () => { this.recalc(el, 'seek'); }; // 跳转往往就是换场景
+        try { el.addEventListener('seeked', rec.onSeek); } catch (e) { /* ignore */ }
+      }
+      return true;
+    },
+
+    unschedule(el) {
+      const rec = this.mounts.get(el);
+      if (rec) {
+        try { clearInterval(rec.timer); } catch (e) { /* ignore */ }
+        try { if (rec.onSeek && el.removeEventListener) el.removeEventListener('seeked', rec.onSeek); } catch (e) { /* ignore */ }
+      }
+      if (this.mounts.size === 0) this.unwatchMediaEvents();
+    },
+
+    // 场景跃变入口 (由视频状态机在**反色状态发生变化**时调用 —— 那就是 v5-4 意义上的"场景变了")。
+    //   节流 300ms: 跃变可能连续触发, 掩码重算不必跟着连发。
+    onSceneChange(el) {
+      if (!this.enabled() || !el || !this.mounts.has(el)) return false;
+      const now = Date.now();
+      if (this._lastSceneAt && now - this._lastSceneAt < 300) return false;
+      this._lastSceneAt = now;
+      this.recalc(el, 'scene');
+      return true;
+    },
+    _lastSceneAt: 0,
+
+    // ---- 全屏 / PiP (R5 / design D6) ----
+    //   全屏元素渲染在**顶层**, 页面里的覆盖层够不到它 → 覆盖层会"脱离"。处置: 暂停该元素的
+    //   部分反色 (卸载覆盖层, 退回整图反色), 退出后再恢复。**同屏可见地可解释**: 给一次 toast。
+    watchMediaEvents() {
+      if (this._watching) return;
+      const doc = (typeof document !== 'undefined') ? document : null;
+      if (!doc || !doc.addEventListener) return;
+      this._watching = true;
+      this._suspended = new Map();
+      this._onFs = () => { try { this.handleFullscreen(); } catch (e) { /* ignore */ } };
+      this._onPip = (e) => { try { this.handlePip(e); } catch (err) { /* ignore */ } };
+      doc.addEventListener('fullscreenchange', this._onFs);
+      doc.addEventListener('webkitfullscreenchange', this._onFs);
+      doc.addEventListener('mozfullscreenchange', this._onFs);
+      doc.addEventListener('enterpictureinpicture', this._onPip, true);
+      doc.addEventListener('leavepictureinpicture', this._onPip, true);
+      // 掉线清扫 (R8): 元素被移除 / SPA 换页后覆盖层必须一并回收。
+      //   为什么用低频轮询而不是 MutationObserver: 账本最多 regionOverlayMax 条 (默认 8),
+      //   一次 sweep 只是 8 次 isConnected 读; 而 MutationObserver 要给整棵子树挂回调,
+      //   在长页面上得不偿失。定时器只在**有层时**存在, 零层时连定时器都没有。
+      try { clearInterval(this._sweepTimer); } catch (e) { /* ignore */ }
+      this._sweepTimer = setInterval(() => { try { this.sweepDetached(); } catch (e) { /* ignore */ } }, 2000);
+    },
+
+    // 清扫: 元素已脱离文档 → 卸载 (同时清掉它的暂停记录)
+    sweepDetached() {
+      let n = 0;
+      Array.from(this.mounts.keys()).forEach((el) => {
+        try { if (!el.isConnected) { this.unmount(el, 'detached'); n++; } } catch (e) { /* ignore */ }
+      });
+      if (this._suspended) {
+        Array.from(this._suspended.keys()).forEach((el) => {
+          try { if (!el.isConnected) this._suspended.delete(el); } catch (e) { /* ignore */ }
+        });
+      }
+      return n;
+    },
+
+    unwatchMediaEvents() {
+      const doc = (typeof document !== 'undefined') ? document : null;
+      if (!this._watching || !doc || !doc.removeEventListener) return;
+      this._watching = false;
+      try {
+        doc.removeEventListener('fullscreenchange', this._onFs);
+        doc.removeEventListener('webkitfullscreenchange', this._onFs);
+        doc.removeEventListener('mozfullscreenchange', this._onFs);
+        doc.removeEventListener('enterpictureinpicture', this._onPip, true);
+        doc.removeEventListener('leavepictureinpicture', this._onPip, true);
+      } catch (e) { /* ignore */ }
+      // 注意: 这里**不恢复**被暂停的层 —— unwatch 只在"最后一层也被拆掉"或整体拆除时发生,
+      //   此时恢复反而会凭空长出一层 (与调用方的意图相反)。恢复只走 handleFullscreen/handlePip。
+      if (this._suspended) this._suspended.clear();
+      try { clearInterval(this._sweepTimer); } catch (e) { /* ignore */ }
+      this._sweepTimer = null;
+    },
+    _watching: false,
+    _suspended: null,
+
+    fullscreenElement() {
+      const doc = (typeof document !== 'undefined') ? document : null;
+      if (!doc) return null;
+      return doc.fullscreenElement || doc.webkitFullscreenElement || doc.mozFullScreenElement || null;
+    },
+
+    // 暂停 = 卸载但**记住** (掩码还在缓存里, 退出后能原样恢复)
+    suspend(el, why) {
+      const rec = this.mounts.get(el);
+      if (!rec) return false;
+      if (!this._suspended) this._suspended = new Map();
+      this._suspended.set(el, { src: rec.src, key: rec.key, why: why || '' });
+      this.unmount(el, why || 'suspend');
+      return true;
+    },
+
+    restore(el) {
+      if (!this._suspended || !this._suspended.has(el)) return false;
+      const info = this._suspended.get(el);
+      this._suspended.delete(el);
+      let mask = null;
+      try { mask = regionCache.get(info.key) || null; } catch (e) { /* ignore */ }
+      if (!mask || mask.source !== 'region') { return this.degrade(el, 'no-mask'); }
+      return this.mount(el, mask, info.src);
+    },
+
+    handleFullscreen() {
+      const fsEl = this.fullscreenElement();
+      if (fsEl) {
+        const affected = [];
+        this.mounts.forEach((rec, el) => {
+          if (el === fsEl || (fsEl.contains && fsEl.contains(el))) affected.push(el);
+        });
+        if (!affected.length) return false;
+        affected.forEach((el) => this.suspend(el, 'fullscreen'));
+        showToast('全屏中已暂停部分反色（覆盖层无法进入全屏顶层）');
+        return true;
+      }
+      // 退出全屏 → 恢复被暂停的
+      if (!this._suspended || !this._suspended.size) return false;
+      const els = Array.from(this._suspended.keys());
+      let n = 0;
+      els.forEach((el) => { if (this.restore(el)) n++; });
+      if (n) showToast('已恢复部分反色');
+      return n > 0;
+    },
+
+    handlePip(e) {
+      const doc = (typeof document !== 'undefined') ? document : null;
+      const target = (e && e.target) || (doc && doc.pictureInPictureElement) || null;
+      if (!target) return false;
+      if (e && e.type === 'enterpictureinpicture') {
+        if (!this.mounts.has(target)) return false;
+        this.suspend(target, 'pip');
+        showToast('画中画中已暂停部分反色');
+        return true;
+      }
+      return this.restore(target);
+    },
+
+    diagnostics() {
+      return {
+        overlays: this.mounts.size,
+        suspended: this._suspended ? this._suspended.size : 0,
+        watching: this._watching === true,
+        degradeByReason: Object.assign({}, this.degradeByReason),
+        lastDegradeReason: this.lastDegradeReason,
+        lastRecalcReason: this.lastRecalcReason,
+        lastUnmountReason: this.lastUnmountReason,
+        max: this.maxOverlays(),
+      };
+    },
+  };
+
+  // finalizeInvert 的挂载钩子。放在这里 (而不是引擎里) 是为了让引擎与决策管线解耦:
+  //   **返回值即语义** —— true 表示本层已接管, 调用方不得再写元素级反色。
+  function regionRenderTryMount(el, src) {
+    if (!RegionRenderEngine.enabled()) return false;
+    let mask = null;
+    try {
+      // ① 优先取"这次判定刚算出来的那份" (元素直连, 不受键漂移影响);
+      // ② 退而求其次: 按键查缓存 (例如同一张图在别的元素上已经算过)。
+      if (regionByElement) mask = regionByElement.get(el) || null;
+      if (!mask && src) mask = regionBySrc.get(String(src)) || null;
+      if (!mask) mask = regionCache.get(regionMaskKeyFor(el)) || null;
+    } catch (e) { /* ignore */ }
+    if (!mask) return false; // 没算过掩码就绝不为了渲染去现算 (渲染层不主导判定)
+    return RegionRenderEngine.mount(el, mask, src);
+  }
+
+  // 非反色结论 / 关闭开关时的清理入口
+  function regionRenderUnmount(el, why) {
+    return RegionRenderEngine.unmount(el, why || 'keep');
+  }
+
+  // 视频场景跃变入口 (被视频状态机的 setInvertState 调用; 节流与降级都在引擎里)
+  function regionRenderOnSceneChange(el) {
+    if (!RegionRenderEngine.enabled()) return false;
+    return RegionRenderEngine.onSceneChange(el);
+  }
+
+  // ==========================================
   // 21. 本地数据统计管理器 (StatsManager) —— 仅本地存储, 绝不自动上传
   // ==========================================
   const StatsManager = {
@@ -10398,6 +11193,20 @@
         regionCacheHits: 0,
         regionCacheMisses: 0,
         regionCacheEvictions: 0,
+        // v6.2 区域渲染层: 挂载/卸载/重算 + 降级分原因 (固定键集)
+        regionOverlaysMounted: 0,
+        regionOverlaysUnmounted: 0,
+        regionRecalcs: 0,
+        regionRenderDegradeAncestorFilter: 0,
+        regionRenderDegradeAncestorOpacity: 0,
+        regionRenderDegradeAncestorBlend: 0,
+        regionRenderDegradeAncestorBackdrop: 0,
+        regionRenderDegradeNoPositioned: 0,
+        regionRenderDegradeMutexFx: 0,
+        regionRenderDegradeMutexTune: 0,
+        regionRenderDegradeOverlayBudget: 0,
+        regionRenderDegradeNoMask: 0,
+        regionRenderDegradeNotReady: 0,
       };
     },
 
@@ -14243,6 +15052,18 @@
     // v6.0 与 Action Registry 的接缝 (单测契约): 键构造 + 来源标签决断
     regionMaskKeyFor,
     regionReasonFor,
+    // v6.2 区域渲染层 (单测契约 + v6-3 纠正回路的挂载点)
+    REGION_RENDER_DEGRADES,
+    RegionRenderEngine,
+    regionContentRect,
+    regionBoxGrid,
+    regionRenderExpr,
+    regionRootVerdict,
+    regionMutexVerdict,
+    regionRenderTryMount,
+    regionRenderUnmount,
+    regionRenderOnSceneChange,
+    regionCacheDelete,
     exportStats: () => StatsManager.exportJson(),
     stats: StatsManager,
     engines: {},

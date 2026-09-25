@@ -95,6 +95,39 @@ v6.0 UI rebuild.
 
 ---
 
+## 🧪 v6.0 in progress (automatic partial inversion · rendering layer landed)
+
+> **Status: the rendering layer has landed, but the whole feature is still OFF by default** —
+> turn on `regionSegment` and `regionRender` and you get "colour artwork inside a white slide
+> keeps its colours, everything else inverts".
+
+It renders through a **`backdrop-filter` overlay**, sampling in the compositor and never reading
+pixels — so cross-origin images, cross-origin video and even DRM video can be partially inverted
+(a clone-layer approach fails on all three).
+
+- **The overlay is its own DOM layer**: never a pseudo-element of the media (replaced elements
+  generate none) and never a site wrapper's `::after` (misaligned geometry, pseudo-element clashes).
+- **The mask follows the content box**: letterbox margins from `object-fit: contain` and ancestors
+  with `transform` stay aligned, and margin areas are never inverted.
+- **Bitmap and vector expressions render pixel-identically** (verified by sampling real screenshots
+  in the browser bench).
+- **It never blocks clicks** (`pointer-events: none`, verified by hit-testing), stays out of the
+  accessibility tree, and uses the smallest workable `z-index`.
+- **Explicit degradation when the backdrop can't be sampled**: an ancestor with `filter`, an
+  ancestor at opacity < 1, a blend mode, or its own backdrop-filter → fall back to whole-image
+  inversion plus a one-line Chinese notice (once per reason per session). **Never a silent failure.**
+- **Fullscreen / PiP**: partial inversion is suspended and restored with an explanatory notice.
+- **Video / GIF**: the mask is recomputed on a heartbeat (1s by default) and on scene jumps, and is
+  reused between frames — so during a **gradual** scene change "which part should invert" lags
+  (the inversion itself stays real-time). Turn on "static images only" to opt out of that trade-off.
+- **Removed elements / navigation / switch off**: overlays and mask definitions are reclaimed with
+  no residue.
+
+With everything off there are zero overlays and zero new nodes — the 29 existing browser
+end-to-end scenarios stay regression-free.
+
+---
+
 ## 🆕 What's New in v5.0 (Page-Media Governance Layer · Unified Actions)
 
 > v5.0 grows the script from an "inverter" into a **general page-media governance layer**:

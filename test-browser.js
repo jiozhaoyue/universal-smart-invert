@@ -49,6 +49,12 @@ const SVG_TEMPLATES = {
   '/img/fx-redwhite.svg': `<svg xmlns="http://www.w3.org/2000/svg" width="200" height="120"><rect x="0" y="0" width="100" height="120" fill="#ff0000"/><rect x="100" y="0" width="100" height="120" fill="#ffffff"/></svg>`,
   // 彩色照片替代物 (luma 模式不应触碰): 高饱和多彩
   '/img/fx-photo.svg': `<svg xmlns="http://www.w3.org/2000/svg" width="200" height="120"><rect width="100%" height="100%" fill="#1a9632"/><circle cx="100" cy="60" r="40" fill="#e2483d"/><circle cx="60" cy="40" r="20" fill="#f5d312"/></svg>`,
+  // ===== v6.2 部分反色基准图 =====
+  // 浅底 + 一大块高饱和蓝 (该块要被"抠出来保持原色", 其余白底该反色)。
+  //   尺寸刻意取 120×70 / 200×120 = 35% 图面积 > 面积门 3% 且厚度远 > 3 格 → 必被抠。
+  '/img/region-block.svg': `<svg xmlns="http://www.w3.org/2000/svg" width="200" height="120"><rect width="100%" height="100%" fill="#ffffff"/><rect x="40" y="30" width="120" height="70" fill="#1e50c8"/></svg>`,
+  // 浅底 + 圆形色块: 抠出来的形状不是矩形 → 表达必须退到位图 (位图/矢量两条路的对照样本)
+  '/img/region-disc.svg': `<svg xmlns="http://www.w3.org/2000/svg" width="200" height="120"><rect width="100%" height="100%" fill="#ffffff"/><circle cx="100" cy="60" r="45" fill="#e2483d"/></svg>`,
   // 自学习规则: 4 张深色图 (分类器判定不该反色 → 反色只能来自学习规则)
   '/img/learn-dark-1.svg': `<svg xmlns="http://www.w3.org/2000/svg" width="160" height="120"><rect width="100%" height="100%" fill="#111827"/><text x="30" y="65" fill="#6b7280" font-size="14">dark-1</text></svg>`,
   '/img/learn-dark-2.svg': `<svg xmlns="http://www.w3.org/2000/svg" width="160" height="120"><rect width="100%" height="100%" fill="#1f2937"/><text x="30" y="65" fill="#9ca3af" font-size="14">dark-2</text></svg>`,
@@ -558,6 +564,40 @@ const VIEWER_HTML = `<!DOCTYPE html>
 // 1. Create HTTP test servers (main + cross-origin CORS SVG host)
 // Scenario 12 pages are registered in main() after the extension smoke builds the real bundle.
 // v5.0: 元素动作 bench 页 (hide / mask / dim / peek 的落点与开关即回滚)
+// v6.2 区域渲染层 bench 页:
+//   - r-img      浅底 + 矩形色块 → 该块被抠出来保持原色 (走矢量快路径)
+//   - r-img-disc 浅底 + 圆形色块 → 形状非矩形 (退位图表达) —— 与上面那张构成两表达对照
+//   - r-img-letter 同一张图用 object-fit:contain 放进正方形盒 → 上下/左右 letterbox,
+//                  掩码必须贴合**内容盒**, 边距区不得被反色
+//   - r-img-tf   放在 transform: scale() 的祖先里 (坐标映射的第二类场景)
+//   - r-img-filter 祖先带 filter → backdrop root 被截断 → 必须显式降级 (零覆盖层)
+const REGION_HTML = `<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Region bench</title>
+<style>
+  body { margin:0; background:#ffffff; font:14px sans-serif; }
+  #r-wrap { position:relative; width:100%; padding:10px; }
+  .r-cell { position:relative; margin:12px; }
+  #r-img { width:200px; height:120px; display:block; }
+  #r-img-disc { width:200px; height:120px; display:block; }
+  #r-img-letter { width:200px; height:200px; display:block; background:#ffffff; object-fit:contain; }
+  #r-tf { transform: scale(1.3); transform-origin: top left; }
+  #r-img-tf { width:200px; height:120px; display:block; }
+  #r-filt { filter: blur(0px); }
+  #r-img-filter { width:200px; height:120px; display:block; }
+</style></head>
+<body>
+  <div id="r-wrap">
+    <div class="r-cell" id="r-cell-rect"><img id="r-img" src="/img/region-block.svg" alt="region rect"></div>
+    <div class="r-cell" id="r-cell-disc"><img id="r-img-disc" src="/img/region-disc.svg" alt="region disc"></div>
+    <div class="r-cell" id="r-cell-letter"><img id="r-img-letter" src="/img/region-block.svg" alt="letterbox"></div>
+    <div class="r-cell" id="r-cell-tf"><div id="r-tf"><img id="r-img-tf" src="/img/region-block.svg" alt="transformed"></div></div>
+    <div class="r-cell" id="r-cell-filter"><div id="r-filt"><img id="r-img-filter" src="/img/region-block.svg" alt="filter ancestor"></div></div>
+  </div>
+  <script>
+    ${executableScript}
+  </script>
+</body></html>`;
+
 const ACTION_HTML = `<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>Action bench</title>
 <style>
@@ -578,6 +618,7 @@ const ACTION_HTML = `<!DOCTYPE html>
 </body></html>`;
 
 const PAGES = {
+  '/region-page': REGION_HTML,
   '/action-page': ACTION_HTML,
   '/login-page': LOGIN_HTML,
   '/recolor-page': RECOLOR_HTML,
@@ -3013,6 +3054,280 @@ async function main() {
     assert.strictEqual(mg3.paused, true, 'Esc 后本会话暂停');
     assert.strictEqual(mg3.afterTag, false, '暂停后不再打标');
     assert.strictEqual(mg3.remain, 0, '逃生后无残留 pending');
+
+    // ============================================================
+    // Scenario 30 (v6.2): 区域反色渲染层 (部分反色)
+    //   - 默认关闭 → 零覆盖层 (基线零回归)
+    //   - 真实判定管线驱动: 分割 → 掩码 → 覆盖层接管, 元素本体 filter: none
+    //   - 覆盖层滤镜串与 --svi-img-filter 逐字符一致
+    //   - 覆盖层不挡点击 (elementFromPoint 穿透)
+    //   - 位图与矢量两表达**渲染结果像素级等价** (截图像素采样, 真合成器出图)
+    //   - object-fit:contain 的 letterbox 边距保持原色 (掩码贴合内容盒)
+    //   - 祖先带 filter → 零覆盖层 + 降级原因可观测
+    //   - 元素移除 → 零残留
+    // ============================================================
+    console.log('[Test] Scenario 30: v6.2 region render layer (overlay / filter-none / pixel-equal / letterbox / degrade / cleanup) ...');
+    await sendCdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/region-page` });
+    await new Promise((r) => setTimeout(r, 2500));
+
+    // 30a. 默认关闭 → 零覆盖层、零属性
+    const rg0 = await evalInPage(`(() => ({
+      overlays: document.querySelectorAll('.svi-region-overlay').length,
+      attrs: document.querySelectorAll('[data-svi-region]').length,
+      render: window.__svi.prefs.regionRender,
+      segment: window.__svi.prefs.regionSegment
+    }))()`);
+    assert.strictEqual(rg0.render, false, 'v6.2 渲染开关默认关闭');
+    assert.strictEqual(rg0.overlays, 0, '默认关闭时零覆盖层 (基线零回归)');
+    assert.strictEqual(rg0.attrs, 0, '默认关闭时零 data-svi-region 属性');
+
+    // 30b. 打开 → 真实管线驱动挂载
+    const rg1 = await evalInPageAsync(`(async () => {
+      const svi = window.__svi;
+      svi.prefs.regionSegment = true;
+      svi.prefs.regionRender = true;
+      svi.prefs.regionGridN = 16;
+      svi.prefs.regionKRects = 3;
+      svi.engines.image.clearCacheAndRescan();
+      await new Promise((r) => setTimeout(r, 1800));
+      const img = document.getElementById('r-img');
+      const ib = img.getBoundingClientRect();
+      const overlayFor = (el) => {
+        const b = el.getBoundingClientRect();
+        return Array.from(document.querySelectorAll('.svi-region-overlay')).find((o) => {
+          const r = o.getBoundingClientRect();
+          return Math.abs(r.left - b.left) < 2 && Math.abs(r.top - b.top) < 2
+            && Math.abs(r.width - b.width) < 2 && Math.abs(r.height - b.height) < 2;
+        }) || null;
+      };
+      const ov = overlayFor(img);
+      const cs = ov ? getComputedStyle(ov) : null;
+      const hit = document.elementFromPoint(ib.left + ib.width / 2, ib.top + ib.height / 2);
+      const b = ov ? ov.getBoundingClientRect() : null;
+      // 滤镜串一致性: 让**元素级路径**在同一元素上算一遍, 与覆盖层的 computed 值逐字符比对。
+      //   为什么要用 computed 对 computed (而不是比 CSS 变量字面量): 浏览器会把 contrast(0.90)
+      //   规范化成 contrast(0.9) —— 比字面量会假红; 两条路径都过同一套 computed 管线才是有意义的比较。
+      img.setAttribute('data-svi-inverted', 'true');
+      const elemFilter = getComputedStyle(img).filter;
+      img.removeAttribute('data-svi-inverted');
+      return {
+        overlays: document.querySelectorAll('.svi-region-overlay').length,
+        hasOv: !!ov,
+        imgFilter: getComputedStyle(img).filter,
+        imgInvertedAttr: img.getAttribute('data-svi-inverted'),
+        regionAttr: img.getAttribute('data-svi-region'),
+        ovBackdrop: cs ? (cs.backdropFilter || cs.webkitBackdropFilter) : '',
+        ovInline: ov ? String(ov.style.backdropFilter || '') : '',
+        elemFilter: elemFilter,
+        ovPointer: cs ? cs.pointerEvents : '',
+        maskImage: cs ? (cs.maskImage || cs.webkitMaskImage || '') : '',
+        clipPath: cs ? cs.clipPath : '',
+        ovBox: b ? [Math.round(b.left), Math.round(b.top), Math.round(b.width), Math.round(b.height)] : null,
+        imgBox: [Math.round(ib.left), Math.round(ib.top), Math.round(ib.width), Math.round(ib.height)],
+        hitIsImg: hit === img,
+        diag: svi.RegionRenderEngine.diagnostics()
+      };
+    })()`);
+    assert.ok(rg1.hasOv, '打开后必须挂上覆盖层; diag=' + JSON.stringify(rg1.diag));
+    assert.strictEqual(rg1.imgFilter, 'none', 'R1: 部分反色生效时元素本体 filter 必须是 none');
+    assert.strictEqual(rg1.imgInvertedAttr, null, 'R1: 元素级反色属性门已撤销 (不叠加双重滤镜)');
+    assert.strictEqual(rg1.regionAttr, 'true', 'R1: 元素被标记 data-svi-region');
+    assert.strictEqual(rg1.ovPointer, 'none', 'R1: 覆盖层 pointer-events:none');
+    assert.strictEqual(rg1.hitIsImg, true, 'R1: 命中测试穿透覆盖层 (点到的是媒体本身)');
+    assert.deepStrictEqual(rg1.ovBox, rg1.imgBox, '覆盖层几何与元素盒逐像素对齐');
+    assert.strictEqual(rg1.ovBackdrop, rg1.elemFilter,
+      'R1: 覆盖层滤镜串与元素级路径逐字符一致 (同一条 computed 管线), got "' + rg1.ovBackdrop + '" vs "' + rg1.elemFilter + '"');
+    assert.ok(String(rg1.ovInline).indexOf('var(--svi-img-filter') === 0,
+      'R1: 覆盖层滤镜串只引用 --svi-img-filter 变量 (不写第二份字面量), got ' + rg1.ovInline);
+    assert.ok(String(rg1.clipPath).indexOf('url(') === 0, 'R2: 矩形块走 clip-path 矢量表达, got ' + rg1.clipPath);
+    assert.ok(rg1.maskImage === 'none' || rg1.maskImage === '', 'R2: 矢量表达时 mask-image 关闭, got ' + rg1.maskImage);
+
+    // 截图像素采样: 真合成器出图 → 回灌页面画到 canvas 读像素 (无额外依赖)
+    const captureSample = async (pts) => {
+      const shot = (await sendCdp('Page.captureScreenshot', { format: 'png' })).data;
+      return evalInPageAsync(`(async () => {
+        const im = new Image();
+        im.src = 'data:image/png;base64,${shot}';
+        await im.decode();
+        const cv = document.createElement('canvas');
+        cv.width = im.width; cv.height = im.height;
+        const ctx = cv.getContext('2d');
+        ctx.drawImage(im, 0, 0);
+        const dpr = window.devicePixelRatio || 1;
+        const pts = ${JSON.stringify(pts)};
+        return pts.map((p) => Array.from(ctx.getImageData(Math.round(p[0] * dpr), Math.round(p[1] * dpr), 1, 1).data));
+      })()`);
+    };
+    const pxRect = [[rg1.imgBox[0] + 10, rg1.imgBox[1] + 60], [rg1.imgBox[0] + 100, rg1.imgBox[1] + 60]];
+
+    // 30c. 位图表达 (K=0 强制) 的语义: 浅底被反色 / 色块保持原色
+    //   先验位图是因为它不依赖 clip-path 的解析, 拿它当"基准语义"最干净。
+    const rgBitmap = await evalInPageAsync(`(async () => {
+      const svi = window.__svi;
+      svi.prefs.regionKRects = 0;
+      svi.engines.image.clearCacheAndRescan();
+      await new Promise((r) => setTimeout(r, 1800));
+      const img = document.getElementById('r-img');
+      const b = img.getBoundingClientRect();
+      const ov = Array.from(document.querySelectorAll('.svi-region-overlay')).find((o) => {
+        const r = o.getBoundingClientRect();
+        return Math.abs(r.left - b.left) < 2 && Math.abs(r.top - b.top) < 2;
+      }) || null;
+      const cs = ov ? getComputedStyle(ov) : null;
+      return {
+        hasOv: !!ov,
+        maskImage: cs ? (cs.maskImage || cs.webkitMaskImage || '') : '',
+        clipPath: cs ? cs.clipPath : '',
+        maskSize: cs ? (cs.maskSize || cs.webkitMaskSize || '') : '',
+        maskMode: cs ? (cs.maskMode || cs.webkitMaskMode || '') : ''
+      };
+    })()`);
+    assert.ok(rgBitmap.hasOv, 'K=0 时仍应挂覆盖层 (只是表达退位图)');
+    assert.ok(String(rgBitmap.maskImage).indexOf('data:image/png') >= 0,
+      'R2: K=0 → 位图表达 (mask-image 用 PNG data URL), got ' + String(rgBitmap.maskImage).slice(0, 48));
+    const bmpPx = await captureSample(pxRect);
+    assert.ok(bmpPx[0][0] < 130 && bmpPx[0][1] < 130 && bmpPx[0][2] < 130,
+      '浅底被反色 (变暗), got ' + JSON.stringify(bmpPx[0]));
+    assert.ok(bmpPx[1][2] > 150 && bmpPx[1][0] < 120,
+      '色块保持原色 (蓝通道仍高, 红通道低), got ' + JSON.stringify(bmpPx[1]));
+
+    // 30d. 矢量表达 (K=3) 必须与位图**渲染像素级等价**
+    const rgBack = await evalInPageAsync(`(async () => {
+      const svi = window.__svi;
+      svi.prefs.regionKRects = 3;
+      svi.engines.image.clearCacheAndRescan();
+      await new Promise((r) => setTimeout(r, 1800));
+      const img = document.getElementById('r-img');
+      const b = img.getBoundingClientRect();
+      const ov = Array.from(document.querySelectorAll('.svi-region-overlay')).find((o) => {
+        const r = o.getBoundingClientRect();
+        return Math.abs(r.left - b.left) < 2 && Math.abs(r.top - b.top) < 2;
+      }) || null;
+      const cs = ov ? getComputedStyle(ov) : null;
+      return { hasOv: !!ov, clipPath: cs ? cs.clipPath : '', maskImage: cs ? (cs.maskImage || '') : '' };
+    })()`);
+    assert.ok(rgBack.hasOv, 'K=3 时覆盖层仍在');
+    assert.ok(String(rgBack.clipPath).indexOf('url(') === 0, 'R2: 矩形块走 clip-path 矢量表达, got ' + rgBack.clipPath);
+    const vecPx = await captureSample(pxRect);
+    for (let i = 0; i < pxRect.length; i++) {
+      for (let c = 0; c < 3; c++) {
+        assert.ok(Math.abs(vecPx[i][c] - bmpPx[i][c]) <= 4,
+          'R2/I7: 两表达渲染像素级等价 @点' + i + ' 通道' + c + ' → 矢量 ' + vecPx[i][c] + ' vs 位图 ' + bmpPx[i][c]);
+      }
+    }
+
+    // 30e. letterbox (object-fit: contain): 掩码贴合内容盒, 边距区绝不反色
+    const rg3 = await evalInPage(`(() => {
+      const img = document.getElementById('r-img-letter');
+      const b = img.getBoundingClientRect();
+      const ov = Array.from(document.querySelectorAll('.svi-region-overlay')).find((o) => {
+        const r = o.getBoundingClientRect();
+        return Math.abs(r.left - b.left) < 2 && Math.abs(r.top - b.top) < 2;
+      }) || null;
+      return { hasOv: !!ov, box: [Math.round(b.left), Math.round(b.top), Math.round(b.width), Math.round(b.height)] };
+    })()`);
+    assert.ok(rg3.hasOv, 'letterbox 图也要挂层');
+    const pxLetter = [
+      [rg3.box[0] + 100, rg3.box[1] + 8],   // 上边距 (内容盒之外)
+      [rg3.box[0] + 10, rg3.box[1] + 100],  // 内容盒内的浅底
+      [rg3.box[0] + 100, rg3.box[1] + 100], // 内容盒内的色块
+    ];
+    const letPx = await captureSample(pxLetter);
+    assert.ok(letPx[0][0] > 200 && letPx[0][1] > 200 && letPx[0][2] > 200,
+      'letterbox 边距保持原色 (未被反色), got ' + JSON.stringify(letPx[0]));
+    assert.ok(letPx[1][0] < 130, '内容盒内的浅底被反色, got ' + JSON.stringify(letPx[1]));
+    assert.ok(letPx[2][2] > 150, '内容盒内的色块保持原色, got ' + JSON.stringify(letPx[2]));
+
+    // 30f. 祖先带 filter → 零覆盖层 + 降级原因可观测 (R4 最高风险项)
+    const rg4 = await evalInPage(`(() => {
+      const img = document.getElementById('r-img-filter');
+      const b = img.getBoundingClientRect();
+      const has = Array.from(document.querySelectorAll('.svi-region-overlay')).some((o) => {
+        const r = o.getBoundingClientRect();
+        return Math.abs(r.left - b.left) < 2 && Math.abs(r.top - b.top) < 2;
+      });
+      const toast = document.getElementById('svi-toast');
+      return {
+        hasOverlay: has,
+        regionAttr: img.getAttribute('data-svi-region'),
+        degrade: window.__svi.RegionRenderEngine.diagnostics().degradeByReason,
+        toast: toast ? String(toast.textContent || '') : ''
+      };
+    })()`);
+    assert.strictEqual(rg4.hasOverlay, false, '祖先带 filter → 零覆盖层 (backdrop root 被截断, 显式降级)');
+    assert.strictEqual(rg4.regionAttr, null, '降级元素上零痕迹');
+    assert.ok((rg4.degrade['ancestor-filter'] || 0) >= 1, '降级原因可观测: ancestor-filter, got ' + JSON.stringify(rg4.degrade));
+    assert.ok(/降级/.test(rg4.toast), 'R4: 降级必须同屏可见地可解释 (toast 文案), got "' + rg4.toast + '"');
+
+    // 30g. 元素移除 → 覆盖层一并回收, 账本同步 (R8)
+    const rg5 = await evalInPageAsync(`(async () => {
+      const before = document.querySelectorAll('.svi-region-overlay').length;
+      const cell = document.getElementById('r-cell-rect');
+      cell.remove();
+      await new Promise((r) => setTimeout(r, 2600)); // 等一次掉线清扫 (2s)
+      return {
+        before: before,
+        after: document.querySelectorAll('.svi-region-overlay').length,
+        ledger: window.__svi.RegionRenderEngine.diagnostics().overlays,
+        lastUnmount: window.__svi.RegionRenderEngine.diagnostics().lastUnmountReason
+      };
+    })()`);
+    assert.ok(rg5.before >= 3, '移除前页面至少有 3 层 (矩形 / 圆形 / letterbox), got ' + rg5.before);
+    assert.strictEqual(rg5.after, rg5.before - 1, '被移除元素的覆盖层必须一并回收, got ' + rg5.after + ' vs ' + rg5.before);
+    assert.strictEqual(rg5.ledger, rg5.after, '引擎账本与实际节点数一致 (无脱钩残留)');
+    assert.strictEqual(rg5.lastUnmount, 'detached', '卸载原因可观测: detached (元素已脱离文档)');
+
+    // 30i. 全屏进出 (R5): 用桩 fullscreenElement + 合成事件驱动, 验我方的挂/摘与账本
+    const rgFs = await evalInPageAsync(`(async () => {
+      const svi = window.__svi;
+      svi.prefs.regionRender = true;
+      svi.prefs.regionKRects = 3;
+      svi.engines.image.clearCacheAndRescan();
+      await new Promise((r) => setTimeout(r, 1800));
+      const img = document.getElementById('r-img-disc');
+      const mounted = img.getAttribute('data-svi-region');
+      const before = document.querySelectorAll('.svi-region-overlay').length;
+      Object.defineProperty(document, 'fullscreenElement', { value: img, configurable: true });
+      document.dispatchEvent(new Event('fullscreenchange'));
+      await new Promise((r) => setTimeout(r, 400));
+      const during = {
+        overlays: document.querySelectorAll('.svi-region-overlay').length,
+        suspended: svi.RegionRenderEngine.diagnostics().suspended,
+        attr: img.getAttribute('data-svi-region')
+      };
+      Object.defineProperty(document, 'fullscreenElement', { value: null, configurable: true });
+      document.dispatchEvent(new Event('fullscreenchange'));
+      await new Promise((r) => setTimeout(r, 600));
+      const after = {
+        overlays: document.querySelectorAll('.svi-region-overlay').length,
+        suspended: svi.RegionRenderEngine.diagnostics().suspended,
+        attr: img.getAttribute('data-svi-region')
+      };
+      return { mounted: mounted, before: before, during: during, after: after };
+    })()`);
+    assert.strictEqual(rgFs.mounted, 'true', '前置: 目标元素已挂覆盖层');
+    assert.strictEqual(rgFs.during.suspended, 1, 'R5: 进全屏 → 该元素的层被暂停 (账本 +1)');
+    assert.strictEqual(rgFs.during.attr, null, 'R5: 暂停时摘掉 region 标记');
+    assert.strictEqual(rgFs.during.overlays, rgFs.before - 1, 'R5: 暂停时页面上少一层');
+    assert.strictEqual(rgFs.after.suspended, 0, 'R5: 退出全屏 → 暂停账本清空');
+    assert.strictEqual(rgFs.after.overlays, rgFs.before, 'R5: 退出全屏 → 覆盖层恢复 (掩码还在缓存里)');
+    assert.strictEqual(rgFs.after.attr, 'true', 'R5: 恢复后重新打上 region 标记');
+
+    // 30h. 关闭开关 → 全清 (开关即回滚)
+    const rg6 = await evalInPageAsync(`(async () => {
+      const svi = window.__svi;
+      svi.prefs.regionRender = false;
+      svi.engines.image.clearCacheAndRescan();
+      await new Promise((r) => setTimeout(r, 1200));
+      return {
+        overlays: document.querySelectorAll('.svi-region-overlay').length,
+        attrs: document.querySelectorAll('[data-svi-region]').length,
+        ledger: svi.RegionRenderEngine.diagnostics().overlays
+      };
+    })()`);
+    assert.strictEqual(rg6.overlays, 0, '关闭后零覆盖层 (开关即回滚)');
+    assert.strictEqual(rg6.attrs, 0, '关闭后零属性残留');
+    assert.strictEqual(rg6.ledger, 0, '关闭后账本归零');
 
     console.log('\n🎉 ALL BROWSER AUTOMATION TESTS PASSED 100% SUCCESFULLY!\n');
 

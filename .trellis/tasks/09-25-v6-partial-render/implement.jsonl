@@ -1,0 +1,6 @@
+{"file": ".trellis/tasks/09-25-v6-partial-render/prd.md", "reason": "本任务需求 R1-R9 与验收标准"}
+{"file": ".trellis/tasks/09-25-v6-partial-render/design.md", "reason": "架构决策 D1-D7（覆盖层载体/几何映射/降级/互斥/调度）"}
+{"file": ".trellis/tasks/09-25-v6-partial-render/implement.md", "reason": "分阶段执行清单与评审门 G1-G3"}
+{"file": ".trellis/spec/frontend/region-mask-contract.md", "reason": "上游冻结契约：只消费不重实现，含不变量 I0-I8 与消费纪律"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "项目硬约束：禁止模式/引擎边界/属性门纪律"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "必须复用既有覆盖层/清理/blob URL 纪律，不得另起一套"}

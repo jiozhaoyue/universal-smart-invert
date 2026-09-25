@@ -4148,6 +4148,285 @@ setTimeout(() => {
   console.log('✓ v6.0 阶段 7 单测 passed: regionKRects 可读写且作用到内核 / 五条降级路径(taint·decode·cross-origin·no-pixels·budget)各退化为整图且原因非空 / 预算安全阀 / StatsManager 计数健全 / 诊断快照字段齐全');
 })();
 
+// ============================================================
+// v6.2 单测 (区域渲染层: 几何映射 / 祖先链判定 / 互斥 / 表达构造 / 关闭态短路)
+// 契约来源: .trellis/tasks/09-25-v6-partial-render/design.md D1~D5 · PRD R1~R7
+// ============================================================
+(function () {
+  const {
+    regionContentRect, regionBoxGrid, regionRenderExpr, regionRootVerdict, regionMutexVerdict,
+    RegionRenderEngine, regionRenderTryMount, regionRenderUnmount, regionMaskTake, regionCacheClear,
+    REGION_DEFAULTS, regionCoverage, makeRegionMask, validateRegionMask, prefs,
+  } = svi;
+
+  function mkEl(opts) {
+    const o = opts || {};
+    const attrs = Object.assign({}, o.attrs);
+    return {
+      tagName: o.tagName || 'IMG',
+      id: o.id || '',
+      className: o.className || '',
+      naturalWidth: o.naturalWidth || 0,
+      naturalHeight: o.naturalHeight || 0,
+      clientWidth: o.clientWidth || 0,
+      clientHeight: o.clientHeight || 0,
+      getAttribute(k) { return Object.prototype.hasOwnProperty.call(attrs, k) ? attrs[k] : null; },
+      setAttribute(k, v) { attrs[k] = String(v); },
+      removeAttribute(k) { delete attrs[k]; },
+      _attrs: attrs,
+    };
+  }
+
+  // ---- 1. 内容盒几何 (R3 / design D2): object-fit 五种 + object-position ----
+  {
+    // fill: 铺满, 无 letterbox
+    assert.deepStrictEqual(regionContentRect(100, 100, 200, 100, 'fill', 0.5, 0.5),
+      { x: 0, y: 0, w: 200, h: 100 }, 'fill → 内容盒 = 元素盒');
+
+    // contain 宽受限: 200×100 盒装 100×100 图 → 上下留边 (这里左右留边)
+    assert.deepStrictEqual(regionContentRect(100, 100, 200, 100, 'contain', 0.5, 0.5),
+      { x: 50, y: 0, w: 100, h: 100 }, 'contain 宽受限 → 左右 letterbox 居中');
+
+    // contain 高受限: 100×200 盒装 100×100 图 → 上下留边
+    assert.deepStrictEqual(regionContentRect(100, 100, 100, 200, 'contain', 0.5, 0.5),
+      { x: 0, y: 50, w: 100, h: 100 }, 'contain 高受限 → 上下 letterbox 居中');
+
+    // object-position 左上 → 偏移归零
+    assert.deepStrictEqual(regionContentRect(100, 100, 200, 100, 'contain', 0, 0),
+      { x: 0, y: 0, w: 100, h: 100 }, 'object-position: 0 0 → 贴左上');
+
+    // cover: 盖满并溢出 → 负偏移 (裁切起点)
+    assert.deepStrictEqual(regionContentRect(100, 100, 200, 100, 'cover', 0.5, 0.5),
+      { x: 0, y: -50, w: 200, h: 200 }, 'cover → 内容大于盒, 偏移为负 (等量裁切)');
+
+    // none: 原始尺寸居中
+    assert.deepStrictEqual(regionContentRect(50, 50, 200, 100, 'none', 0.5, 0.5),
+      { x: 75, y: 25, w: 50, h: 50 }, 'none → 原始尺寸居中');
+
+    // scale-down: 取 none 与 contain 中更小的那个 (大图等比缩小, 不拉伸变形 / 小图不放大)
+    assert.deepStrictEqual(regionContentRect(400, 400, 200, 100, 'scale-down', 0.5, 0.5),
+      { x: 50, y: 0, w: 100, h: 100 }, 'scale-down: 大图按 contain 缩 (不拉伸变形 → 左右留边)');
+    const sd = regionContentRect(100, 100, 200, 100, 'scale-down', 0.5, 0.5);
+    assert.strictEqual(sd.w, 100, 'scale-down: 小图绝不放大');
+
+    // 退化: 固有尺寸未知 → 按 fill; 盒尺寸为 0 → 空矩形
+    assert.deepStrictEqual(regionContentRect(0, 0, 200, 100, 'contain', 0.5, 0.5),
+      { x: 0, y: 0, w: 200, h: 100 }, '固有尺寸未知 → 退化为 fill');
+    assert.deepStrictEqual(regionContentRect(100, 100, 0, 0, 'contain', 0.5, 0.5),
+      { x: 0, y: 0, w: 0, h: 0 }, '盒尺寸为 0 → 空矩形');
+  }
+
+  // ---- 2. 掩码 → 元素盒坐标网格 (design D2 的核心映射) ----
+  {
+    const full = makeRegionMask({ gw: 2, gh: 2, source: 'region', data: new Uint8Array([1, 1, 1, 1]) });
+    const g1 = regionBoxGrid(full, { x: 0, y: 0, w: 100, h: 100 }, 100, 100, 4);
+    assert.strictEqual(g1.n, 4, '输出网格尺寸可指定');
+    assert.strictEqual(regionCoverage(g1.cells), 1, '内容盒铺满盒 → 全 1');
+
+    // letterbox: 内容盒只占盒的中间一半 → 边距区必须保持 0 (不反色)
+    const half = regionBoxGrid(full, { x: 25, y: 0, w: 50, h: 100 }, 100, 100, 4);
+    assert.strictEqual(regionCoverage(half.cells), 0.5, '左右 letterbox: 只有中间两列被标记');
+    assert.strictEqual(half.cells[0], 0, '左边距 → 0');
+    assert.strictEqual(half.cells[3], 0, '右边距 → 0');
+    assert.strictEqual(half.cells[1], 1, '内容区左列 → 1');
+    assert.strictEqual(half.cells[2], 1, '内容区右列 → 1');
+
+    // 掩码里的洞按同一变换搬到元素盒坐标
+    const holed = makeRegionMask({ gw: 4, gh: 4, source: 'region', data: new Uint8Array(16).fill(1).map((_, i) => (i === 5 || i === 6 ? 0 : 1)) });
+    const g2 = regionBoxGrid(holed, { x: 0, y: 0, w: 100, h: 100 }, 100, 100, 4);
+    assert.strictEqual(g2.cells[5], 0, '洞 (格 5) 映射后仍是 0');
+    assert.strictEqual(g2.cells[6], 0, '洞 (格 6) 映射后仍是 0');
+    assert.strictEqual(regionCoverage(g2.cells), 14 / 16, '其余保持 1');
+
+    // cover 裁切: 内容比盒大 → 落在盒外的部分不参与 (那些像素根本看不见)
+    const crop = regionBoxGrid(full, { x: 0, y: -50, w: 100, h: 200 }, 100, 100, 4);
+    assert.strictEqual(regionCoverage(crop.cells), 1, '盖满型裁切: 可见区仍全 1');
+
+    // 退化: 空矩形 → 全 0 (绝不产出"整块反色"的意外)
+    const deg = regionBoxGrid(full, { x: 0, y: 0, w: 0, h: 0 }, 100, 100, 4);
+    assert.strictEqual(regionCoverage(deg.cells), 0, '空内容盒 → 零标记');
+  }
+
+  // ---- 3. 表达构造: 矢量表达与元素盒网格**构造性等价** (I7 在渲染层的前提) ----
+  {
+    const mk = (rows) => {
+      const gh = rows.length;
+      const gw = rows[0].length;
+      const data = new Uint8Array(gw * gh);
+      for (let y = 0; y < gh; y++) for (let x = 0; x < gw; x++) data[y * gw + x] = rows[y][x] === '1' ? 1 : 0;
+      return makeRegionMask({ gw: gw, gh: gh, source: 'region', data: data });
+    };
+    // 浅底挖一个矩形 (矢量命中) 与一个棋盘 (退位图)
+    const rectMask = mk(['1111', '1001', '1001', '1111']);
+    const r1 = regionRenderExpr(rectMask, { x: 0, y: 0, w: 100, h: 100 }, 100, 100, { n: 4, kRects: 3 });
+    assert.strictEqual(r1.expr.kind, 'holes', '矩形洞 → 矢量快路径');
+    assert.strictEqual(r1.expr.holes.length, 1, '一个矩形');
+
+    const cbMask = mk(['1010', '0101', '1010', '0101']);
+    const r2 = regionRenderExpr(cbMask, { x: 0, y: 0, w: 100, h: 100 }, 100, 100, { n: 4, kRects: 3 });
+    assert.strictEqual(r2.expr.kind, 'bitmap', '棋盘 → 位图');
+    assert.strictEqual(r2.expr.bytes.length, 16, '位图长度 = 元素盒网格');
+
+    // 关键断言: **从 expr 反推的区域集合 === 元素盒网格** (两表达同一掩码的构造性等价)
+    const exprCells = (expr, n) => {
+      const out = new Uint8Array(n * n);
+      if (expr.kind === 'bitmap') {
+        for (let i = 0; i < out.length; i++) out[i] = expr.bytes[i] ? 1 : 0;
+        return out;
+      }
+      const rects = expr.kind === 'holes' ? expr.holes : expr.polys;
+      const cover = new Uint8Array(n * n);
+      for (let k = 0; k < rects.length; k++) {
+        const q = rects[k];
+        const x0 = Math.round(q.x * n);
+        const y0 = Math.round(q.y * n);
+        const x1 = x0 + Math.round(q.w * n);
+        const y1 = y0 + Math.round(q.h * n);
+        for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) cover[y * n + x] = 1;
+      }
+      for (let i = 0; i < out.length; i++) out[i] = expr.kind === 'holes' ? (cover[i] ? 0 : 1) : (cover[i] ? 1 : 0);
+      return out;
+    };
+    const same = (a, b) => { for (let i = 0; i < a.length; i++) if (!!a[i] !== !!b[i]) return false; return true; };
+    assert.ok(same(exprCells(r1.expr, r1.n), r1.cells), '矢量反推 === 元素盒网格 (holes)');
+    assert.ok(same(exprCells(r2.expr, r2.n), r2.cells), '位图反推 === 元素盒网格 (bitmap)');
+
+    // 两种表达都必须是契约合法的 (经 v6-1 的校验器)
+    assert.ok(validateRegionMask({ ...rectMask, data: r1.cells, coverage: regionCoverage(r1.cells), gw: r1.n, gh: r1.n, expr: r1.expr }).ok,
+      '矢量表达满足契约不变量');
+  }
+
+  // ---- 4. 祖先链判定 (R4 / design D3): 四类截断各自可辨 ----
+  {
+    const none = { filter: 'none', opacity: '1', mixBlendMode: 'normal', backdropFilter: 'none' };
+    assert.strictEqual(regionRootVerdict([]).ok, true, '空链 → 可用');
+    assert.strictEqual(regionRootVerdict([none, none]).ok, true, '纯静态祖先链 → 可用');
+    assert.strictEqual(regionRootVerdict([none, { ...none, filter: 'blur(2px)' }]).reason, 'ancestor-filter', '祖先带 filter → ancestor-filter');
+    assert.strictEqual(regionRootVerdict([none, { ...none, opacity: '0.5' }]).reason, 'ancestor-opacity', '祖先 opacity<1 → ancestor-opacity');
+    assert.strictEqual(regionRootVerdict([none, { ...none, mixBlendMode: 'multiply' }]).reason, 'ancestor-blend', '祖先 mix-blend-mode → ancestor-blend');
+    assert.strictEqual(regionRootVerdict([none, { ...none, backdropFilter: 'blur(4px)' }]).reason, 'ancestor-backdrop', '祖先 backdrop-filter → ancestor-backdrop');
+    // 多个命中时按链上最先遇到的那个报原因 (最近的祖先先判)
+    assert.strictEqual(regionRootVerdict([{ ...none, opacity: '0.8' }, { ...none, filter: 'blur(1px)' }]).reason,
+      'ancestor-opacity', '原因取链上最近的那个');
+    // opacity 缺省/空串 → 视为 1 (不能因为字段缺失就误判截断)
+    assert.strictEqual(regionRootVerdict([{ filter: 'none', opacity: '', mixBlendMode: '', backdropFilter: '' }]).ok, true,
+      '字段缺失/空串 → 视为正常');
+  }
+
+  // ---- 5. 元素级滤镜互斥 (R7 / design D4): 用户显式滤镜优先 ----
+  {
+    assert.strictEqual(regionMutexVerdict(mkEl({})).ok, true, '无冲突');
+    assert.strictEqual(regionMutexVerdict(mkEl({ attrs: { 'data-svi-fx': '#fff' } })).reason, 'mutex-fx',
+      '图片特效生效中 → 让位 (mutex-fx)');
+    assert.strictEqual(regionMutexVerdict(mkEl({ attrs: { 'data-svi-fx': '#fff', 'data-svi-fx-off': 'true' } })).ok, true,
+      '特效被 kill switch 关掉 → 不冲突');
+    assert.strictEqual(regionMutexVerdict(mkEl({ tagName: 'VIDEO' }), { videoTune: { enabled: true } }).reason,
+      'mutex-tune', '视频画面调节生效中 → 让位 (mutex-tune)');
+    assert.strictEqual(regionMutexVerdict(mkEl({ tagName: 'VIDEO' }), { videoTune: { enabled: false } }).ok, true,
+      '视频画面调节关闭 → 不冲突');
+    assert.strictEqual(regionMutexVerdict(mkEl({}), { videoTune: { enabled: true } }).ok, true,
+      'videoTune 只作用于视频 → 图片不冲突');
+  }
+
+  // ---- 6. 关闭态短路 (R9 / AC-9): 关着时零动作 ----
+  {
+    const el = mkEl({ className: 'photo', naturalWidth: 800, naturalHeight: 600, clientWidth: 400, clientHeight: 300 });
+    const wasRender = prefs.regionRender;
+    try {
+      prefs.regionRender = false;
+      const d0 = RegionRenderEngine.diagnostics();
+      assert.strictEqual(regionRenderTryMount(el, 'x'), false, '关闭时 tryMount 恒 false (走整图路径)');
+      assert.strictEqual(RegionRenderEngine.mount(el, makeRegionMask({ gw: 2, gh: 2, source: 'region', data: [1, 0, 0, 1] }), 'x'), false,
+        '关闭时 mount 恒 false');
+      const d1 = RegionRenderEngine.diagnostics();
+      assert.strictEqual(d1.overlays, 0, '关闭时零覆盖层');
+      assert.deepStrictEqual(d1.degradeByReason, d0.degradeByReason, '关闭时连降级计数都不动 (纯短路)');
+      assert.strictEqual(el.getAttribute('data-svi-region'), null, '关闭时零属性写入');
+      assert.strictEqual(regionRenderUnmount(el), false, '关闭时 unmount 也是 no-op');
+
+      // 打开后: 无缓存掩码 → 不挂载 (渲染层绝不主导判定, 不为了渲染去现算分割)
+      prefs.regionRender = true;
+      regionCacheClear();
+      assert.strictEqual(regionRenderTryMount(el, 'x'), false, '有开关但没掩码 → 不挂载');
+      assert.strictEqual(RegionRenderEngine.diagnostics().overlays, 0, '仍然零覆盖层');
+
+      // 掩码来源不合法 (整图/不反色/降级) 一律不挂载, 且原因可观测
+      const whole = makeRegionMask({ gw: 2, gh: 2, source: 'whole' });
+      assert.strictEqual(RegionRenderEngine.mount(el, whole, 'x'), false, 'source=whole → 不挂载 (那本就走整图路径)');
+      assert.strictEqual(RegionRenderEngine.diagnostics().lastDegradeReason, 'no-mask', '原因 = no-mask');
+      const bad = makeRegionMask({ gw: 2, gh: 2, source: 'region', data: new Uint8Array([1, 0, 0, 1]) });
+      bad.v = 99; // 伪造版本漂移
+      assert.strictEqual(RegionRenderEngine.mount(el, bad, 'x'), false, '契约校验不过 → 不挂载');
+      assert.strictEqual(RegionRenderEngine.diagnostics().lastDegradeReason, 'no-mask', '原因 = no-mask (契约校验失败)');
+      // 互斥命中 → 挂在挂载前失败, 且元素级滤镜不被改写
+      const fxEl = mkEl({ attrs: { 'data-svi-fx': '#fff' }, naturalWidth: 10, naturalHeight: 10, clientWidth: 10, clientHeight: 10 });
+      assert.strictEqual(RegionRenderEngine.mount(fxEl, makeRegionMask({ gw: 2, gh: 2, source: 'region', data: [1, 0, 0, 1] }), 'x'), false,
+        '互斥命中 → 不挂载');
+      assert.strictEqual(RegionRenderEngine.diagnostics().lastDegradeReason, 'mutex-fx', '原因 = mutex-fx');
+      assert.strictEqual(fxEl.getAttribute('data-svi-region'), null, '降级时元素上没有任何 region 痕迹');
+    } finally {
+      prefs.regionRender = wasRender;
+      regionCacheClear();
+    }
+  }
+
+  // ---- 7. 调度与生命周期 (R6 / R8 / design D6): 暂停-恢复账本、静态降级、场景跃变门 ----
+  {
+    const fakeNode = { parentNode: { removeChild() { this.removed = true; } }, isConnected: true };
+    const vid = mkEl({ tagName: 'VIDEO', naturalWidth: 320, naturalHeight: 180, clientWidth: 320, clientHeight: 180 });
+    const wasRender = prefs.regionRender;
+    const wasStatic = prefs.regionStaticOnly;
+    try {
+      prefs.regionRender = true;
+      prefs.regionStaticOnly = false;
+      regionCacheClear();
+      // 造一份"已挂载"的账本记录 (不真的建 DOM: Node 环境没有可用的 DOM 桩)
+      RegionRenderEngine.mounts.set(vid, { el: vid, node: fakeNode, clip: null, src: 'v.mp4', key: 'k|v', epoch: RegionRenderEngine.epoch });
+
+      // (a) 静态图调度门: 视频/GIF 才调度; 静态图零调度
+      const img = mkEl({ tagName: 'IMG', naturalWidth: 100, naturalHeight: 100, clientWidth: 100, clientHeight: 100 });
+      RegionRenderEngine.mounts.set(img, { el: img, node: fakeNode, clip: null, src: 'a.png', key: 'k|a', epoch: RegionRenderEngine.epoch });
+      assert.strictEqual(RegionRenderEngine.scheduleFor(img, 'a.png'), false, '静态图不调度 (零定时器)');
+      assert.strictEqual(RegionRenderEngine.isAnimated(img, 'a.gif'), true, 'GIF 按扩展名判为动图');
+      assert.strictEqual(RegionRenderEngine.isAnimated(img, 'a.png'), false, 'PNG 不判动图');
+      assert.strictEqual(RegionRenderEngine.isVideo(vid), true, 'VIDEO 识别');
+
+      // (b) 「仅静态图」降级开关: 视频不挂层 (规避掩码滞后, 这是设计里写明的已知代价)
+      prefs.regionStaticOnly = true;
+      assert.strictEqual(RegionRenderEngine.scheduleFor(vid, 'v.mp4'), false, '仅静态图开启时视频不调度');
+      prefs.regionStaticOnly = false;
+
+      // (c) 暂停-恢复账本: suspend 卸层但记住; 掩码不在缓存时 restore 显式降级 (不静默长层)
+      assert.strictEqual(RegionRenderEngine.suspend(vid, 'fullscreen'), true, '暂停成功');
+      assert.strictEqual(RegionRenderEngine.mounts.has(vid), false, '暂停后不在挂载表里');
+      assert.strictEqual(RegionRenderEngine.diagnostics().suspended, 1, '暂停账本 +1');
+      assert.strictEqual(RegionRenderEngine.restore(vid), false, '掩码已不在缓存 → 不恢复');
+      assert.strictEqual(RegionRenderEngine.diagnostics().lastDegradeReason, 'no-mask', '原因 = no-mask');
+      assert.strictEqual(RegionRenderEngine.diagnostics().suspended, 0, '恢复尝试后账本清空 (不会挂着一个永不恢复的项)');
+
+      // (d) 全屏/PiP 事件在没有对应元素时必须是 no-op (不能凭空拆/挂)
+      assert.strictEqual(RegionRenderEngine.fullscreenElement(), null, 'Node 环境无全屏元素');
+      assert.strictEqual(RegionRenderEngine.handleFullscreen(), false, '无全屏 + 无暂停项 → no-op');
+      assert.strictEqual(RegionRenderEngine.handlePip({ type: 'enterpictureinpicture', target: vid }), false,
+        '未挂载的元素进 PiP → no-op');
+
+      // (e) 场景跃变: 未挂载的元素不触发; 关闭开关时零动作
+      const never = mkEl({ tagName: 'VIDEO' });
+      assert.strictEqual(RegionRenderEngine.onSceneChange(never), false, '未挂载 → 不触发重算');
+      prefs.regionRender = false;
+      assert.strictEqual(svi.regionRenderOnSceneChange(vid), false, '关闭时场景跃变入口纯短路');
+    } finally {
+      prefs.regionRender = wasRender;
+      prefs.regionStaticOnly = wasStatic;
+      RegionRenderEngine.mounts.clear();
+      regionCacheClear();
+    }
+  }
+
+  console.log('✓ v6.2 单测 passed: 内容盒几何(fill/contain/cover/none/scale-down + object-position) / 元素盒映射(letterbox 边距保持原色·洞搬位·裁切·退化) / 表达构造性等价(矢量反推 === 网格) / 祖先链四类截断可辨 / 互斥矩阵 / 关闭态纯短路与四条降级原因 / 调度门与暂停恢复账本');
+})();
+
+
 
 
 

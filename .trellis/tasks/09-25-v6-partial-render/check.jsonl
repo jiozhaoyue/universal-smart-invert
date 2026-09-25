@@ -1,0 +1,3 @@
+{"file": ".trellis/tasks/09-25-v6-partial-render/prd.md", "reason": "逐条核对 R1-R9 与汇总验收标准"}
+{"file": ".trellis/tasks/09-25-v6-partial-render/design.md", "reason": "核对 D1-D7 是否落地（含四处显式降级路径）"}
+{"file": ".trellis/spec/frontend/region-mask-contract.md", "reason": "核查只消费契约、零第二处分割实现、掩码结构未被改写"}

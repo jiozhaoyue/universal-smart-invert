@@ -31,8 +31,10 @@ Chrome extension DERIVED from it. Key paths:
   and the v5.0 **Action Registry** = ordered `SOURCES` table + `resolveStage` + `arbitrate` +
   `ACTIONS` executors, with the switch matrix read only through `actionEnabled(id)`), plus the
   v6.0 **region-segmentation kernel** (section 12.5: `RegionMask` frozen contract + two performance
-  gates + morphology/connected-components/area gate + exact rectangle decomposition + LRU cache;
-  all reachable through `window.__svi`; off by default, renders nothing yet)
+  gates + morphology/connected-components/area gate + exact rectangle decomposition + LRU cache)
+  and the v6.2 **region render layer** (section 20.5 `RegionRenderEngine`: backdrop-filter overlay +
+  bitmap/vector mask + `object-fit` geometry mapping + backdrop-root degradation + fullscreen/PiP
+  suspend + video/GIF recalculation; off by default)
 - `extension/` — GENERATED output (content.js + manifest.json + icons). **Never hand-edit**;
   rebuild after every header change with `node scripts/build-extension.js`
 - `scripts/` — zero-dependency build chain (build-extension, gen-icons, pack, zip lib) and live
@@ -98,6 +100,12 @@ removed after it bound loopback-only and was unreachable via LAN/proxied browser
   `.trellis/spec/frontend/region-mask-contract.md` — any change goes back to planning first.
   `buildRegionMask` must stay a pure function; side effects (cache/counters/timing) live only in the
   `regionMaskTake` shell. With `regionSegment` off, no region code may run, cache, or write anything.
+- **Rendering a region mask has three non-obvious rules** (spec §6; each one was found only in a real
+  browser): CSS `mask-image` clips by **alpha**, not luminance (write `alpha=0` for "keep" cells);
+  a `<clipPath>` unions its children (emit ONE `<path>` with `clip-rule:evenodd`, kept outside the
+  clipped element); geometry maps content-box → element-box before applying `object-fit`/
+  `object-position`, with letterbox margins masked out. Never mount on the media element's own
+  pseudo-element, and never reuse a site wrapper's `::after`.
 - **Committing without pushing is incomplete (不得只提交).** After every work commit, push to
   `origin main` (`git push`) before the session ends — all four gate commands green first.
 - GitHub Actions: the `secrets` context is NOT allowed in `if:` — use a `$GITHUB_ENV` gate step.

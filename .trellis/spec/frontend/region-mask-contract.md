@@ -95,8 +95,47 @@
 与 Action Registry 的接缝：新增 **reason 码 `'region'`**（**不改 `SOURCES` 表形状**，
 `source` 仍是 `'pixel'`）；`'region'` 被判为**自动来源**（进撤销栈）。
 
-## 6. 证据位置
+## 6. 渲染层实现要点（v6-2 落地，2026-09-26 · 三条硬约束）
+
+消费方**必须**照下面三条渲染，否则实测会得到"整块元素被反色"（单测抓不到，只有真浏览器能发现）：
+
+1. **`mask-image` 走 alpha 通道，不是亮度**。位图表达编码 PNG 时：RGB 一律白，
+   **"保持原色"的格必须写 `alpha = 0`**（透明）。alpha 全 255 等于整块遮罩 →
+   覆盖层会把整个元素盒都反色。
+2. **`<clipPath>` 内多个子元素之间是并集**。矢量表达**必须**汇成**单条 `<path>`**
+   （外框 + 各洞作为子路径）+ `clip-rule: evenodd`；写成"一个整盒 rect + 若干洞 rect"
+   会得到「整盒 ∪ 洞」= 整盒。且 clipPath 容器**不能放在被裁剪元素内部**（放同级兄弟）。
+3. **几何映射分两步**：内容盒归一化坐标 →（`object-fit` / `object-position` 仿射）→
+   元素盒坐标；然后位图与矢量都按元素盒 100% 铺满。
+   内容盒之外的格**一律 0（保持原色）** —— 那些像素不是图像内容。
+   覆盖层几何用元素相对定位祖先的 `offsetLeft/Top/Width/Height`；**不要用 `inset: 0`**
+   （containing block 是定位祖先，不是媒体元素）。
+
+**掩码查找（消费方取掩码的唯一正确方式）**：`RegionMask` 只由图像内容决定、与元素无关，
+故取用顺序为 **元素直连 → src 直连 → 字符串键兜底**。只按字符串键查会踩两个静默不挂的坑：
+判定时机早于图片加载（键里的固有尺寸还是 0）、以及同 src 的第二个元素复用决策（不会再算网格）。
+`window.__svi` 侧对应 `regionByElement`（WeakMap）/ `regionBySrc`（Map, 上限 200）/
+`regionCache`（LRU 200）三层，`regionCacheClear()` 一并清空。
+
+**覆盖层纪律**：`position:absolute` + `pointer-events:none` + `z-index:1` + `aria-hidden`，
+不设 `transform`/`opacity`（避免自造 stacking context）；载体**必须是独立 DOM 层**，
+不得挂到媒体元素自身的伪元素上（replaced element 不生成伪元素），也不得借用站点包裹元素的
+`::after`（几何对不齐 + 与站点伪元素冲突）。生命周期：元素脱离文档即回收（低频清扫），
+全屏/PiP 期间暂停（卸载但记住，退出后恢复）。
+
+**降级原因码**（`degrade.reason` 之外，渲染层另有自己的原因码，供面板与 toast 用）：
+`ancestor-filter` / `ancestor-opacity` / `ancestor-blend` / `ancestor-backdrop` /
+`no-positioned-ancestor` / `mutex-fx` / `mutex-tune` / `overlay-budget` / `no-mask` / `not-ready`。
+**任何一条都不得静默失效**：退化为整图判定 + 计数 + 每原因每会话一次的 toast。
+
+**已知限制（如实标注）**：视频/GIF 的掩码按心跳（默认 1s）与场景跃变重算，**帧间沿用**旧掩码 ——
+场景**渐变**时"哪块该反"会滞后（反色本身仍是实时的，由合成器逐帧重采样）；
+面板需标注该代价，并提供「仅静态图」开关（`regionStaticOnly`）。
+
+## 7. 证据位置
 
 - 单测：`test.js` 的「v6.0 unit tests」「v6.0 阶段 1/2/3/4/5/6/7」块（含 bench 与反例留档）
-- 端到端：`test-browser.js` 29 场景（默认关闭，基线零回归）
-- 设计与推理：`.trellis/tasks/09-25-v6-auto-region/design.md`、`implement.md`（含 8 条偏离记录）
+- 端到端：`test-browser.js` **Scenario 30**（部分反色渲染层：像素等价 / letterbox / 降级 / 全屏 /
+  零残留，含真合成器出图的像素采样）；其余 29 场景在默认关闭下零回归
+- 设计与推理：`.trellis/tasks/09-25-v6-auto-region/design.md`、`implement.md`（含 8 条偏离记录）；
+  渲染层见 `.trellis/tasks/09-25-v6-partial-render/design.md`、`implement.md`（含 6 条偏离记录）
