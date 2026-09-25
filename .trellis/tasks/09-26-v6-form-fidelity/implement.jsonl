@@ -1,0 +1,5 @@
+{"file": ".trellis/tasks/09-26-v6-form-fidelity/prd.md", "reason": "本任务需求 R1-R5(缺陷修复/形态覆盖/真实站点/Edge 分发/文档自检) 与验收线"}
+{"file": ".trellis/tasks/09-26-v6-form-fidelity/design.md", "reason": "§2 挂载唯一入口契约与三通道补挂; §3 两种注入形态; §4 真实站点断言口径; §5 watch 与 Edge 安装"}
+{"file": ".trellis/tasks/09-26-v6-form-fidelity/implement.md", "reason": "分阶段清单(阶段 0 取证先行 → 红/绿留证 → 收口)"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "既有断言不得放宽、单文件真源等质量纪律"}
+{"file": ".trellis/spec/frontend/region-mask-contract.md", "reason": "同族「契约冻结 + 单点收口」写法参照(本片挂载契约照此风格沉淀)"}

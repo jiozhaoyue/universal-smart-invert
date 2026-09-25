@@ -617,7 +617,78 @@ const ACTION_HTML = `<!DOCTYPE html>
   </script>
 </body></html>`;
 
+// —— v6.6 Scenario 32: 油猴 GM 垫片形态（首次覆盖 GM_addStyle 分支）——
+// 时序是关键: GM_* 必须在脚本执行**之前**定义 (与油猴 @grant 的语义一致),
+// 否则脚本会走兜底分支, 这个场景就名不副实。断言里用 __sviShimUsed 证明 GM 分支**真的被执行过**。
+const SHIM_HTML = `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>v6.6 GM shim form bench</title>
+<style>
+  body { font-family: sans-serif; background: #121212; color: #fff; padding: 20px; }
+  .frame { background: #1e1e1e; padding: 10px; border-radius: 8px; display: inline-block; margin: 8px; text-align: center; }
+  img { display: block; width: 160px; height: 120px; border-radius: 4px; }
+</style>
+</head>
+<body>
+  <h1>GM shim form bench</h1>
+  <div class="frame"><img id="gm-img-white" src="/img/white-diagram.svg" alt="白底图"><p>白底图</p></div>
+  <div class="frame"><img id="gm-img-cream" src="/img/cream-slide.svg" alt="米底图"><p>米底图</p></div>
+  <script>
+    /* 油猴 @grant 列表的最小等价垫片 (先定义, 后执行被测脚本) */
+    (function () {
+      var GM_PF = 'svi-gm-bench:';
+      window.__sviShimUsed = false;
+      window.GM_addStyle = function (css) {
+        window.__sviShimUsed = true;
+        var s = document.createElement('style');
+        s.textContent = css;
+        (document.head || document.documentElement).appendChild(s);
+        return s;
+      };
+      window.GM_getValue = function (k, d) { try { var v = localStorage.getItem(GM_PF + k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } };
+      window.GM_setValue = function (k, v) { try { localStorage.setItem(GM_PF + k, JSON.stringify(v)); } catch (e) {} };
+      window.GM_deleteValue = function (k) { try { localStorage.removeItem(GM_PF + k); } catch (e) {} };
+      window.GM_xmlhttpRequest = function () { return { abort: function () {} }; };
+      window.GM = {
+        xmlHttpRequest: window.GM_xmlhttpRequest,
+        addStyle: window.GM_addStyle,
+        getValue: window.GM_getValue,
+        setValue: window.GM_setValue
+      };
+    })();
+  </script>
+  <script>
+    ${executableScript}
+  </script>
+</body>
+</html>`;
+
+// —— v6.6 Scenario 33: document_start 注入形态（<html> 尚未创建）——
+// 本页**不含任何脚本**: 由测试运行器用 Page.addScriptToEvaluateOnNewDocument 注入,
+// 此刻 document.head 与 document.documentElement **都是 null** —— 修复前整张样式表被静默丢弃。
+const NOSTART_HTML = `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>v6.6 document_start form bench</title>
+<style>
+  body { font-family: sans-serif; background: #121212; color: #fff; padding: 20px; }
+  .frame { background: #1e1e1e; padding: 10px; border-radius: 8px; display: inline-block; margin: 8px; text-align: center; }
+  img { display: block; width: 160px; height: 120px; border-radius: 4px; }
+</style>
+</head>
+<body>
+  <h1>document_start form bench</h1>
+  <div class="frame"><img id="ns-img-white" src="/img/white-diagram.svg" alt="白底图"><p>白底图</p></div>
+  <div class="frame"><img id="ns-img-cream" src="/img/cream-slide.svg" alt="米底图"><p>米底图</p></div>
+</body>
+</html>`;
+
 const PAGES = {
+  '/shim-page': SHIM_HTML,
+  '/nostart-page': NOSTART_HTML,
   '/region-page': REGION_HTML,
   '/action-page': ACTION_HTML,
   '/login-page': LOGIN_HTML,
@@ -3504,6 +3575,77 @@ async function main() {
     assert.strictEqual(rc5.layers, 0, '关闭后零可视化层');
     assert.strictEqual(rc5.overlays, 0, '关闭后零覆盖层');
     assert.strictEqual(rc5.samples, 0, '关闭后零样本');
+
+    // ============================================================
+    // Scenario 32 (v6.6): 油猴 GM 垫片形态 —— 首次真正执行 GM_addStyle 分支
+    //   修复前 31 个场景全部把脚本**内联进 HTML 且不定义任何 GM 垫片**,
+    //   于是 `typeof GM_addStyle === 'function'` 恒为假, 这条分支从未被测过。
+    // ============================================================
+    console.log('[Test] Scenario 32: v6.6 GM shim form (GM_addStyle branch) ...');
+    await sendCdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/shim-page` });
+    await new Promise((r) => setTimeout(r, 4500));
+    const gm = await evalInPageAsync(`(() => {
+      const imgs = ['gm-img-white', 'gm-img-cream'].map((id) => document.getElementById(id)).filter(Boolean);
+      const sviCss = [...document.querySelectorAll('style')].filter((s) => /data-svi-inverted/.test(s.textContent || ''));
+      return {
+        shimUsed: window.__sviShimUsed === true,
+        cssCount: sviCss.length,
+        cssBytes: sviCss.reduce((n, s) => n + (s.textContent || '').length, 0),
+        htmlClass: document.documentElement.className,
+        rootVar: getComputedStyle(document.documentElement).getPropertyValue('--svi-img-filter'),
+        imgCount: imgs.length,
+        inverted: imgs.filter((i) => i.getAttribute('data-svi-inverted') === 'true').length,
+        filterNone: imgs.filter((i) => (getComputedStyle(i).filter || 'none') === 'none').length,
+        version: window.__svi && window.__svi.version,
+      };
+    })()`);
+    assert.strictEqual(gm.version, USERSRC_VERSION, '32: GM 垫片形态下脚本必须完成 boot');
+    assert.strictEqual(gm.shimUsed, true, '32: GM_addStyle 垫片必须被真正调用过 (证明走的是 GM 分支, 不是兜底分支)');
+    assert.ok(gm.cssCount >= 1, '32: GM 分支下样式表必须在场');
+    assert.ok(gm.cssBytes > 40000, '32: GM 分支下样式表内容完整 (' + gm.cssBytes + ' 字节)');
+    assert.ok(/svi-img-invert-on/.test(gm.htmlClass), '32: html 主开关门类必须落地 (' + gm.htmlClass + ')');
+    assert.ok(gm.rootVar && gm.rootVar !== 'none', '32: --svi-img-filter 必须写入, got ' + gm.rootVar);
+    assert.strictEqual(gm.imgCount, 2, '32: 场景页应有 2 张基准图');
+    assert.strictEqual(gm.inverted, gm.imgCount, '32: 两张浅底图都应被判为反色');
+    assert.strictEqual(gm.filterNone, 0, '32: 滤镜必须真实生效 (不许只写属性不生效)');
+
+    // ============================================================
+    // Scenario 33 (v6.6): document_start 注入形态 —— 根节点尚未创建
+    //   这是修复前 100% 复现「属性照写、滤镜不生效」的那条路径:
+    //   document.head 与 document.documentElement 皆为 null → 整张样式表被静默丢弃。
+    // ============================================================
+    console.log('[Test] Scenario 33: v6.6 document_start form (root not yet created) ...');
+    const errBefore33 = pageErrorCount;
+    const injected = await sendCdp('Page.addScriptToEvaluateOnNewDocument', { source: executableScript });
+    const injectedId = injected && injected.identifier;
+    await sendCdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/nostart-page` });
+    await new Promise((r) => setTimeout(r, 5000));
+    const ns = await evalInPageAsync(`(() => {
+      const imgs = ['ns-img-white', 'ns-img-cream'].map((id) => document.getElementById(id)).filter(Boolean);
+      const sviCss = [...document.querySelectorAll('style')].filter((s) => /data-svi-inverted/.test(s.textContent || ''));
+      return {
+        cssCount: sviCss.length,
+        cssBytes: sviCss.reduce((n, s) => n + (s.textContent || '').length, 0),
+        htmlClass: document.documentElement.className,
+        rootVar: getComputedStyle(document.documentElement).getPropertyValue('--svi-img-filter'),
+        imgCount: imgs.length,
+        inverted: imgs.filter((i) => i.getAttribute('data-svi-inverted') === 'true').length,
+        filterNone: imgs.filter((i) => (getComputedStyle(i).filter || 'none') === 'none').length,
+        version: window.__svi && window.__svi.version,
+      };
+    })()`);
+    assert.strictEqual(ns.version, USERSRC_VERSION, '33: document_start 形态下脚本必须完成 boot');
+    assert.ok(ns.cssCount >= 1, '33: 主样式表必须最终在场 (修复前为 0 —— 整张样式表被静默丢弃)');
+    assert.ok(ns.cssBytes > 40000, '33: 主样式表内容完整 (' + ns.cssBytes + ' 字节), 修复前为 0');
+    assert.ok(/svi-img-invert-on/.test(ns.htmlClass), '33: html 主开关门类必须落地 (' + ns.htmlClass + ')');
+    assert.ok(ns.rootVar && ns.rootVar !== 'none', '33: --svi-img-filter 必须写入, got ' + ns.rootVar);
+    assert.strictEqual(ns.imgCount, 2, '33: 场景页应有 2 张基准图');
+    assert.strictEqual(ns.inverted, ns.imgCount, '33: 两张浅底图都应被判为反色');
+    assert.strictEqual(ns.filterNone, 0, '33: 滤镜必须真实生效 (修复前 2/2 为 none)');
+    assert.strictEqual(pageErrorCount, errBefore33,
+      '33: 根未就绪的路径不得产生页面异常 (两个同族裸挂载点原本会 null.appendChild 抛错)');
+    if (injectedId) await sendCdp('Page.removeScriptToEvaluateOnNewDocument', { identifier: injectedId });
+    console.log('[Test] Scenario 33: 注入脚本已移除, 不留残留到后续场景');
 
     console.log('\n🎉 ALL BROWSER AUTOMATION TESTS PASSED 100% SUCCESFULLY!\n');
 

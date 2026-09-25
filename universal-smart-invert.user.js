@@ -3639,6 +3639,154 @@
   }
 
   // ==========================================
+  // 5.5 样式挂载唯一入口与「根就绪」重放 (v6.6)
+  //
+  // 背景 (实测确凿的静默失效): document_start 注入时 (扩展 content script / 部分宿主的
+  // document-start 注入), 脚本可能在 <html> 尚未创建时运行 —— 此刻
+  // `document.head` 与 `document.documentElement` **都是 null**。
+  // 历史写法 `const r = document.head || document.documentElement; if (r) r.appendChild(el)`
+  // 会把整张样式表**静默丢掉**: 无异常、无日志、无痕迹 —— 表现为
+  // 「data-svi-inverted 属性照写, 但 html.svi-img-invert-on img[..] 规则不存在 → 滤镜不生效」,
+  // 用户看到的就是「图片没有反色」。
+  // 同族坑在本仓已出现过一次: v4.6.1 的 `observe(null)` 被吞掉后静默失效
+  // (见下方 setupPendingMask 的注释), 故此次收口为三条硬约束:
+  //   1) **所有**样式节点一律经 mountStyleNode() 挂载, 禁止再写裸挂载;
+  //   2) **所有**「必须写根节点」的启动动作一律经 whenRootReady() 登记, 根出现后按原顺序重放;
+  //   3) 根迟迟未出现 → 明确告警, 不再静默。
+  //
+  // 行为契约 (有根时与修复前逐字节等价):
+  //   - sviStyleRoot(): 有 head 用 head, 否则用 documentElement, 都没有则 null。
+  //   - mountStyleNode(el): 有根即刻挂载并返回; 无根则排队, 待根出现的第一时刻补挂。
+  //     带 id 的节点做**幂等复用** (已在场 / 已排队 → 返回既有节点), 避免引擎重复 ensure 造出同 id 双节点。
+  //   - whenRootReady(fn): 有根即刻执行; 无根则登记, 根出现后按登记顺序重放一次。永不抛错、永不阻塞。
+  // ==========================================
+  const pendingStyleNodes = [];   // 待补挂的样式节点 (登记顺序 = 挂载顺序)
+  const rootReadyWaiters = [];    // 待重放的根状态动作 (登记顺序 = 执行顺序)
+  let rootWatcherArmed = false;
+  let rootFlushDone = false;      // 一次性: 根就绪的补挂 + 重放只做一次
+  let rootWatchObserver = null;
+  let rootWatchTimer = null;
+  let rootWatchTries = 0;
+  let rootWatchEvents = [];
+  let rootUnreadyWarned = false;
+  const ROOT_WATCH_MAX_TRIES = 8; // 有界兜底: 约 0+50+100+…+350 ≈ 1.4s, 之后只告警不再轮询
+
+  function sviStyleRoot() {
+    return document.head || document.documentElement || null;
+  }
+
+  function attachStyleNode(el) {
+    const root = sviStyleRoot();
+    if (!root) return false;
+    try {
+      root.appendChild(el);
+    } catch (e) {
+      return false;
+    }
+    return true;
+  }
+
+  function mountStyleNode(el) {
+    if (!el) return el;
+    const id = el.id || '';
+    if (id) {
+      // 幂等复用: 同 id 节点已在场 → 直接用既有的 (引擎可能重复 ensure)
+      const live = document.getElementById(id);
+      if (live && live.isConnected) return live;
+      for (let i = 0; i < pendingStyleNodes.length; i++) {
+        if (pendingStyleNodes[i].id === id) return pendingStyleNodes[i];
+      }
+    }
+    if (attachStyleNode(el)) return el;
+    pendingStyleNodes.push(el);
+    armRootWatcher();
+    return el;
+  }
+
+  function whenRootReady(fn) {
+    if (typeof fn !== 'function') return;
+    if (document.documentElement) {
+      flushRootReady(); // 顺手把排队中的样式节点补挂掉 (此时根已在)
+      try { fn(); } catch (e) { /* 单个启动动作失败不影响其余 */ }
+      return;
+    }
+    rootReadyWaiters.push(fn);
+    armRootWatcher();
+  }
+
+  // 根就绪: 先补挂样式节点, 再按登记顺序重放根状态动作。返回是否已完成。
+  function flushRootReady() {
+    if (rootFlushDone) return true;
+    if (!document.documentElement) return false;
+    rootFlushDone = true;
+    disarmRootWatcher();
+    const nodes = pendingStyleNodes.splice(0, pendingStyleNodes.length);
+    for (let i = 0; i < nodes.length; i++) {
+      if (!attachStyleNode(nodes[i])) {
+        console.warn('[SmartInvert] 样式节点挂载失败 (根已就绪但 appendChild 未成功): #' + (nodes[i].id || '(无 id)'));
+      }
+    }
+    const waiters = rootReadyWaiters.splice(0, rootReadyWaiters.length);
+    for (let i = 0; i < waiters.length; i++) {
+      try { waiters[i](); } catch (e) { /* 单个启动动作失败不影响其余 */ }
+    }
+    return true;
+  }
+
+  // 三条通道并行探测「根出现」: 事件式优先, 有界轮询只作兜底
+  function armRootWatcher() {
+    if (rootWatcherArmed || rootFlushDone) return;
+    rootWatcherArmed = true;
+    // 通道 1: <html> 被插入 document 的那一刻 (childList 直属于 document, 无需 subtree)
+    try {
+      rootWatchObserver = new MutationObserver(() => { flushRootReady(); });
+      rootWatchObserver.observe(document, { childList: true });
+    } catch (e) {
+      rootWatchObserver = null;
+    }
+    // 通道 2: 解析阶段切换 —— 兜住 observer 缺席/不触发的主机
+    try {
+      const onReady = () => { flushRootReady(); };
+      document.addEventListener('readystatechange', onReady);
+      document.addEventListener('DOMContentLoaded', onReady);
+      rootWatchEvents = [['readystatechange', onReady], ['DOMContentLoaded', onReady]];
+    } catch (e) { /* ignore */ }
+    // 通道 3: 有界轮询兜底 (间隔递增); 用尽仍无根 → 告警一次, 不再静默
+    const tick = () => {
+      rootWatchTimer = null;
+      if (rootFlushDone) return;
+      if (flushRootReady()) return;
+      rootWatchTries++;
+      if (rootWatchTries >= ROOT_WATCH_MAX_TRIES) {
+        if (!rootUnreadyWarned) {
+          rootUnreadyWarned = true;
+          console.warn(
+            '[SmartInvert] 根节点迟迟未就绪: ' + pendingStyleNodes.length + ' 个样式节点, ' +
+            rootReadyWaiters.length + ' 个启动动作未落地 (样式不生效的原因通常是这一条)'
+          );
+        }
+        return;
+      }
+      rootWatchTimer = setTimeout(tick, 50 * rootWatchTries);
+    };
+    try { rootWatchTimer = setTimeout(tick, 0); } catch (e) { /* ignore */ }
+  }
+
+  function disarmRootWatcher() {
+    rootWatcherArmed = false;
+    try { if (rootWatchObserver) rootWatchObserver.disconnect(); } catch (e) { /* ignore */ }
+    rootWatchObserver = null;
+    if (rootWatchTimer) {
+      try { clearTimeout(rootWatchTimer); } catch (e) { /* ignore */ }
+      rootWatchTimer = null;
+    }
+    for (let i = 0; i < rootWatchEvents.length; i++) {
+      try { document.removeEventListener(rootWatchEvents[i][0], rootWatchEvents[i][1]); } catch (e) { /* ignore */ }
+    }
+    rootWatchEvents = [];
+  }
+
+  // ==========================================
   // 6. 样式注入 (极简胶囊、控制卡片、高级设置弹窗)
   // ==========================================
   function injectStyles() {
@@ -5061,12 +5209,13 @@
     `;
 
     if (typeof GM_addStyle === 'function') {
+      // GM 分支**保持原样**: 那是宿主 (油猴) 自己的挂载实现, 不由我们改写其语义
       GM_addStyle(css);
     } else {
       const el = document.createElement('style');
       el.textContent = css;
-      const styleRoot = document.head || document.documentElement;
-      if (styleRoot) styleRoot.appendChild(el);
+      // v6.6: 一律走唯一挂载入口 —— 根尚未创建时排队补挂, 不再静默丢弃整张样式表
+      mountStyleNode(el);
     }
   }
 
@@ -9051,9 +9200,10 @@
       if (this.styleNode && this.styleNode.isConnected) return;
       this.styleNode = document.getElementById('svi-fx-style');
       if (!this.styleNode) {
-        this.styleNode = document.createElement('style');
-        this.styleNode.id = 'svi-fx-style';
-        (document.head || document.documentElement).appendChild(this.styleNode);
+        const el = document.createElement('style');
+        el.id = 'svi-fx-style';
+        // v6.6: 唯一挂载入口 —— 排队中的同 id 节点会被幂等复用, 不会造出双节点
+        this.styleNode = mountStyleNode(el);
         if (this._rules) this._rules.clear();
       }
     }
@@ -10226,9 +10376,10 @@
         if (!this.styleNode || !this.styleNode.isConnected) {
           this.styleNode = document.getElementById('svi-bgr-style');
           if (!this.styleNode) {
-            this.styleNode = document.createElement('style');
-            this.styleNode.id = 'svi-bgr-style';
-            (document.head || document.documentElement).appendChild(this.styleNode);
+            const bgrEl = document.createElement('style');
+            bgrEl.id = 'svi-bgr-style';
+            // v6.6: 唯一挂载入口 (原为裸 appendChild, 根为 null 时抛错并被外层 try 吞掉)
+            this.styleNode = mountStyleNode(bgrEl);
           }
         }
         let css = '';
@@ -15406,7 +15557,8 @@
       setTimeout(off, 5000);
     } catch (e) { /* ignore */ }
   }
-  setupFlashGuard();
+  // v6.6: 防闪光守卫同样**依赖根节点** (写 documentElement.dataset + 挂一条样式); 无根时原写法静默返回
+  whenRootReady(setupFlashGuard);
 
   // ==========================================
   // v5.5 元素级 pending 遮罩 (任务 v5-5)
@@ -15492,7 +15644,9 @@
     }
   }
 
-  setupPendingMask();
+  // v6.6: 无根时原逻辑在 `if (!de …) return` 处静默退出 → 遮罩永不武装 (v5.5「首屏零白闪」达标依赖它)。
+  //   改为根就绪后重放: 根已存在 → 立即执行; 根随后出现 → 补做一次。
+  whenRootReady(setupPendingMask);
 
   // v4.3: 设置项即时拆除句柄 (关闭开关立即移除守卫样式; 重新开启自下次页面加载生效)。
   // 注意: 此处 __svi 字面量尚未创建, 先存句柄, 字面量之后再挂载。
@@ -15524,23 +15678,32 @@
     }
   }
 
-  updateImageFilterCss();
-  updateFontCss();
+  // v6.6: 下面这几个动作都**必须写根节点** (html 门类 / CSS 变量)。document_start 注入时
+  // documentElement 可能尚未创建 —— 原写法会整段静默跳过, 于是「属性照写、门类没上、滤镜不生效」。
+  // 改为经 whenRootReady 登记: 根已存在 → 立即执行 (与修复前逐字节等价); 根未创建 → 根出现后按原顺序重放。
+  whenRootReady(updateImageFilterCss);
+  whenRootReady(updateFontCss);
   StatsManager.load();
 
   // v5.0: 元素动作的启动态 —— 遮罩参数变量 + peek 门 + dim 层按偏好落地。
   //   hide / mask 不需要启动态处理: 它们由规则/手动触发, 没有"页级常驻状态"。
   //   dim / peek 是页级动作, 必须在此按持久化偏好恢复 (刷新后仍生效)。
-  try {
-    syncMaskVars();
-    setPeekGate(actionEnabled('peek'));
-    if (actionEnabled('dim')) applyPageDim(true);
-  } catch (e) { /* ignore */ }
+  whenRootReady(() => {
+    try {
+      syncMaskVars();
+      setPeekGate(actionEnabled('peek'));
+      if (actionEnabled('dim')) applyPageDim(true);
+    } catch (e) { /* ignore */ }
+  });
 
   // 调试与单测句柄 (始终暴露, 纯逻辑可直接在 Node 中通过环境桩单测)
   window.__svi = {
     version: SCRIPT_VERSION,
     runtime,
+    // v6.6 样式挂载契约 (单测/bench 契约): 唯一挂载入口 + 根就绪重放
+    mountStyleNode,
+    whenRootReady,
+    sviStyleRoot,
     // v4.6: prefs 改为动态 getter —— Store.onRemoteLoaded 重指派 state 后,
     // 调试/单测句柄始终引用活状态, 消除句柄脱钩
     get prefs() { return state; },

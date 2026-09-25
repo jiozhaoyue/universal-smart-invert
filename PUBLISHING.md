@@ -88,16 +88,38 @@ node scripts/pack.js             # 自研 stored-mode ZIP 打包器 → dist/uni
 
 - 构建是 **确定且幂等** 的：相同源码产出逐字节相同的 content.js / manifest.json / zip；
 - `manifest.json` 的 `name` / `version` / `description` 自动同步自脚本头部元数据（描述超 132 字符时按 Chrome 限制裁剪）；
-- `manifest.json` 形态：MV3，`content_scripts` 匹配 `<all_urls>` + `file://*/*`、`document_end`、`all_frames`，权限仅 `["storage"]`，含 4 尺寸图标；
+- `manifest.json` 形态：MV3，`content_scripts` 匹配 `<all_urls>` + `file://*/*`、`document_start`、`all_frames`，权限仅 `["storage"]`，含 4 尺寸图标；
+  （`document_start` 意味着内容脚本可能在 `<html>` 创建**之前**执行 —— 见 v6.6 的样式挂载契约：所有样式节点必须走唯一挂载入口，根未就绪时排队补挂，禁止裸 `document.head || documentElement` 挂载。）
 - 前奏垫片：`EXT_MODE`（wrapper 作用域，核心据此认领 owner kind `ext`）、`GM_xmlhttpRequest`（fetch 实现，blob/onload/onerror/ontimeout 契约与核心 gmFetchBlob 对齐）、`GM.xmlHttpRequest` 别名、`GM_addStyle`（style 元素）。存储无需垫片 —— 核心 Store 原生探测 `chrome.storage.sync`（含 sync 单条 8KB 配额分片、配额满自动降级 `chrome.storage.local`）。注意: MV3 内容脚本中的 `fetch` 不能绕过页面 CORS —— 跨域图片走脚本自带的优雅降级链, 与油猴 `GM_xmlhttpRequest` 可跨域的行为不同。
 
 ### 1. 本地安装与调试 (Load Unpacked)
 
 1. 运行上面三条构建命令；
-2. Chrome / Edge 打开 `chrome://extensions`，右上角开启 **开发者模式**；
+2. Chrome / Edge 打开 `chrome://extensions`（Edge 为 `edge://extensions`），开启 **开发者模式**；
 3. 点击 **「加载已解压的扩展程序」**，选择仓库的 `extension/` 目录；
 4. 需要 `file://` 反色时，在扩展详情页打开 **「允许访问文件网址」**（对应 manifest 的 `file://*/*` 匹配，与油猴的文件访问开关互不影响）；
 5. 修改 `universal-smart-invert.user.js` 后重新运行 `node scripts/build-extension.js`，再刷新页面即可生效。
+
+#### 1.1 让 `extension/` 始终最新（v6.6）
+
+「加载已解压」绑定的是一个**固定目录**，所以「始终最新」= **让那个目录始终是最新构建**：
+
+```bash
+node scripts/watch-extension.js          # 监听真源与 scripts/extension-src/，变更即重建
+node scripts/watch-extension.js --pack    # 顺带产出 dist/ 里的 zip
+node scripts/watch-extension.js --once    # 只重建一次后退出（供门禁用）
+```
+
+- 监听 `universal-smart-invert.user.js` 与 `scripts/extension-src/`；防抖默认 300ms（`--debounce` 可调）；
+- **单次重建失败不会退出**（watch 场景下退出等于失去保护），会打印错误后继续监听；
+- 重建完成后，在 `edge://extensions` / `chrome://extensions` 的扩展卡片上点一次 **「重新加载」** 即生效。
+- **这不是自动更新**：浏览器侧仍需点这一下。真正免手动只能上架商店（或用企业策略自托管 CRX + `update.xml`），见 §5.2。
+
+> **Chrome / Edge 137+ 已忽略 `--load-extension` 启动参数**（本项目在 Chrome 153.0.8010.53 /
+> Edge 153.0.4234.48 实测：加了该参数后 `/json/list` 里只有浏览器自带扩展，本扩展根本没被加载）。
+> 因此**没有命令行永久安装法**，只能用上面的界面路径；自动化测试改走 CDP
+> `Extensions.loadUnpacked` + `--remote-debugging-pipe`（先例：`dev/probe-popup-e2e.js`、
+> `dev/probe-github-readme.js`）。
 
 ### 2. 油猴脚本与插件版如何共存 (休眠握手)
 

@@ -57,6 +57,12 @@ Bench gotchas: uses a FIXED profile dir `.chrome-test-profile/` (gitignored) tha
 wipes at start; needs `--enable-unsafe-swiftshader` for WebGL scenarios; scenarios 2b/18 rely on
 in-run persistence, so never add global storage cleanup mid-run.
 
+Injection-form coverage: every page template **inlines** the userscript into HTML and defines **no**
+`GM_*` shims — so `document.head` always exists and `GM_addStyle` never does. That blind spot hid a
+real defect (silently dropped stylesheet). Scenarios 32 (GM-shim form) and 33 (`Page.addScriptToEvaluateOnNewDocument`,
+i.e. before `<html>` exists) exist to cover both forms; do not "simplify" them back to inline injection.
+See `.trellis/spec/frontend/style-mount-contract.md`.
+
 ## 本地实时调试（全部现成开源做法，无自研服务器）
 
 Three complementary paths; pick per need. Never hand-roll a server again (a custom one was
@@ -105,6 +111,17 @@ removed after it bound loopback-only and was unreachable via LAN/proxied browser
   or in either HTML artifact; the only allowed literal is the flash-guard `background:#000`.
   All UI controls are built by the single `SviControls` library (`ui` is a zero-DOM delegation
   shim) — one implementation per control, verified by unit test.
+- **Style nodes have exactly one mount point** (`mountStyleNode`) and root-dependent startup has
+  exactly one deferral point (`whenRootReady`). Mount immediately when `document.head` /
+  `documentElement` exists, otherwise **queue and attach the moment a root appears** (three
+  channels: MutationObserver on `document` + `readystatechange` + bounded polling). Never write a
+  bare `(document.head || document.documentElement).appendChild(...)`: the extension runs at
+  `document_start`, where a content script / `addScriptToEvaluateOnNewDocument` can execute before
+  `<html>` exists, both are `null`, and the whole 45 KB stylesheet was **silently dropped** —
+  attributes written, filter never applied, i.e. the user-visible "images don't invert".
+  Failing to mount must `console.warn`, never stay silent. Bench scenarios 32 (GM-shim form) and 33
+  (root not yet created) exist to keep both forms honest; `test-browser.js` inlines the script into
+  HTML, which is exactly why this class of bug hid from the other 31 scenarios.
 - **Region correction is a DATA channel, not a drawing tool.** The only gesture is a single
   `click` on a visualized region (a click flips that connected component's verdict). Never add
   polygon/lasso/brush interaction. Corrections persist as a **flip set** keyed by

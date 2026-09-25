@@ -62,13 +62,33 @@
 
 ---
 
-## 📦 扩展形态的安装方式（v6.5 补充）
+## 📦 扩展形态的安装方式（v6.6 补充）
 
-- **推荐**：在 `chrome://extensions` 打开「开发者模式」→「加载已解压的扩展程序」→ 选 `extension/`
-  目录（该目录由 `node scripts/build-extension.js` 生成）。
+- **推荐**：在 `chrome://extensions`（Edge 为 `edge://extensions`）打开「开发者模式」→
+  「加载已解压的扩展程序」→ 选 `extension/` 目录（该目录由 `node scripts/build-extension.js` 生成）。
 - **CRX 包**：`node scripts/build-crx.js` 可以产出签名 CRX，但请注意 ——
   **非商店来源的 CRX 在 Windows / macOS 的 Chrome 上默认被阻止安装**，它面向的是企业内部分发、
   离线部署与需要固定扩展 ID 的场景，**不是**双击即装的安装包。普通用户请走上面那条路径。
+
+### Edge / Chrome「加载已解压」+ 保持最新（v6.6）
+
+「加载已解压」指向的是一个**固定目录**，所以「始终最新」的关键是**让那个目录始终是最新构建**：
+
+1. 生成产物：`node scripts/build-extension.js`（或 `node scripts/watch-extension.js --once`）；
+2. `edge://extensions`（Chrome: `chrome://extensions`）→ 左下角打开「开发人员模式」；
+3. 「加载解压缩的扩展」→ 选**本仓的 `extension/` 目录**；
+4. 之后改源码时：
+   - 让目录保持最新：`node scripts/watch-extension.js`
+     （监听真源与 `scripts/extension-src/`，变更即自动重建；**单次重建失败不会退出**，继续监听）；
+   - 让浏览器生效：在该扩展卡片上点一次「重新加载」。
+5. **这不是双击即装，也不自动更新** —— 浏览器侧仍需点一次「重新加载」。
+   若需要**真正免手动**的常新，只能上架 Edge 加载项商店，或用企业策略自托管 CRX + `update.xml`；
+   两者本仓当前都不提供，说明见 `PUBLISHING.md`。
+
+> **注意**：Chrome / Edge **137+ 已忽略 `--load-extension` 启动参数**
+> （本项目在 Chrome 153.0.8010.53 / Edge 153.0.4234.48 上实测确认：加了该参数后扩展根本没被加载）。
+> 因此**无法用命令行完成永久安装**，只能用上面的界面路径；自动化测试改走 CDP
+> `Extensions.loadUnpacked`（见 `dev/probe-github-readme.js`，以及 v6.5 的真扩展 E2E）。
 ---
 
 ## 🧪 v6.0 开发中 (自动部分反色 · 内核已落地)
@@ -540,11 +560,37 @@ DRM 视频同样能反色（克隆层方案在这些场景会直接失败）。
 - 背景图引擎覆盖 body 末尾动态追加的覆盖层元素（`inline style background-image`）。
 
 ### 6. 🩺 GitHub 不生效排查 (FAQ)
-若在 GitHub README 上感觉脚本"没生效"，请依次检查：
-1. **确认脚本版本**：打开油猴管理面板，确认「全网通用智能视频与图片反色」版本号为 **3.1.0** 或更高（旧版存在首屏不反色与封面横跳问题）；
-2. **自动更新静默失败**：脚本经 `raw.githubusercontent.com` 检查更新——若你的网络访问 GitHub Raw 失败（或旧版脚本指向的仓库已私有/更名，Raw 404），油猴会**静默保留旧版本**。解决：在油猴面板「实用工具 → 检查用户脚本更新」手动触发，或直接重新点击上方安装链接覆盖安装；
-3. **检查脚本是否被禁用**：油猴图标数字角标是否点亮、本站是否被黑名单/白名单或"本站启用"开关关闭；
-4. **状态自检**：设置弹窗 →「🖼️ 当前页媒体」→ 采集列表，若图片状态为"跳过:…"，原因一目了然（也可顺手在此手动反色）。
+
+若在 GitHub README 上感觉脚本"没生效"，**按下面的顺序自检**（前两步就能定位绝大多数情况）：
+
+1. **先看版本**：油猴面板 →「已安装脚本」→ 看「全网通用智能视频与图片反色」的版本号，
+   应与本仓 `universal-smart-invert.user.js` 顶部 `@version` 一致（当前 **5.0.0**）。
+   过旧的版本会缺少 GitHub README / camo 图的强制反色规则。
+2. **自动更新会静默失败**：脚本经 `raw.githubusercontent.com` 检查更新——该域名在你的网络下不可达时
+   （或旧版脚本指向的仓库已私有/更名，Raw 404），油猴会**静默保留旧版本**，不会有任何提示。
+   解决：油猴面板 →「实用工具 → 检查用户脚本更新」手动触发，或直接重新点击上方安装链接覆盖安装。
+3. **是否被禁用**：油猴图标角标是否点亮、本站是否被黑名单/白名单或"本站启用"开关关闭。
+
+**一行自检**（在该页面按 F12 → Console，粘贴回车）—— 一次性把脚本真实状态打出来：
+
+```js
+({ver: window.__svi && window.__svi.version, css: [...document.querySelectorAll('style')].some(s => /data-svi-inverted/.test(s.textContent)), cls: document.documentElement.className, inv: document.querySelectorAll('[data-svi-inverted="true"]').length, n: document.querySelectorAll('.markdown-body img').length})
+```
+
+读法：
+
+| 输出 | 含义 | 处置 |
+| :--- | :--- | :--- |
+| `css: false` | **样式表不在场** → 滤镜规则根本不存在，属性写了也不会生效 | 这正是 v6.6 修掉的那类静默失效；升级到最新版 |
+| `cls` 不含 `svi-img-invert-on` | 主开关门类没上 | 站点电源 / 图片反色偏好被关 |
+| `inv` 远小于 `n` | 判定没覆盖到这些图 | 设置弹窗 →「🖼️ 当前页媒体」看每张图的「跳过」原因码，也可就地手动反色 |
+| `ver` 有值但 `css: false` | 脚本在跑，但样式表没落地 | 同上第一行；同时把 `ver` 报给维护者 |
+| `ver: undefined`（其余字段正常） | 你用的是**扩展形态**：扩展跑在隔离世界，页面控制台**看不到** `window.__svi`，属正常现象 | 以 `css` / `cls` / `inv` 三项为准即可 |
+
+> 注：`ver` 只有**用户脚本（油猴）形态**在页面控制台可见；扩展形态请忽略它。
+
+4. **状态自检（细粒度）**：设置弹窗 →「🖼️ 当前页媒体」→ 采集列表，若图片状态为"跳过:…"，
+   原因一目了然（也可顺手在此手动反色）。
 
 ---
 
