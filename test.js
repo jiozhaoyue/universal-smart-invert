@@ -1764,26 +1764,30 @@ setTimeout(() => {
   // ---- 1. 来源表结构与顺序 (AC-1 唯一性: 顺序必须逐字等于现行 decideImage 优先级链) ----
   assert.deepStrictEqual(
     SOURCES.map((s) => s.id),
-    ['manual', 'elementRule', 'learned', 'seedProtect', 'faviconSkip', 'seedForceInvert'],
-    'SOURCES 顺序必须与现行优先级链一致 (favicon 夹在 protect 与 forceInvert 之间)'
+    ['manualElement', 'manual', 'elementRule', 'learned', 'seedProtect', 'faviconSkip', 'seedForceInvert'],
+    'SOURCES 顺序必须与现行优先级链一致 (favicon 夹在 protect 与 forceInvert 之间; manualElement 是 A13 新增的元素属性来源)'
   );
   assert.deepStrictEqual(
     SOURCES.map((s) => s.stage),
-    ['override', 'override', 'rule', 'rule', 'rule', 'rule'],
-    'stage: 前两条属决策快照之前 (override), 后四条属快照之后 (rule)'
+    ['override', 'override', 'override', 'rule', 'rule', 'rule', 'rule'],
+    'stage: 前三条属决策快照之前 (override), 后四条属快照之后 (rule)'
   );
   assert.strictEqual(new Set(SOURCES.map((s) => s.id)).size, SOURCES.length, '来源 id 必须唯一');
   assert.ok(SOURCES.every((s) => typeof s.resolve === 'function'), '每条来源必须有 resolve');
 
   // ---- 2. ACTIONS 契约 (AC-3: keep 无属性门) ----
   assert.strictEqual(ACTIONS.invert.attr, 'data-svi-inverted', 'invert 属性门');
+  assert.strictEqual(ACTIONS.bgInvert.attr, 'data-svi-bginv', 'bgInvert 属性门 (A13: 与 invert 分离但共用仲裁与来源表)');
   assert.strictEqual(ACTIONS.keep.attr, null, 'keep 必须无属性门 (否则全动作关闭时会增加页面属性写入, 破坏 AC-3)');
   assert.strictEqual(ACTIONS.invert.defaultEnabled, true, 'invert 默认开 (现状)');
+  assert.strictEqual(ACTIONS.bgInvert.defaultEnabled, true, 'bgInvert 默认开 (现状)');
   assert.strictEqual(ACTIONS.keep.defaultEnabled, true, 'keep 默认开 (现状)');
   assert.ok(!('hide' in ACTIONS) && !('mask' in ACTIONS) && !('dim' in ACTIONS) && !('peek' in ACTIONS),
     '阶段 A 不得出现未落地动作 (hide/mask/dim/peek 属阶段 B)');
   assert.ok(ACTIONS.invert.isActive({ getAttribute: () => 'true' }), 'invert.isActive 读属性门');
   assert.strictEqual(ACTIONS.keep.isActive({ getAttribute: () => 'true' }), false, 'keep 恒为非激活');
+  assert.ok(ACTIONS.bgInvert.isActive({ getAttribute: (k) => (k === 'data-svi-bginv' ? 'true' : null) }), 'bgInvert.isActive 读自身属性门');
+  assert.strictEqual(ACTIONS.invert.isActive({ getAttribute: (k) => (k === 'data-svi-bginv' ? 'true' : null) }), false, 'invert 与 bgInvert 属性门不得串台');
 
   // ---- helpers ----
   function mkEl(opts) {
@@ -1839,6 +1843,31 @@ setTimeout(() => {
   assert.strictEqual(
     resolveStage(mkEl({}), { src: urlNoOv, elementRules: [], protect: [], forceInvert: [] }, 'override'),
     null, 'override 段无人认领必须返回 null'
+  );
+
+  // 3d. (A13) manualElement 元素属性优先于 manual 的 src 键
+  const urlBoth = 'https://mail.163.com/both.png';
+  svi.prefs.manualOverrides[svi.manualOverrideKey(host, urlBoth)] = 'restore';
+  const rAttr = resolveStage(mkEl({ attrs: { 'data-svi-manual': 'invert' } }), {
+    src: urlBoth, elementRules: [], protect: [], forceInvert: [],
+  }, 'override');
+  assert.strictEqual(rAttr.source, 'manualElement', '元素属性手动结论必须先于 src 键被采纳');
+  assert.strictEqual(rAttr.verdict, 'invert', '属性 invert 必须压过 src 键 restore');
+
+  // 3e. (A13) elementRule 透传原始动作 (供 BgImageEngine 区分 recolor)
+  const rRecolor = resolveStage(mkEl({ matchSelectors: ['.rc'] }), {
+    src: '', elementRules: [{ selector: '.rc', action: 'recolor' }], protect: [], forceInvert: [],
+  }, 'override');
+  assert.strictEqual(rRecolor.action, 'recolor', 'recolor 动作必须原样透传 (不属 ACTIONS, 由 bgReplace 引擎处理)');
+  assert.strictEqual(rRecolor.verdict, 'keep', 'recolor 的 verdict 为 keep (与原实现一致)');
+
+  // 3f. (A13) el=null 时 override 段只能命中 manual (decideUrl 的 URL 级路径)
+  const rUrlOnly = resolveStage(null, { src: urlBoth, elementRules: [{ selector: '.x', action: 'invert' }] }, 'override');
+  assert.strictEqual(rUrlOnly.source, 'manual', 'el=null 时 manualElement / elementRule 均不得命中, 只留 manual');
+  assert.strictEqual(rUrlOnly.verdict, 'keep', 'URL 级手动 restore → keep');
+  assert.strictEqual(
+    resolveStage(null, { src: 'https://mail.163.com/none.png' }, 'override'), null,
+    'URL 无覆盖 → null'
   );
 
   // ---- 4. resolveStage: rule 段短路顺序 ----
@@ -1927,13 +1956,30 @@ setTimeout(() => {
   ACTIONS.keep.apply(elK, null, 'pixel');
   assert.strictEqual(elK.getAttribute('data-svi-inverted'), 'true', '手动 invert 存在时 keep.apply 必须被判为反色');
 
+  // ---- 7. (A13) bgInvert 执行器: 属性门独立 + 同一仲裁 ----
+  const elBg = mkEl({});
+  ACTIONS.bgInvert.apply(elBg, null, 'pixel');
+  assert.strictEqual(elBg.getAttribute('data-svi-bginv'), 'true', 'bgInvert.apply 写自身属性门');
+  assert.strictEqual(elBg.getAttribute('data-svi-inverted'), null, 'bgInvert 不得串到 invert 属性门');
+  ACTIONS.bgInvert.revert(elBg);
+  assert.strictEqual(elBg.getAttribute('data-svi-bginv'), null, 'bgInvert.revert 摘除自身属性门');
+
+  const elBgM = mkEl({ attrs: { 'data-svi-manual': 'restore' } });
+  ACTIONS.bgInvert.apply(elBgM, null, 'pixel');
+  assert.strictEqual(elBgM.getAttribute('data-svi-bginv'), null, '手动 restore 存在时 bgInvert.apply 不得写反色属性');
+
+  const elBgMi = mkEl({ attrs: { 'data-svi-manual': 'invert' } });
+  ACTIONS.bgInvert.revert(elBgMi);
+  assert.strictEqual(elBgMi.getAttribute('data-svi-bginv'), 'true', '手动 invert 存在时 bgInvert.revert 必须被判为反色');
+
   // ---- 清理: 还原偏好与学习数据, 避免影响后续用例 ----
   delete svi.prefs.manualOverrides[svi.manualOverrideKey(host, urlManual)];
   delete svi.prefs.manualOverrides[svi.manualOverrideKey(host, urlW)];
   delete svi.prefs.manualOverrides[svi.manualOverrideKey(host, urlNoOv)];
+  delete svi.prefs.manualOverrides[svi.manualOverrideKey(host, urlBoth)];
   svi.RuleLearner.data = {};
 
-  console.log('✓ v5.0 unit tests passed: Action Registry (SOURCES 顺序/stage 分段/resolveStage 短路/arbitrate 两例外/keep 无属性门)');
+  console.log('✓ v5.0 unit tests passed: Action Registry (SOURCES 顺序/stage 分段/resolveStage 短路/arbitrate 两例外/keep 无属性门/bgInvert 独立属性门)');
 })();
 
 

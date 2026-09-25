@@ -67,15 +67,19 @@
 
 ### 阶段 A 后续项（审计新发现，独立成步、单独提交）
 
-- [ ] **A13** 合并 `BgImageEngine` 的第二套优先级链（消除 AC-1 的最后一处违例）
-      - 新增 `bgInvert` 执行器（`attr: 'data-svi-bginv'`）或决定 `invert` 是否双属性门
-      - `SOURCES` 新增独立来源 `manualElement`（元素属性手动结论），位置在 `manual` 之后、
-        `elementRule` 之前 —— 与 `BgImageEngine` 现行顺序一致
-      - `BgImageEngine` 元素级路径改经 `resolveStage(el, ctx, 'override')`
-      - **已知影响**：部分元素的 `reason` 由 `'pixel'` 变为 `'manual'`，`force` 由 false 变 true
-        → 属**有意的行为变更**，不是回归；必须在证据文件里逐项列出差异并与用户确认
-      - 依据与三条不能夹带的理由见 `design.md §7.1`
-      GATE（因含行为变更，需单独四绿 + 差异清单）
+- [x] **A13** 合并 `BgImageEngine` 的第二套优先级链（消除 AC-1 的最后一处违例）
+      - [x] 新增 `bgInvert` 执行器（`attr: 'data-svi-bginv'`）+ 写点 `applyBgInvertState`
+      - [x] `SOURCES` 新增 `manualElement`（元素属性手动结论），位置在 `manual` **之前**
+            —— 与 `manualStateFor` 的读取顺序（先属性、后 src 键）逐字一致
+      - [x] `elementRule` 来源**透传原始 `action`**，使 `recolor`（不属 ACTIONS）可被识别，
+            否则会被映射成 keep 静默丢掉局部改色
+      - [x] `BgImageEngine.processEl` / `decideUrl` 改经 `resolveStage('override')`
+      - [x] 「已知影响：reason 由 pixel 变 manual」**经论证不成立** ——
+            拆表后读取顺序与 `manualStateFor` 等价，且 `markManual` 同帧同值写属性与 src 键
+      GATE（四绿 + 场景断言 diff 为空）✓
+      → 证据：`research/stage-a-baseline-evidence.md` §A13
+      → 附：`firstMatchingElementRule` 真实调用点收敛为 **1 处**；`manualStateFor` 剩余 2 处
+        均为写点仲裁 / 投递守卫，不含规则查询，不构成第二条链
 
 ---
 

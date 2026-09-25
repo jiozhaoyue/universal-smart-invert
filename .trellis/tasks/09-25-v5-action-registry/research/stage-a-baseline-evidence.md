@@ -107,3 +107,61 @@ manualStateFor(el) → firstMatchingElementRule(el, profile.elementRules) → �
 
 **处理**：登记为 v5-1 的显式遗留项（见 `design.md §7`、`implement.md` 阶段 A 后续项），
 在 v5-1 内做（不推到 v5-2+），但必须**独立成步并单独验证**。
+
+## A13 实测结论（2026-09-25）
+
+**决策**：按推荐方案落地 —— 新增 `bgInvert` 动作 + `manualElement` 来源。
+
+### 改动
+
+| 位置 | 内容 |
+| :--- | :--- |
+| `SOURCES` 首条 | 新增 `manualElement`（只读 `data-svi-manual` 属性），置于 `manual` **之前** |
+| `SOURCES.elementRule` | 改为**透传原始 `rule.action`**（新增 `action` 字段），使 `recolor` 可被调用方识别 |
+| `ACTIONS` | 新增 `bgInvert`（`attr: 'data-svi-bginv'`）+ 新写点 `applyBgInvertState`（与 `applyInvertState` 同构，经 `arbitrate`） |
+| `BgImageEngine.processEl` | 原 `manualStateFor(el)` + `firstMatchingElementRule(el, …)` 两处读点 → 单次 `resolveStage(el, {src: getMediaSrc(el), elementRules}, 'override')` |
+| `BgImageEngine.decideUrl` | 原三行直查 `manualOverrides` → `resolveStage(null, {src: url}, 'override')` |
+
+### 顺序等价性论证（为何不是行为变更）
+
+原 `manualStateFor(el)` 的语义 = **属性 ∪ src 键**，读取顺序为「先属性、后 src 键」。
+拆成 `manualElement`（属性）+ `manual`（src 键）两条来源、按此顺序排列后，
+与 `manualStateFor` 的读取顺序**逐字相同**；`elementRule` 紧随其后，位置不变。
+故 `BgImageEngine` 的覆盖段顺序等价。
+
+`decideImage` 侧同理：`markManual` 对有 src 的元素**同帧写入属性与 src 键且值相同**，
+两条来源结论一致，先属性后 src 键不改变结果。
+
+### `recolor` 的保全方式
+
+`recolor` 不属 `ACTIONS`（由 `backgroundReplace` 引擎做局部改色）。
+若直接按 `verdict` 处理会被映射成 `keep`、静默丢掉局部改色。因此 `elementRule` 来源
+**透传原始 `action`**，`BgImageEngine` 先判 `action === 'recolor'` 走原分支。
+这样 `firstMatchingElementRule` 仍然只有**一个调用点**（AC-1 唯一性成立）。
+
+### 唯一性复审计（A13 后）
+
+| 检查项 | 结果 |
+| :--- | :--- |
+| `firstMatchingElementRule(` | **仅 1 处真实调用** —— `SOURCES.elementRule` ✓ （原第 2 处在 `BgImageEngine`，已消除） |
+| `manualOverrides[` 读点 | 3 处：`manualStateFor`（仲裁输入）/ `SOURCES.manual` / `ImageFxEngine.paramsFor`（rect **参数读取**，非优先级判定） |
+| `manualStateFor(` | 2 处：`arbitrate`（写点仲裁）/ `ImageFxEngine.applyTo`（**投递守卫**，非优先级链） |
+
+`ImageFxEngine` 的两处均为「写入/投递侧的守门」，不含规则/种子查询，**不是第二条优先级链**，
+按设计保留。至此 AC-1「不存在第二处独立的优先级判定实现」成立。
+
+### 验证
+
+| 门禁 | 结果 |
+| :--- | :--- |
+| `node --check universal-smart-invert.user.js` | 0 |
+| `node test.js` | EXIT 0；`✓` 行 17 → 18；新增 8 条 A13 断言（manualElement 优先 / recolor 透传 / el=null 路径 / bgInvert 独立属性门与仲裁）|
+| `node test-browser.js` | EXIT 0；场景 + 断言行 diff **空** |
+| build + pack | 0 |
+
+**bg 路径的 bench 覆盖已确认存在**（非仅单测）：
+- 场景 10 `BG-Image Thumb div: data-svi-bginv = true` ✓
+- 场景 15a/15c 悬停矩阵断言 `#hover-bg` 的 `data-svi-bginv` 标记与 hover 行为 ✓
+- viewer overlay 断言 `data-svi-bginv === true` ✓
+
+**A13 判定：通过，且零行为变化。**

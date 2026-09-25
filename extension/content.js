@@ -1862,6 +1862,19 @@
     return c;
   }
 
+  // 背景图反色写点 (v5.0 A13): data-svi-bginv 的写入/摘除, 与 applyInvertState 同构
+  // (经 arbitrate 保留手动结论幂等占优)。BgImageEngine 原有手动分支是"读手动→直接写",
+  // 这里改为"写前仲裁", 两者对既有数据等价 (markManual 同帧写入属性与 src 键, 结论一致)。
+  function applyBgInvertState(el, wantInvert, reason) {
+    if (!el || typeof el.setAttribute !== 'function' || typeof el.getAttribute !== 'function') return reason || '';
+    const c = arbitrate(el, { verdict: wantInvert ? 'invert' : 'keep', reason: reason });
+    try {
+      if (c.verdict === 'invert') el.setAttribute('data-svi-bginv', 'true');
+      else el.removeAttribute('data-svi-bginv');
+    } catch (e) { /* ignore */ }
+    return c.reason;
+  }
+
   // 元素动作执行器表 (v5.0)
   //   attr: 该动作的属性门 (null = 不写属性, 见 design §D-2 keep)
   //   apply / revert 必须幂等、不抛异常、不查布局
@@ -1874,6 +1887,19 @@
       revert(el) { return applyInvertState(el, false, 'pixel'); }, // 仍过仲裁: 规则驱动的还原不得压过手动结论
       isActive(el) {
         return !!el && typeof el.getAttribute === 'function' && el.getAttribute('data-svi-inverted') === 'true';
+      },
+    },
+    // v5.0 A13: 背景图反色 —— 属性门 / 写点独立于 invert, 但共用同一仲裁与同一来源表。
+    //   原 BgImageEngine 自带一套 manualStateFor + firstMatchingElementRule 的窄链,
+    //   是 AC-1「不存在第二处独立优先级判定」的最后一处违例, 此处收口。
+    bgInvert: {
+      id: 'bgInvert',
+      attr: 'data-svi-bginv',
+      defaultEnabled: true,
+      apply(el, params, source) { return applyBgInvertState(el, true, source || 'pixel'); },
+      revert(el) { return applyBgInvertState(el, false, 'pixel'); },
+      isActive(el) {
+        return !!el && typeof el.getAttribute === 'function' && el.getAttribute('data-svi-bginv') === 'true';
       },
     },
     keep: {
@@ -1891,6 +1917,19 @@
   const SOURCES = [
     // —— stage 'override' (决策快照之前) ——
     {
+      // v5.0 A13: 元素属性手动结论 (data-svi-manual) —— 服务无 src 的元素 (canvas / 背景图元素),
+      //   这类元素没有 src 键可查, 属性是唯一真源。置于 manual 之前: 属性是 per-element 的一手证据,
+      //   且与写点 arbitrate 的读取顺序 (manualStateFor 先读属性) 保持一致。
+      id: 'manualElement', stage: 'override',
+      resolve(el, ctx) {
+        if (!el || typeof el.getAttribute !== 'function') return null;
+        const m = el.getAttribute('data-svi-manual');
+        if (m === 'invert') return { verdict: 'invert', reason: 'manual', force: true };
+        if (m === 'restore') return { verdict: 'keep', reason: 'manual', force: true };
+        return null;
+      },
+    },
+    {
       id: 'manual', stage: 'override',
       resolve(el, ctx) {
         const src = ctx && ctx.src;
@@ -1906,7 +1945,11 @@
       resolve(el, ctx) {
         const erule = firstMatchingElementRule(el, (ctx && ctx.elementRules) || []);
         if (!erule) return null;
-        return { verdict: erule.action === 'invert' ? 'invert' : 'keep', reason: 'element-rule', force: true };
+        // v5.0 A13: 透传原始 rule.action —— 调用方需要区分动作集之外的动作
+        // (当前唯一: 'recolor' 局部改色, 由 backgroundReplace 引擎处理, 不属 ACTIONS)。
+        // 本来源仍是 firstMatchingElementRule 的唯一调用点 (AC-1 唯一性)。
+        const action = erule.action === 'invert' ? 'invert' : (erule.action === 'keep' || erule.action === 'protect' ? 'keep' : erule.action);
+        return { verdict: action === 'invert' ? 'invert' : 'keep', action: action, reason: 'element-rule', force: true };
       },
     },
 
@@ -7025,28 +7068,25 @@
       }
       if (!bg || bg.indexOf('url(') === -1) return;
 
-      // v4.6: Alt+点击手动结论占优门 (C2) —— 元素带手动标记时 bg 扫描不做任何自动改写,
-      // 杜绝背景图首扫/重扫把用户手动结论拉回 (与 canvas 首扫同源的覆盖路径)
-      const manual = manualStateFor(el);
-      if (manual !== null) {
-        if (manual) el.setAttribute('data-svi-bginv', 'true');
-        else el.removeAttribute('data-svi-bginv');
-        return;
-      }
-
-      // v3.3 用户元素规则: 显式保护/强制反色优先于尺寸门槛与亮度判定
-      // v4.3: 'recolor' 局部改色 —— 不走滤镜, 交给背景替换桶引擎只改该元素的浅色部分
-      const erule = firstMatchingElementRule(el, profile.elementRules);
-      if (erule) {
-        if (erule.action === 'protect') {
-          el.removeAttribute('data-svi-bginv');
-        } else if (erule.action === 'recolor') {
+      // v5.0 A13: 覆盖段 (手动结论 + 用户元素规则) 统一经 SOURCES 解析 ——
+      // 本引擎不再自带窄链 (原 manualStateFor(el) + firstMatchingElementRule(el, …) 两处读点
+      // 已收口进 SOURCES)。顺序与原来逐字一致: 元素属性手动结论 → src 键手动结论 → 元素规则
+      // (manualStateFor 本身即"属性 ∪ src 键", 拆成 manualElement + manual 两条来源后顺序不变)。
+      // ctx.src 用 getMediaSrc(el): 与原 manualStateFor 的 src 键回退取值方式相同。
+      let ctxSrc = '';
+      try { ctxSrc = getMediaSrc(el); } catch (e) { ctxSrc = ''; }
+      const cov = resolveStage(el, { src: ctxSrc, elementRules: profile.elementRules }, 'override');
+      if (cov) {
+        if (cov.action === 'recolor') {
+          // 'recolor' 不属 ACTIONS (局部改色由 backgroundReplace 引擎处理), 保持原分支
           try {
             const bgr = window.__svi && window.__svi.engines ? window.__svi.engines.bgReplace : null;
             if (bgr && typeof bgr.partialTag === 'function') bgr.partialTag(el);
           } catch (e) { /* ignore */ }
+        } else if (cov.verdict === 'invert') {
+          ACTIONS.bgInvert.apply(el, null, cov.reason);
         } else {
-          el.setAttribute('data-svi-bginv', 'true');
+          ACTIONS.bgInvert.revert(el);
         }
         return;
       }
@@ -7097,10 +7137,11 @@
     }
 
     decideUrl(url) {
-      // 手动覆盖记忆优先 (host|url)
-      const ov = state.manualOverrides[manualOverrideKey(profileKey(), url)];
-      if (ov === 'invert') return true;
-      if (ov === 'restore') return false;
+      // v5.0 A13: 手动覆盖记忆优先 (host|url) —— 经 SOURCES.manual 统一解析。
+      // el 传 null: manualElement 需要元素, 本路径只有 URL; elementRule 需要元素, 同样得 null。
+      // 结果与原「三行直查 manualOverrides」完全等价。
+      const ovc = resolveStage(null, { src: url }, 'override');
+      if (ovc) return ovc.verdict === 'invert';
 
       if (this.cache.has(url)) return this.cache.get(url);
 
