@@ -58,7 +58,7 @@ Specifically designed to tame **blinding white PowerPoint/PDF lecture slides in 
 
 > **Status: the kernel has landed and its contract is frozen, but the whole feature is OFF by
 > default and this stage changes nothing you can see.** Install this build and nothing looks
-> different — the rendering layer (v6-2) is not written yet.
+> This section is the decider; the renderer is the next section. Each layer has its own switch.
 
 The problem it solves: when one image mixes light areas that *should* be inverted with colour
 content that should not, whole-image inversion gets it wrong either way. Invert a white slide that
