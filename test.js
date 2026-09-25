@@ -949,13 +949,28 @@ function makeTestStore(mock) {
     st.detectBackend = () => 'chrome-sync';
     st.set('big', { blob: 'y'.repeat(9000) });
     st.flush();
-    setTimeout(() => {
+    // 有界轮询替代固定 120ms 等待。为什么必须改:
+    //   分片写入链的每一步都是「在回调里重新排期 1ms」, 而固定等待的到期时间是**从脚本开始**算的。
+    //   只要本文件的同步执行时间超过等待窗口 (新增测试块很容易把它推过线), 事件循环一解阻,
+    //   调度器按到期时间排序会先跑那个已逾期的断言, 再轮到写入链的下一步 —— 用例必挂。
+    //   实测: v6.0 测试块把同步时长推过 120ms 后, 失败率 ~6/10, 且失败信息看起来像产品 bug
+    //   (其实是测试自己在和自己抢时间)。轮询到条件成立即通过、超时才失败: 不变慢, 也没有竞态。
+    const verify = () => {
       assert.strictEqual(st.backend, 'chrome-local', 'quota failure degrades backend to chrome-local');
       assert.strictEqual(st.useChunking, false, 'local backend skips chunking');
       const saved = localArea.get('svi:big');
       assert.ok(saved && JSON.parse(saved).blob.length === 9000, 'failed value rewritten into chrome.storage.local');
       console.log('✓ v3.0 Store quota-degrade regression passed (sync → local fallback)');
-    }, 120);
+    };
+    const deadline = Date.now() + 2000;
+    const poll = () => {
+      const saved = localArea.get('svi:big');
+      const settled = st.backend === 'chrome-local' && !!saved && JSON.parse(saved).blob.length === 9000;
+      if (settled) { verify(); return; }
+      if (Date.now() > deadline) { verify(); return; } // 超时后走同一组断言 → 真实缺陷仍然会红
+      setTimeout(poll, 10);
+    };
+    setTimeout(poll, 10);
   } finally {
     // 清理全局桩 (避免影响其它用例的 chrome 探测)
     setTimeout(() => { try { delete global.chrome; } catch (e) { global.chrome = undefined; } }, 300);
