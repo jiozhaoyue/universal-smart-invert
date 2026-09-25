@@ -627,4 +627,55 @@ assert.deepStrictEqual(svi.effectiveSourceIds('rule'),
 `refreshActionsSection()` 由 `openSettingsModal` 调用。诊断/统计类文案若只在构建时渲染，
 会停留在旧值 —— 与 v4.5 修过的"设置行不回显"是同一类缺陷，**每次新增诊断行都要接进刷新链**。
 
+---
+
+## v5.4 Additions (提前判定契约)
+
+### 1. 视频判定：**只加门，不改默认路径**
+
+`frameSequenceDecision(win, opts)` 返回 `{ whiteFlash, earlySwitch, ... }`，两个门全 false 时
+调用方**必须原样采用单帧判结果**。这是把回归面压到最小的唯一做法 —— 改"整体判定方式"会让
+所有既有视频场景无法逐帧解释。
+
+**两个门的优先级：`earlySwitch` 先判。** 否则"暗→白的真实场景切换"与"转场白闪"在窗口形态上
+完全相同，会被一起压掉。这是实现时纠正过的错（见 implement.md 偏离 1）。
+
+### 2. 两条采样路径**必须共用同一判定函数**
+
+`onFrame`（rVFC 逐帧）与 `tick`（250ms 兜底）在互斥切换时若各用各的判定，结论会抖动。
+`HILStateMachine.detectSequenced()` 是唯一入口。
+
+### 3. 序列窗只在状态机内累积、容量 ≤8、只存数值
+
+热路径（每帧）不得分配对象、不得查布局。窗口用 `push` + `shift` 维护，长度上限固定。
+
+### 4. 动图：**先闸门后付费**，且三个纯函数分离
+
+| 纯函数 | 职责 |
+| :--- | :--- |
+| `animatedProbe(el, opts)` | 廉价闸门。**采样结果由调用方传入**（保持纯函数，不碰 DOM） |
+| `animatedSpectrum(frames, opts)` | 全帧谱三分类。**混合型默认 keep** |
+| `animatedStride(frameCount, cap)` | 分帧步长。**等间隔抽帧，不是"只解前 N 帧"** |
+
+抽帧方式很重要：只解前 N 帧会**系统性偏向"开头是白底"的动图**，而场景切换往往在后面。
+
+### 5. 混合型动图**不做逐帧切换**，且必须如实标注
+
+CSS `filter` / `content:url` 都无法按时序切换。"按多数帧近似"是选项，不是等价物 ——
+面板与 README 都要写明这一点。**不假装能做到**是本项目的硬要求。
+
+### 6. 能力降级必须静默且可观测
+
+`ImageDecoder` 缺失 → 返回 `null`（交回静态判定，行为等于上一版）+ 记一次
+`animDecoderUnavailable` 供面板说明。**绝不抛错**（`analyzeAnimated` 整体包在 try/catch 内，
+且 `typeof ImageDecoder !== 'function'` 是第一条判断）。
+
+### 7. bench 断言的两条经验
+
+- **别断言硬编码的控件数量**：v3.3 的"9 个滑块"断言在本片加两行后假失败。改为
+  「下界 + 关键行标签都在 DOM 里」—— 这才贴近断言的**本意**（滑块没被折叠抽屉藏起来）。
+- **别依赖被前序场景改过的开关**：`StatsManager.count()` 在 `state.statsEnabled === false`
+  时是 no-op，而某个前序场景会把它关掉。断言计数类行为前要在场景内显式打开并还原。
+- **判可见性不要用 `offsetParent`**：对 `position: fixed` 容器内的元素恒为 `null`。
+
 

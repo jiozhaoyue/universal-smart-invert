@@ -198,6 +198,44 @@ asked for. This project consistently avoids the latter.
 - **Export stays an explicit action**: rule packs / backups / fixtures only happen when you click;
 - **Fixtures never enter the repo**: `dev/fixtures/` is gitignored — it contains your own image URLs.
 
+### 12. ⏱ Pre-emptive judging (video frame sequence · animated-image spectrum)
+
+**Video**: judging moves from "single frame" to a **frame-sequence window** (last 3 frames) with
+two gates:
+
+| Gate | Fires when | Effect |
+| :--- | :--- | :--- |
+| **Early switch** | A clear jump crosses the threshold from below (≥ the scene-delta gate) | Switches to white *without* waiting for the next frame — perceptually "the colour is already right when the scene changes" |
+| **No switch on transition flash** | Barely over the threshold, an isolated white frame in the window, no clear jump | Treated as a transition flash and **not** inverted (no more flicker) |
+
+> The **clear-jump gate wins**. A real dark→white scene change and a transition flash look
+> identical frame-locally; only the jump magnitude separates them. This was corrected once during
+> implementation (the first version suppressed genuine switches too).
+
+Both sampling paths (rVFC per-frame / 250 ms fallback poll) **share the same decision function**,
+so the two paths cannot disagree when they hand over. Turning "frame-sequence judging" off
+restores v4.6's single-frame semantics.
+
+**Animated images (GIF / animated WebP / APNG / AVIF)**: previously judged from **one frame** and
+then frozen, so a scene-changing GIF stayed wrong forever. Now:
+
+1. **Cheap gate**: extension/type match, or two samples taken at different times disagree;
+2. Only then pay the cost: `ImageDecoder` decodes **all (evenly strided) frames** into a brightness spectrum;
+3. **Three-way classification**: all-light → invert; all-dark → keep; **mixed → keep by default**.
+
+> **Why mixed keeps by default**: CSS filters **cannot switch over time**. Truly per-frame
+> inversion would mean replaying the GIF on a canvas (expensive, cross-origin-limited). So the
+> default is conservative; "follow the majority of frames" is an option and the panel
+> **states plainly that it is not per-frame switching** — no pretending.
+
+- Two budgets: a frame cap (excess frames are **evenly strided**, not "first N" — that would bias
+  toward GIFs whose opening is white) and a millisecond budget (over budget → conclude from what
+  was decoded);
+- Animated verdicts allow **one bounded re-check** (default after 30 s) — animated images are the
+  only media whose answer can legitimately differ between moments;
+- Without `ImageDecoder`: **silent degradation** to static judging plus one explanatory line in the
+  panel — never an error.
+
 ---
 
 ## 🆕 What's New in v4.6 (Local-First Decisions · Interaction Fixes · Dark-Veil Awareness)

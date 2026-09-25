@@ -1,0 +1,7 @@
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "检查项: 视频热路径 (onFrame/detectSequenced/_seqPush) 是否 O(1) 且零分配; 是否有逐元素 getComputedStyle; 新纯函数是否挂 __svi 且被单测断言真代码; ImageDecoder 是否完全包在能力检测内; 复验 v5.2 Additions 的撤销契约未被破坏。"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "检查项: 动图路径是否复用了既有解码链与 getEvalPrefs, 而没有另起第二套像素统计; frameSequenceDecision 是否被 onFrame 与 tick 两条路径共同调用 (而不是各写一遍)。"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "检查项: 8 个新偏好在 loadState 是否都有规范化与范围钳制; 3 个新 reason 码是否在 REASON_ZH 与面板文案都被消费。"}
+{"file": ".trellis/tasks/09-25-v5-media-governance/prd.md", "reason": "检查项: AC-3 默认零回归需有基线 diff 证据 (视频场景 12/18 等); AC-6 预算需在超限时被兑现 (有可断言路径)。"}
+{"file": ".trellis/tasks/09-25-v5-preload-decide/prd.md", "reason": "逐条核对 R1-R6; 并核对**范围裁决 D2 是否被越界** (不得出现 Range 预取 / MediaSource 钩子)。"}
+{"file": ".trellis/tasks/09-25-v5-preload-decide/design.md", "reason": "检查项: (1) 是否只加了 whiteFlash/earlySwitch 两个门而没有改写默认单帧路径 (D-1); (2) onFrame 与 tick 是否共用同一纯函数 (D-2, 双路径一致); (3) 动图是否先闸门后付费 (D-3); (4) 混合型是否默认 keep 且面板写明"不支持逐帧切换" (D-4, 不得含糊); (5) 动图结论是否可复议且有界 (D-5); (6) 无 ImageDecoder 时行为是否 == v5-3 (D-6)。"}
+{"file": ".trellis/tasks/09-25-v5-preload-decide/implement.md", "reason": "检查项: 两个回滚点 (R1/R2) 的验证是否真实跑过; bench 28a 的"不晚于基线"是否用了可比的测量方式 (避免把抖动当提前); 复选框是否随执行实时勾选; 偏离项是否留痕。"}

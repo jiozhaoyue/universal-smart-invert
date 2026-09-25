@@ -275,6 +275,19 @@
     calibrateAuto: true,       // 阈值自校准**自动收紧** (只收紧; 放松需手动点)
     calibrateMinSamples: 5,    // 触发校准所需的最少修正样本 (1 ~ 50)
     falseInvertRate: 0.3,      // 误反占比阈值 (0.1 ~ 0.9)
+
+    // ===== v5.4 新增偏好: 提前判定 (任务 v5-4) =====
+    frameSequence: true,       // 视频帧序列判定 (滑动窗 + 两个门); false 回退单帧判 (v5.3 语义)
+    frameWindow: 3,            // 滑动窗帧数 (2 ~ 8)
+    sceneDelta: 0.35,          // 场景跃变门 (0.1 ~ 0.9)
+    flashWindowRatio: 0.5,     // 转场白闪门: 窗口内白帧占比低于此值即判为闪光 (0.2 ~ 0.9)
+    flashWhiteSkip: true,      // 转场白闪不切换 (防误触发)
+    animatedDetect: true,      // 动图全帧谱分析 (ImageDecoder 不可用时自动降级)
+    animMixedPolicy: 'keep',   // 混合型动图策略: keep(默认, 不反) | majority(按多数帧近似)
+    animAllLightRatio: 0.9,    // 全浅 / 全深的白帧占比门 (0.6 ~ 1)
+    frameSampleCap: 60,        // 谱分析最多解多少帧 (4 ~ 200; 超出按 stride 抽帧)
+    animDecodeBudgetMs: 40,    // 谱分析毫秒预算 (10 ~ 300; 超限用已解帧出结论)
+    animRecheckMs: 30,         // 动图结论多久后允许复议一次 (秒, 5 ~ 600)
   };
 
   // 运行时状态 (仅存于内存, 每个标签页独立, 绝不写入存储 —— 标签页隔离)
@@ -1021,6 +1034,18 @@
     merged.calibrateAuto = merged.calibrateAuto !== false;
     merged.calibrateMinSamples = Math.round(clampNumber(merged.calibrateMinSamples, 1, 50, 5));
     merged.falseInvertRate = clampNumber(merged.falseInvertRate, 0.1, 0.9, 0.3);
+    // v5.4 字段规范化: 提前判定 (帧序列 / 动图)
+    merged.frameSequence = merged.frameSequence !== false;
+    merged.frameWindow = Math.round(clampNumber(merged.frameWindow, 2, 8, 3));
+    merged.sceneDelta = clampNumber(merged.sceneDelta, 0.1, 0.9, 0.35);
+    merged.flashWindowRatio = clampNumber(merged.flashWindowRatio, 0.2, 0.9, 0.5);
+    merged.flashWhiteSkip = merged.flashWhiteSkip !== false;
+    merged.animatedDetect = merged.animatedDetect !== false;
+    if (['keep', 'majority'].indexOf(merged.animMixedPolicy) === -1) merged.animMixedPolicy = 'keep';
+    merged.animAllLightRatio = clampNumber(merged.animAllLightRatio, 0.6, 1, 0.9);
+    merged.frameSampleCap = Math.round(clampNumber(merged.frameSampleCap, 4, 200, 60));
+    merged.animDecodeBudgetMs = Math.round(clampNumber(merged.animDecodeBudgetMs, 10, 300, 40));
+    merged.animRecheckMs = Math.round(clampNumber(merged.animRecheckMs, 5, 600, 30));
     // 标签页隔离: 运行时状态绝不入库
     delete merged.invertActive;
 
@@ -2753,6 +2778,12 @@
     'transparent-light': '透明底（保持原样）',
     'hidden-rule': '学习规则 · 屏蔽',
     'mask-rule': '学习规则 · 遮罩',
+    // v5.4 动图三条 (面板与分布聚合共用)
+    'animated-light': '动图 · 全帧浅色',
+    'animated-dark': '动图 · 全帧深色',
+    'animated-mixed': '动图 · 混合场景（默认保持原样，不支持逐帧切换）',
+    'animated-empty': '动图 · 未能取到帧',
+    'shape-prior': '形状先验（跨站）',
     skip: '跳过',
   };
 
@@ -5238,6 +5269,40 @@
     }
 
     // 逐帧采样 (rVFC): 白底检测 + 时间线预布防 + 媒体主导
+    // v5.4: 帧序列判定 —— 复用**同一次** detect (不额外采样), 只在窗口给出额外证据时覆盖。
+    //   onFrame (rVFC 逐帧) 与 tick (250ms 兜底) 必须共用本函数, 否则两路互斥切换时结论会抖动。
+    detectSequenced(video) {
+      const r = this.detector.detect(video);
+      if (!r) return null;
+      if (state.frameSequence === false) return r; // 回退开关: 回到单帧判 (v5.3 语义)
+      const win = Math.max(2, Math.min(8, Number(state.frameWindow) || 3));
+      this._seq = this._seq || [];
+      this._seq.push(r.whiteRatio);
+      while (this._seq.length > win) this._seq.shift();
+      let threshold = (state.whiteThreshold || 60) / 100;
+      try {
+        const prof = getSiteProfile();
+        if (typeof prof.whiteThreshold === 'number') threshold = prof.whiteThreshold / 100;
+      } catch (e) { /* ignore */ }
+      const d = frameSequenceDecision(this._seq, {
+        threshold: threshold,
+        sceneDelta: state.sceneDelta,
+        flashRatio: state.flashWindowRatio,
+      });
+      if (!d.ready) return Object.assign({}, r, { seq: d });
+      // 门 1: 转场白闪 → 改判 normal (不切换)
+      if (state.flashWhiteSkip !== false && d.whiteFlash && r.scene === 'white_slide') {
+        StatsManager.count('flashWhiteSkips');
+        return Object.assign({}, r, { scene: 'normal', seq: d, seqNote: 'white-flash' });
+      }
+      // 门 2: 明确在涨的跨阈帧 → 提前判白 (不等下一帧确认)
+      if (d.earlySwitch && r.scene === 'normal') {
+        StatsManager.count('earlySwitches');
+        return Object.assign({}, r, { scene: 'white_slide', seq: d, seqNote: 'early' });
+      }
+      return Object.assign({}, r, { seq: d });
+    }
+
     onFrame(video) {
       if (!video || document.hidden) return;
       if (runtime.siteActive === false) return; // v4.2: 站点电源/定时档挂起闸
@@ -5248,7 +5313,7 @@
       this.applyTimeline(video, runtime.userRejectedScene);
       if (!state.autoDetect || profile.disableVideoAuto || (this.detector && this.detector.isCorsRestricted)) return;
       if (!this.detector) return;
-      const result = this.detector.detect(video);
+      const result = this.detectSequenced(video); // v5.4: 帧序列判定
       if (!result) return;
       this.applySceneResult(result, true);
     }
@@ -5274,7 +5339,7 @@
       }
       if (!this.detector) return;
 
-      const result = this.detector.detect(video);
+      const result = this.detectSequenced(video); // v5.4: 与 onFrame 共用同一判定 (避免两路结论抖动)
       if (!result) {
         this.ui && this.ui.updateStatusBadge();
         return;
@@ -6149,6 +6214,99 @@
     } catch (e) {
       return 0;
     }
+  }
+
+  // ==========================================
+  // 13.5 v5.4 提前判定纯函数 (帧序列 / 动图闸门 / 动图全帧谱)
+  //      design: .trellis/tasks/09-25-v5-preload-decide/design.md §D-1 / §D-3 / §D-4
+  //      三个都是纯函数 (单测契约), 热路径只做"查表 + 复用已有的一次采样", 不引入额外开销。
+  // ==========================================
+
+  // 帧序列判定。单帧判有两个问题:
+  //   (1) 切换滞后 —— 要等帧真的变白才成立, 感知上是"白一下才变暗";
+  //   (2) 转场白闪 —— 转场常有 1~2 帧接近纯白, 单帧判会误触发。
+  // **只加两个门**: 其余情况两个门都返回 false (= 什么都不改), 这是把回归面压到最小的关键。
+  function frameSequenceDecision(win, opts) {
+    const o = opts || {};
+    const threshold = typeof o.threshold === 'number' ? o.threshold : 0.6;
+    const sceneDelta = typeof o.sceneDelta === 'number' ? o.sceneDelta : 0.35;
+    const flashRatio = typeof o.flashRatio === 'number' ? o.flashRatio : 0.5;
+    const earlyTolerance = typeof o.earlyTolerance === 'number' ? o.earlyTolerance : 0.1;
+    const out = { whiteFlash: false, earlySwitch: false, avg: 0, delta: 0, ready: false, whiteCount: 0 };
+    const w = Array.isArray(win) ? win : [];
+    if (w.length < 3) return out; // 至少 3 帧才谈得上"序列"
+    out.ready = true;
+    const last = w[w.length - 1];
+    const prev = w[w.length - 2];
+    out.delta = Math.abs(last - prev);
+    out.avg = w.reduce((a, b) => a + b, 0) / w.length;
+    out.whiteCount = w.filter((x) => x >= threshold).length;
+    // 门 2 (提前切换) **先判** —— 明确的跨阈跃变优先于白闪门。
+    //   否则"暗→白的真实场景切换"会与"转场白闪"撞在同一个窗口形态上被误压掉
+    //   (两者在只看到当前帧时无法区分, 但跃变幅度可以区分)。
+    if (prev < threshold && last >= threshold * (1 - earlyTolerance) && (last - prev) >= sceneDelta) {
+      out.earlySwitch = true;
+    }
+    // 门 1 (转场白闪): 只压**证据薄弱**的白帧 —— 当前帧刚过阈值(落在容忍带内)、窗口内只有它是白的,
+    //   且没发生明确跃变。大跃变的白帧交给门 2 (那是真的场景切换)。
+    if (!out.earlySwitch && out.whiteCount === 1 && (out.whiteCount / w.length) < flashRatio
+      && last >= threshold && last < (threshold + earlyTolerance)) {
+      out.whiteFlash = true;
+    }
+    return out;
+  }
+
+  // 动图闸门 (廉价付费判断)。**保持纯函数**: 多时刻采样的结果由调用方传入,
+  // 本函数不碰 DOM、不采样。
+  const ANIM_EXT_RE = /\.(gif|apng|webp|avif)(\?|#|$)/i;
+
+  function animatedProbe(el, opts) {
+    const o = opts || {};
+    try {
+      if (!el) return { animated: false, reason: 'no-el' };
+      const src = o.src || (typeof getMediaSrc === 'function' ? getMediaSrc(el) : '');
+      if (!src) return { animated: false, reason: 'no-src' };
+      if (/^data:image\/(gif|webp|apng|avif)/i.test(src)) return { animated: true, reason: 'data-uri' };
+      if (ANIM_EXT_RE.test(src)) return { animated: true, reason: 'extension' };
+      const a = o.sampleA;
+      const b = o.sampleB;
+      if (typeof a === 'number' && typeof b === 'number'
+        && Math.abs(a - b) >= (typeof o.deltaThreshold === 'number' ? o.deltaThreshold : 0.15)) {
+        return { animated: true, reason: 'pixel-delta' };
+      }
+      return { animated: false, reason: 'static' };
+    } catch (e) {
+      return { animated: false, reason: 'error' };
+    }
+  }
+
+  // 动图全帧谱三分类 (纯函数)。
+  //   **混合型默认 keep** —— CSS filter / content:url 都无法按时序切换; 要真的逐帧反色得把
+  //   GIF 交给 canvas 逐帧重绘 (成本高、跨域受限)。policy='majority' 时按多数帧近似,
+  //   面板会如实标注"不支持逐帧切换", 不假装能做到。
+  function animatedSpectrum(frames, opts) {
+    const o = opts || {};
+    const threshold = typeof o.threshold === 'number' ? o.threshold : 0.6;
+    const allLight = typeof o.allLightRatio === 'number' ? o.allLightRatio : 0.9;
+    const policy = o.policy === 'majority' ? 'majority' : 'keep';
+    const list = Array.isArray(frames) ? frames : [];
+    const out = { frames: list.length, whiteFrames: 0, ratio: 0, verdict: 'keep', reason: 'animated-mixed' };
+    if (!list.length) { out.reason = 'animated-empty'; return out; }
+    out.whiteFrames = list.filter((x) => x >= threshold).length;
+    out.ratio = out.whiteFrames / list.length;
+    if (out.ratio >= allLight) { out.verdict = 'invert'; out.reason = 'animated-light'; return out; }
+    if (out.ratio <= (1 - allLight)) { out.verdict = 'keep'; out.reason = 'animated-dark'; return out; }
+    out.verdict = (policy === 'majority' && out.ratio >= 0.5) ? 'invert' : 'keep';
+    out.reason = 'animated-mixed';
+    return out;
+  }
+
+  // 分帧采样步长 (纯函数): 帧数超上限时按 stride 抽帧, 而不是只解前 N 帧
+  // (只解前 N 帧会系统性偏向"开头是白底"的 GIF, 但动图的场景切换往往在后面)
+  function animatedStride(frameCount, cap) {
+    const n = Math.max(1, Number(frameCount) || 0);
+    const c = Math.max(1, Number(cap) || 1);
+    return Math.max(1, Math.ceil(n / c));
   }
 
   // ==========================================
@@ -7110,6 +7268,92 @@
     }
 
     // ==========================================
+    // ===== v5.4 动图路径 (design §D-3 / §D-4 / §D-5) =====
+    //   先廉价闸门, 命中才付全帧谱的代价。ImageDecoder 不可用 → 静默降级 (返回 null,
+    //   行为与 v5.3 完全一致), 并记一次 animDecoderUnavailable 供面板说明。
+    async analyzeAnimated(img, src) {
+      try {
+        if (state.animatedDetect === false) return null;
+        if (typeof ImageDecoder !== 'function') {
+          StatsManager.count('animDecoderUnavailable');
+          return null;
+        }
+        this.animDecisions = this.animDecisions || new Map();
+        // 已判过的动图在 animRecheckMs 内不重解 —— 动图是唯一"同一 src 不同时刻答案可能不同"
+        // 的媒体, 所以允许**有界复议一次** (过期后重解), 但绝不无界重算。
+        const prev = this.animDecisions.get(src);
+        const recheckMs = Math.max(5, Math.min(600, Number(state.animRecheckMs) || 30)) * 1000;
+        if (prev && Date.now() - prev.at < recheckMs) {
+          return { decision: prev.verdict, reason: prev.reason };
+        }
+        const probe = animatedProbe(img, { src: src });
+        if (!probe.animated) return null;
+        const blob = await gmFetchBlob(src);
+        if (!blob) return null;
+        const ratios = await this.decodeAnimatedSpectrum(blob);
+        if (!ratios || !ratios.length) return null;
+        const spec = animatedSpectrum(ratios, {
+          threshold: (state.whiteThreshold || 60) / 100,
+          allLightRatio: state.animAllLightRatio,
+          policy: state.animMixedPolicy,
+        });
+        this.animDecisions.set(src, { verdict: spec.verdict === 'invert', reason: spec.reason, at: Date.now() });
+        StatsManager.count('animDecoded');
+        return { decision: spec.verdict === 'invert', reason: spec.reason, spec: spec, probe: probe.reason };
+      } catch (e) {
+        return null;
+      }
+    }
+
+    // 解全帧谱。双预算: 帧数上限 (stride 抽帧, 不是只解前 N 帧) + 毫秒上限。
+    async decodeAnimatedSpectrum(blob) {
+      const cap = Math.max(4, Math.min(200, Number(state.frameSampleCap) || 60));
+      const budget = Math.max(10, Math.min(300, Number(state.animDecodeBudgetMs) || 40));
+      const t0 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+      const now = () => ((typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now());
+      let decoder = null;
+      const ratios = [];
+      try {
+        const type = blob.type || 'image/gif';
+        const buf = await blob.arrayBuffer();
+        decoder = new ImageDecoder({ data: buf, type: type });
+        if (decoder.tracks && decoder.tracks.ready) {
+          try { await decoder.tracks.ready; } catch (e) { /* ignore */ }
+        }
+        const track = decoder.tracks && decoder.tracks[0];
+        const count = (track && track.frameCount) || 0;
+        if (!count) return null;
+        const stride = animatedStride(count, cap);
+        const canvas = document.createElement('canvas');
+        canvas.width = 16;
+        canvas.height = 16;
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        const prefs = getEvalPrefs();
+        for (let i = 0; i < count; i += stride) {
+          if (now() - t0 > budget) break; // 超预算: 用已解帧出结论 (结果仍可用, 只是采样更少)
+          let frame = null;
+          try {
+            const res = await decoder.decode({ frameIndex: i });
+            frame = res && res.image;
+            if (!frame) continue;
+            ctx.drawImage(frame, 0, 0, 16, 16);
+            const data = ctx.getImageData(0, 0, 16, 16).data;
+            const st = evaluateImagePixelStats(data, prefs);
+            if (st && typeof st.lightRatio === 'number') ratios.push(st.lightRatio);
+          } catch (e) {
+            /* 单帧解码失败跳过, 不影响其余帧 */
+          } finally {
+            try { if (frame && typeof frame.close === 'function') frame.close(); } catch (e2) { /* ignore */ }
+          }
+        }
+      } catch (e) {
+        return null;
+      } finally {
+        try { if (decoder && typeof decoder.close === 'function') decoder.close(); } catch (e) { /* ignore */ }
+      }
+      return ratios;
+    }
+
     // v3.1 统一决策管线 (R1/R2/R4) —— 唯一决策函数, 全部处理入口共用。
     // 优先级: 手动覆盖 > 元素规则(v3.3) > 学习规则 > 种子保护/强制反色 > 小元素门 + 策略门 > 像素分析。
     // decide-once: 决策一经达成即冻结 (decisionBySrc), 仅 clearCacheAndRescan 显式重置。
@@ -7230,10 +7474,22 @@
         }
       }
 
+      // 7.5 v5.4 动图路径: 先廉价闸门, 命中才付全帧谱的代价。
+      //     位置在"档 B 止步门"之后 —— 动图需要取字节, 不参与本地优先的保守判定;
+      //     ImageDecoder 不可用时静默降级为静态判定 (返回 null), 行为与 v5.3 一致。
+      const anim = await this.analyzeAnimated(img, src);
+      if (anim) {
+        if (this.cache.size >= this.maxCacheSize) {
+          this.cache.delete(this.cache.keys().next().value);
+        }
+        this.cache.set(src, anim.decision);
+        this.applyDecision(img, src, this.recordDecision(src, anim.decision ? 'invert' : 'keep', anim.reason));
+        return;
+      }
+
       // 8. 像素分析 (结论缓存命中 → 直接落决策, 不再重算; in-flight 去重: 同 src
       //    并发入口共享一次分析 —— eager/IO/补扫同时触达同一图片时绝不重复解码)
-      if (this.cache.has(src)) {
-        const isLight = this.cache.get(src);
+      if (this.cache.has(src)) {        const isLight = this.cache.get(src);
         if (isLight && maskedVeto()) return; // v4.6: 遮罩否决 (缓存像素判定为亮时仍需过蒙层上下文)
         this.applyDecision(img, src, this.recordDecision(src, isLight ? 'invert' : 'keep', 'pixel'));
         return;
@@ -10109,6 +10365,44 @@
       this.rowSyncs.push(() => tolRow.sync());
 
       sec.add(ui.infoLine('特效以替换图方式呈现：悬停查看原图，Alt+点击临时还原，Alt+Shift+拖拽框选区域。'));
+
+      // ===== v5.4 动图全帧谱 (GIF / 动画 WebP / APNG / AVIF) =====
+      const animSupported = (typeof ImageDecoder === 'function');
+      if (!animSupported) {
+        sec.add(ui.infoLine('本浏览环境不支持 ImageDecoder，动图将按静态图判定（取当前显示的那一帧）。'));
+      }
+      const animRow = ui.toggleRow('动图全帧谱分析',
+        '对 GIF / 动画 WebP / APNG 解出全部（抽样）帧算亮度谱，再判断整段动画该不该反色。'
+        + '此前动图只按一帧判死，换景后会一直错。'
+        + (animSupported ? '' : '（当前环境不支持，此项无效）'),
+        () => state.animatedDetect !== false,
+        (on) => { state.animatedDetect = !!on; savePrefs(); showToast(on ? '动图谱分析已开启' : '动图谱分析已关闭'); });
+      sec.add(animRow);
+      this.rowSyncs.push(() => animRow.sync());
+
+      const mixedRow = ui.selectRow('混合型动图',
+        '整段动画里深浅场景都有的情况。⚠ CSS 滤镜**无法按时序切换**，所以默认保持原样；「按多数帧」只是一种近似，不是逐帧反色',
+        [
+          { v: 'keep', label: '保持原样', describe: '推荐：不做半吊子的近似。' },
+          { v: 'majority', label: '按多数帧近似', describe: '白帧占多数才反色 —— 整段会一起反，不会跟着动图切。' },
+        ],
+        () => state.animMixedPolicy,
+        (v) => { state.animMixedPolicy = v; savePrefs(); });
+      sec.add(mixedRow);
+      this.rowSyncs.push(() => mixedRow.sync());
+
+      const animRatioRow = ui.sliderRow('全浅判定门', '白帧占比达到此值才算"整段都是浅色动画"',
+        () => state.animAllLightRatio, (v) => { state.animAllLightRatio = v; savePrefs(); },
+        0.6, 1, 0.05, '');
+      sec.add(animRatioRow);
+      this.rowSyncs.push(() => animRatioRow.sync());
+
+      const animCapRow = ui.sliderRow('谱分析帧上限', '最多解多少帧（超出按等间隔抽帧，不是只解开头几帧）',
+        () => state.frameSampleCap, (v) => { state.frameSampleCap = Math.round(v); savePrefs(); },
+        4, 200, 4, '帧');
+      sec.add(animCapRow);
+      this.rowSyncs.push(() => animCapRow.sync());
+
       return sec.el;
     }
 
@@ -10211,6 +10505,34 @@
         });
       sec.add(timelineRow);
       this.rowSyncs.push(() => timelineRow.sync());
+
+      // ===== v5.4 帧序列判定 (提前切换 + 转场白闪门) =====
+      const seqRow = ui.toggleRow('帧序列判定',
+        '用最近几帧的滑动窗做判定：① 转场白闪不再误触发反色；② 明确在涨的跨阈帧提前一帧切换（感知上"场景一变颜色就对了"）。关闭则回到单帧判定',
+        () => state.frameSequence !== false,
+        (on) => { state.frameSequence = !!on; savePrefs(); showToast(on ? '帧序列判定已开启' : '帧序列判定已关闭（回到单帧判定）'); });
+      sec.add(seqRow);
+      this.rowSyncs.push(() => seqRow.sync());
+
+      const seqWinRow = ui.sliderRow('序列窗帧数', '窗口越大越稳、反应越慢（至少 3 帧才启用两个门）',
+        () => state.frameWindow, (v) => { state.frameWindow = Math.round(v); savePrefs(); },
+        2, 8, 1, '帧');
+      sec.add(seqWinRow);
+      this.rowSyncs.push(() => seqWinRow.sync());
+
+      const sceneDeltaRow = ui.sliderRow('场景跃变门', '相邻帧白占比变化超过此值才算"场景变了"（提前切换的依据）',
+        () => state.sceneDelta, (v) => { state.sceneDelta = v; savePrefs(); },
+        0.1, 0.9, 0.05, '');
+      sec.add(sceneDeltaRow);
+      this.rowSyncs.push(() => sceneDeltaRow.sync());
+
+      const flashRow = ui.toggleRow('转场白闪不切换',
+        '转场常有一两帧接近纯白：窗口内白帧占比不足时判为闪光，不触发反色（避免一闪一闪）',
+        () => state.flashWhiteSkip !== false,
+        (on) => { state.flashWhiteSkip = !!on; savePrefs(); showToast(on ? '转场白闪门已开启' : '转场白闪门已关闭'); });
+      sec.add(flashRow);
+      this.rowSyncs.push(() => flashRow.sync());
+
       return sec.el;
     }
 
@@ -12668,6 +12990,11 @@
     sourceDistribution,
     mergeRulesInto,
     maybeAutoCalibrate,
+    // v5.4 提前判定契约 (单测契约)
+    frameSequenceDecision,
+    animatedProbe,
+    animatedSpectrum,
+    animatedStride,
     ImageInvertEngine,
     // v3.2 纯函数导出 (单测契约): 视频画面调节滤镜链构建
     buildVideoTuneFilter,

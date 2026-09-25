@@ -2017,13 +2017,22 @@ async function main() {
         return {
           section: true,
           sliders: sec.querySelectorAll('input[type="range"]').length,
+          // v5.4: 断言改为"下界 + 全部可见"而不是硬编码数量 ——
+          // 硬编码数量会在每次新增设置行时假失败, 而这条断言的**本意**是
+          // "滑块没有被折叠抽屉藏起来" (v3.3 accordion dissolved)。
+          // v5.4: 断言改为「下界 + 关键行标签都在」而不是硬编码数量 ——
+          // 硬编码数量会在每次新增设置行时假失败(v5.4 加了两行帧序列), 而这条断言的**本意**是
+          // "滑块没有被折叠抽屉藏起来"(v3.3 accordion dissolved), 用标签在不在更贴本意也更稳。
+          // 注: 不判可见性 —— 视频区块在「全局」页签, 未切到该页签时 rect 高度为 0。
+          hasTuneLabels: ['亮度', '对比度', '饱和度', '暖色', '黑白'].every((t) => sec.textContent.indexOf(t) >= 0),
           presets: ['护眼', '夜间', '鲜艳', '还原'].map((t) => !!Array.from(sec.querySelectorAll('button')).find((b) => b.textContent === t)),
         };
       })()`,
       returnByValue: true
     })).result.value;
     assert.strictEqual(tuneOpen.section, true, '视频画面调节 section must exist');
-    assert.strictEqual(tuneOpen.sliders, 9, 'video section must expose 5 tune + 4 algorithm sliders (v3.3 accordion dissolved)');
+    assert.ok(tuneOpen.sliders >= 9, 'video section must expose at least the 5 tune + 4 algorithm sliders (v3.3 accordion dissolved), got ' + tuneOpen.sliders);
+    assert.strictEqual(tuneOpen.hasTuneLabels, true, '5 个画面调节行的标签必须都在 DOM 里 (未被折叠抽屉隐藏)');
     assert.deepStrictEqual(tuneOpen.presets, [true, true, true, true], 'preset buttons 护眼/夜间/鲜艳/还原 present');
 
     const tuneEye = (await sendCdp('Runtime.evaluate', {
@@ -2857,6 +2866,84 @@ async function main() {
     assert.strictEqual(dl2.profileLum, dl2.ovLum, '站点档案必须透传校准后的阈值 (否则写了也不生效)');
     assert.strictEqual(dl2.resetOk, true, '恢复默认返回 true');
     assert.strictEqual(dl2.afterReset, false, '恢复后站点覆盖里不再有 imgLumCutoff');
+
+    // ============================================================
+    // Scenario 28 (v5.4): 提前判定 (帧序列两个门 / 动图闸门与降级)
+    //   - 帧序列: 状态机方法存在 + 两个门的语义 (跃变优先于白闪)
+    //   - 动图: 无 ImageDecoder 时静默降级不抛错; 闸门不误伤静态图
+    // ============================================================
+    console.log('[Test] Scenario 28: v5.4 pre-decide (frame sequence / animated) ...');
+
+    const fs1 = await evalInPageAsync(`(() => {
+      const svi = window.__svi;
+      const hil = svi.engines.hil;
+      const o = { threshold: 0.6, sceneDelta: 0.35, flashRatio: 0.5 };
+      const dJump = svi.frameSequenceDecision([0.1, 0.1, 0.9], o);
+      const dFlash = svi.frameSequenceDecision([0.3, 0.45, 0.62], o);
+      const dStable = svi.frameSequenceDecision([0.9, 0.9, 0.9], o);
+      return {
+        hasMethod: !!(hil && typeof hil.detectSequenced === 'function'),
+        defaultOn: svi.prefs.frameSequence !== false,
+        jumpEarly: dJump.earlySwitch, jumpFlash: dJump.whiteFlash,
+        flashFlag: dFlash.whiteFlash, flashEarly: dFlash.earlySwitch,
+        stableBoth: dStable.earlySwitch || dStable.whiteFlash,
+      };
+    })()`);
+    assert.strictEqual(fs1.hasMethod, true, 'HILStateMachine.detectSequenced 必须存在 (onFrame 与 tick 共用同一判定)');
+    assert.strictEqual(fs1.defaultOn, true, '帧序列判定默认开');
+    assert.strictEqual(fs1.jumpEarly, true, '明确跃变 → 提前切换');
+    assert.strictEqual(fs1.jumpFlash, false, '跃变优先: 真场景切换不得被白闪门压掉');
+    assert.strictEqual(fs1.flashFlag, true, '孤立白帧 → 转场白闪');
+    assert.strictEqual(fs1.flashEarly, false, '白闪不构成提前切换');
+    assert.strictEqual(fs1.stableBoth, false, '稳定态两个门都不得触发 (默认路径不改)');
+
+    const an1 = await evalInPageAsync(`(async () => {
+      const svi = window.__svi;
+      const eng = svi.engines.image;
+      const before = (svi.engines.hil && svi.stats.counters && svi.stats.counters.animDecoderUnavailable) || 0;
+      const savedStats = svi.prefs.statsEnabled;
+      svi.prefs.statsEnabled = true; // 前序场景可能关掉了统计; count() 在关闭时是 no-op
+      const c0 = (svi.stats.counters || {}).animDecoderUnavailable || 0;
+      const saved = window.ImageDecoder;
+      let r = 'unset';
+      let threw = false;
+      let typeAfter = '';
+      window.ImageDecoder = undefined; // 模拟不支持该 API 的浏览器
+      try {
+        typeAfter = typeof ImageDecoder;
+        r = await eng.analyzeAnimated(document.createElement('img'), 'https://x.test/a.gif');
+      }
+      catch (e) { threw = true; r = 'ERR:' + (e && e.message); }
+      const c1 = (svi.stats.counters || {}).animDecoderUnavailable || 0;
+      window.ImageDecoder = saved;
+      svi.prefs.statsEnabled = savedStats;
+      return {
+        r: (r === null ? null : String(r)), threw, c0, c1, supported: typeof saved === 'function',
+        typeAfter, hasMethod: typeof eng.analyzeAnimated === 'function',
+        statsEnabled: savedStats, animatedDetect: svi.prefs.animatedDetect,
+      };
+    })()`);
+    assert.strictEqual(an1.threw, false, '无 ImageDecoder 时不得抛错 (静默降级)');
+    assert.strictEqual(an1.r, null, '无 ImageDecoder 时返回 null → 交给静态判定, 行为与 v5.3 一致');
+    assert.ok(an1.c1 > an1.c0, '必须记一次 animDecoderUnavailable (面板要据此说明); probe=' + JSON.stringify(an1));
+
+    const an2 = await evalInPageAsync(`(() => {
+      const svi = window.__svi;
+      return {
+        staticPng: svi.animatedProbe({}, { src: 'https://x.test/a.png' }).animated,
+        gif: svi.animatedProbe({}, { src: 'https://x.test/a.gif' }).animated,
+        pngDelta: svi.animatedProbe({}, { src: 'https://x.test/a.png', sampleA: 0.1, sampleB: 0.9 }).animated,
+        mixed: svi.animatedSpectrum([0.9, 0.9, 0.1, 0.1, 0.1], { threshold: 0.6, allLightRatio: 0.9 }).verdict,
+        light: svi.animatedSpectrum([0.9, 0.9, 0.95], { threshold: 0.6, allLightRatio: 0.9 }).verdict,
+        stride: svi.animatedStride(1000, 60),
+      };
+    })()`);
+    assert.strictEqual(an2.staticPng, false, '静态 png 不得进动图重路径');
+    assert.strictEqual(an2.gif, true, 'gif 进重路径');
+    assert.strictEqual(an2.pngDelta, true, '后缀不可靠时用像素门兜底');
+    assert.strictEqual(an2.mixed, 'keep', '混合型动图默认保持原样 (不假装能逐帧切换)');
+    assert.strictEqual(an2.light, 'invert', '全浅动图反色');
+    assert.strictEqual(an2.stride, 17, '1000 帧抽 60 → 步长 17 (抽帧覆盖全段而不是只解开头)');
 
     console.log('\n🎉 ALL BROWSER AUTOMATION TESTS PASSED 100% SUCCESFULLY!\n');
 

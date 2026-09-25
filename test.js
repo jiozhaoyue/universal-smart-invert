@@ -2605,4 +2605,120 @@ setTimeout(() => {
   console.log('✓ v5.3 fixture 回归通过: ' + checked + ' 条用户教过的结论被当前代码复现 (跳过 ' + skipped + ' 条, 其中跨 host 的手动条目无法在 Node 桩中复现)');
 })();
 
+// ============================================================
+// v5.4 单测 (帧序列两个门 / 动图闸门 / 全帧谱三分类 / 分帧步长)
+// 契约来源: .trellis/tasks/09-25-v5-preload-decide/design.md §D-1 / §D-3 / §D-4
+// ============================================================
+(function () {
+  const { frameSequenceDecision, animatedProbe, animatedSpectrum, animatedStride } = svi;
+  const TH = 0.6; // threshold
+  const OPT = { threshold: TH, sceneDelta: 0.35, flashRatio: 0.5 };
+
+  // ---- 1. 帧序列: 窗口未满一律"什么都不改" ----
+  for (const w of [[], [0.9], [0.9, 0.9]]) {
+    const d = frameSequenceDecision(w, OPT);
+    assert.strictEqual(d.ready, false, '窗口 <3 帧必须 not ready: ' + JSON.stringify(w));
+    assert.strictEqual(d.whiteFlash, false, 'not ready 时不得报白闪');
+    assert.strictEqual(d.earlySwitch, false, 'not ready 时不得报提前切换');
+  }
+  assert.strictEqual(frameSequenceDecision(null, OPT).ready, false, 'null 窗口安全');
+  assert.strictEqual(frameSequenceDecision('nope', OPT).ready, false, '非数组窗口安全');
+
+  // ---- 2. 稳定态: 两个门都不得触发 (这是"默认路径不改"的核心保证) ----
+  for (const w of [[0.1, 0.1, 0.1], [0.9, 0.9, 0.9], [0.5, 0.5, 0.5], [0.95, 0.9, 0.92]]) {
+    const d = frameSequenceDecision(w, OPT);
+    assert.strictEqual(d.ready, true, 'ready');
+    assert.strictEqual(d.whiteFlash, false, '稳定态不得报白闪: ' + JSON.stringify(w));
+    assert.strictEqual(d.earlySwitch, false, '稳定态不得报提前切换: ' + JSON.stringify(w));
+  }
+
+  // ---- 3. 明确跃变 (暗→白) → 提前切换, 且**不得**被白闪门压掉 ----
+  const jump = frameSequenceDecision([0.1, 0.1, 0.9], OPT);
+  assert.strictEqual(jump.earlySwitch, true, '大跃变必须提前切换');
+  assert.strictEqual(jump.whiteFlash, false, '大跃变是真场景切换, 不得被误判为转场白闪 (两者形态相同, 靠跃变幅度区分)');
+  assert.strictEqual(jump.delta, 0.8, 'delta 计算正确');
+  const jump2 = frameSequenceDecision([0.2, 0.3, 0.95], OPT);
+  assert.strictEqual(jump2.earlySwitch, true, '逐帧爬升到白也算明确跃变');
+
+  // 容忍带: 明确在涨但还没到满阈值 → 提前判白 (这是"提前一帧"的来源)
+  const earlyBand = frameSequenceDecision([0.1, 0.1, 0.55], OPT);
+  assert.strictEqual(earlyBand.earlySwitch, true, '跃变达门且越过容忍带下沿 → 提前切换 (0.55 ≥ 0.6×0.9)');
+  const notYet = frameSequenceDecision([0.1, 0.1, 0.5], OPT);
+  assert.strictEqual(notYet.earlySwitch, false, '未越过容忍带下沿 (0.5 < 0.54) → 不提前');
+
+  // ---- 4. 转场白闪: 证据薄弱的白帧被压掉 ----
+  // 关键: 要构造"没有明确跃变"的孤立白帧 —— 跃变 ≥ sceneDelta 时 earlySwitch 会接管 (那是真切换)
+  const flash = frameSequenceDecision([0.3, 0.45, 0.62], OPT);
+  assert.strictEqual(flash.earlySwitch, false, '跃变 0.17 < sceneDelta 0.35 → 不构成提前切换');
+  assert.strictEqual(flash.whiteFlash, true, '刚过阈值 + 孤立白帧 + 无明确跃变 → 判为转场白闪');
+  // 窗口里不止一帧白 → 不是闪光
+  const twoWhite = frameSequenceDecision([0.9, 0.45, 0.62], OPT);
+  assert.strictEqual(twoWhite.whiteFlash, false, '窗口内已有别的白帧 → 不是孤立白闪');
+  // 白但已在窗口里稳定 → 不压
+  const stableWhite = frameSequenceDecision([0.62, 0.62, 0.62], OPT);
+  assert.strictEqual(stableWhite.whiteFlash, false, '持续的白不是闪光');
+
+  // ---- 5. 动图闸门 (纯函数: 采样由调用方给) ----
+  assert.strictEqual(animatedProbe(null).animated, false, 'null 元素');
+  assert.strictEqual(animatedProbe({}, { src: '' }).animated, false, '无 src');
+  assert.strictEqual(animatedProbe({}, { src: 'https://x.test/a.gif' }).animated, true, '扩展名门: gif');
+  assert.strictEqual(animatedProbe({}, { src: 'https://x.test/a.webp?v=2' }).animated, true, '扩展名门: webp 带查询串');
+  assert.strictEqual(animatedProbe({}, { src: 'https://x.test/a.apng' }).animated, true, '扩展名门: apng');
+  assert.strictEqual(animatedProbe({}, { src: 'data:image/gif;base64,AAAA' }).animated, true, 'data URI 门');
+  assert.strictEqual(animatedProbe({}, { src: 'https://x.test/a.png' }).animated, false, '静态 png 不进重路径');
+  assert.strictEqual(animatedProbe({}, { src: 'https://x.test/a.png', sampleA: 0.1, sampleB: 0.9 }).animated, true,
+    '像素门: 两时刻采样差异超阈 → 疑似动图 (后缀不可靠时兜底)');
+  assert.strictEqual(animatedProbe({}, { src: 'https://x.test/a.png', sampleA: 0.5, sampleB: 0.52 }).animated, false,
+    '像素门: 差异不足 → 静态');
+  assert.strictEqual(animatedProbe({}, { src: 'https://x.test/a.gif' }).reason, 'extension', '闸门给出原因');
+
+  // ---- 6. 全帧谱三分类 ----
+  const spAllLight = animatedSpectrum([0.9, 0.95, 0.92, 0.88], { threshold: TH, allLightRatio: 0.9 });
+  assert.strictEqual(spAllLight.verdict, 'invert', '全浅 → 反色');
+  assert.strictEqual(spAllLight.reason, 'animated-light', 'reason=animated-light');
+  assert.strictEqual(spAllLight.frames, 4, '帧数');
+  assert.strictEqual(spAllLight.whiteFrames, 4, '白帧数');
+  assert.strictEqual(spAllLight.ratio, 1, '白帧占比');
+
+  const spAllDark = animatedSpectrum([0.1, 0.2, 0.05, 0.3], { threshold: TH, allLightRatio: 0.9 });
+  assert.strictEqual(spAllDark.verdict, 'keep', '全深 → 保持原样');
+  assert.strictEqual(spAllDark.reason, 'animated-dark', 'reason=animated-dark');
+
+  const spMixed = animatedSpectrum([0.9, 0.9, 0.1, 0.1, 0.1], { threshold: TH, allLightRatio: 0.9 });
+  assert.strictEqual(spMixed.ratio, 0.4, '混合型白帧占比 0.4');
+  assert.strictEqual(spMixed.verdict, 'keep', '混合型**默认不反** (CSS 滤镜无法按时序切换, 不做半吊子近似)');
+  assert.strictEqual(spMixed.reason, 'animated-mixed', 'reason=animated-mixed');
+  // majority 策略: 按多数帧近似 (且面板如实标注这不是逐帧切换)
+  const spMajority = animatedSpectrum([0.9, 0.9, 0.9, 0.1, 0.2], { threshold: TH, allLightRatio: 0.9, policy: 'majority' });
+  assert.strictEqual(spMajority.verdict, 'invert', 'majority 且白帧占多数 → 反色');
+  assert.strictEqual(spMajority.reason, 'animated-mixed', '仍是 mixed (策略不改变"这是混合型"的事实)');
+  const spMajorityMinor = animatedSpectrum([0.9, 0.1, 0.1, 0.2], { threshold: TH, allLightRatio: 0.9, policy: 'majority' });
+  assert.strictEqual(spMajorityMinor.verdict, 'keep', 'majority 但白帧占少数 → 保持原样');
+
+  // 边界: 恰好等于 allLightRatio
+  const spEdge = animatedSpectrum([0.9, 0.9, 0.9, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1], { threshold: TH, allLightRatio: 0.9 });
+  assert.strictEqual(spEdge.ratio, 0.3, '边界用例占比 0.3');
+  const spEdge2 = animatedSpectrum(Array(9).fill(0.9).concat([0.1]), { threshold: TH, allLightRatio: 0.9 });
+  assert.strictEqual(spEdge2.ratio, 0.9, '恰好 0.9');
+  assert.strictEqual(spEdge2.verdict, 'invert', '恰好等于门 → 全浅 (闭区间)');
+
+  assert.strictEqual(animatedSpectrum([], {}).reason, 'animated-empty', '空帧 → animated-empty');
+  assert.strictEqual(animatedSpectrum([], {}).verdict, 'keep', '空帧不给反色');
+
+  // ---- 7. 分帧步长 (不是"只解前 N 帧") ----
+  assert.strictEqual(animatedStride(30, 60), 1, '帧数未超上限 → 步长 1');
+  assert.strictEqual(animatedStride(120, 60), 2, '120 帧抽 60 → 步长 2');
+  assert.strictEqual(animatedStride(1000, 60), 17, '1000 帧抽 60 → 步长 17');
+  assert.strictEqual(animatedStride(0, 60), 1, '0 帧安全');
+  assert.strictEqual(animatedStride(5, 0), 5, 'cap=0 时按 1 处理 (不除零)');
+  // 抽帧覆盖全段而不是只取开头
+  const stride = animatedStride(120, 60);
+  const picked = [];
+  for (let i = 0; i < 120; i += stride) picked.push(i);
+  assert.ok(picked.length <= 60, '抽帧数不超过上限');
+  assert.ok(picked[picked.length - 1] > 100, '抽帧必须覆盖到动画后段 (而不是只解开头), got ' + picked[picked.length - 1]);
+
+  console.log('✓ v5.4 unit tests passed: 帧序列两个门(含跃变优先于白闪)/动图闸门/全帧谱三分类(混合型默认不反)/分帧步长覆盖全段');
+})();
+
 

@@ -1,0 +1,9 @@
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "编码纪律权威来源。本片重点: 视频检测在热路径上 (rVFC 逐帧), 新增逻辑必须 O(1) 且零分配压力; 禁止在热路径引入逐元素 getComputedStyle 或强制布局; 新纯函数 (frameSequenceDecision / animatedSpectrum / animatedProbe) 必须挂 __svi 并单测; ImageDecoder 代码必须包在能力检测内。另见 v5.0 Additions「Action Registry 契约」(reason 码需进 REASON_ZH)。"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "本片要新增第二条动图判定路径, 极易与既有 analyzeSrc 像素链重复。该指南用于确认动图路径是"闸门 + 复用现有解码链取字节"而不是另写一套解码。"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "本片新增 8 个偏好 + 3 个 reason 码, 会穿透「偏好 → 检测 → 决策 → 原因码映射(v5-2) → 分布聚合(v5-3) → 面板」多层。用于逐层校验消费方。"}
+{"file": ".trellis/tasks/09-25-v5-media-governance/prd.md", "reason": "父任务 AC-3「默认零回归」与 AC-6「预算必须被兑现」为本片的硬约束; 已裁决项 D2 明确排除带外预解码与 MSE 钩子 —— 本片不得实现它们。"}
+{"file": ".trellis/tasks/09-25-v5-preload-decide/prd.md", "reason": "本片需求 R1-R6。注意 D2 裁决把范围钉在「帧序列提前切换」上, 本片不得越界到带外预解码。"}
+{"file": ".trellis/tasks/09-25-v5-preload-decide/design.md", "reason": "本片技术设计。D-1 只加两个门 (whiteFlash / earlySwitch) 不改默认路径 —— 这是把回归面压到最小的关键; D-3 分级付费; D-4 混合型默认不反且如实标注无法逐帧切换; D-5 动图结论可复议一次; D-6 能力降级。"}
+{"file": ".trellis/tasks/09-25-v5-review-undo/prd.md", "reason": "下游消费方: 新增的 animated-* reason 码必须进 REASON_ZH, 否则「本页已处理」列表会显示英文原码。"}
+{"file": ".trellis/tasks/09-25-v5-data-loop/prd.md", "reason": "下游消费方: 新增 reason 码必须被 sourceDistribution 聚合覆盖 (按 reason 聚合是自动的, 但面板文案需要中文)。"}
+{"file": ".trellis/tasks/09-25-v5-mask-guard/prd.md", "reason": "下游消费方: v5-5 的 pending 遮罩挂在"判定完成"事件上 —— 本片的 earlySwitch 会让遮罩期更短, 两者需同批次验证语义一致。"}
