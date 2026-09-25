@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 15
+- **Total Sessions**: 16
 - **Last Active**: 2026-09-26
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~482 | Active |
+| `journal-1.md` | ~504 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 16 | 2026-09-26 | v6-3 完成: 纠正与自校准数据回路 (一次点击翻转 + 掩码差分) | `f7a63e9` | `main` |
 | 15 | 2026-09-26 | v6-2 完成: 部分反色渲染层 (backdrop 覆盖层 + 位图/矢量掩码) | `9d58bd0`, `1df8c4a` | `main` |
 | 14 | 2026-09-25 | v6-1 完成: 自动区域分割内核 (掩码契约冻结) + 阶段 3~8 落地 | `f12f769`, `41118f1`, `8bbc3bc`, `5ad3beb` | `main` |
 | 13 | 2026-09-25 | v5 页面媒体治理层结案: Action Registry + 5 子任务全部完成并归档 | `a167856`, `f56a048`, `48c16e5`, `0604e5c`, `518ceed`, `d0c61fc`, `db98f8f` | `main` |
