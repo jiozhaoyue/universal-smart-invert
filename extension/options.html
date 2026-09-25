@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>智能反色 · 设置</title>
+  <style>
+    /* 构建时由 scripts/build-extension.js 从用户脚本的 v6.4-TOKENS-START/END 块逐字注入。
+       绝不要在这里手写颜色 —— 三处 token 的逐字节一致性由 test.js 把关。 */
+    /* ==========================================
+           v6.4 设计 token —— **全仓唯一真源**（用户 2026-09-26 裁决: 照搬 Dark Reader 深青调）
+           三处消费点: 用户脚本内嵌面板 / 扩展 popup / 扩展 options 页。
+           后两者由 scripts/build-extension.js 在构建时把本块**逐字注入** HTML 产物,
+           三处一致性由 test.js 的逐字节校验把关 —— 受"单文件真源"约束, 这是唯一可行的同源机制。
+           取色来源: PRD v6-4 R7 的 Dark Reader theme.less 实读表 (逐值照搬, 未自行调色)。
+           禁止在别处再定义颜色字面量: 面板 CSS 里出现任何 #hex / rgba(...) 都视为契约漂移
+           (test.js 有断言把关)。
+           ========================================== */
+        /* —— DR 颜色角色 (逐值照搬) —— */
+        --svi-bg: #141e24;              /* 底色 */
+        --svi-fg: #53a1b3;              /* 前景 / 主强调 */
+        --svi-ctl-bg: #141e24;          /* 控件底 */
+        --svi-ctl-hover: #193945;       /* 控件悬停 */
+        --svi-ctl-active: #316e7d;      /* 控件激活 */
+        --svi-input-fg: #53a1b3;        /* 输入前景 */
+        --svi-input-active: #ffffff;    /* 输入激活前景 */
+        --svi-input-ph: #316e7d;        /* 输入占位 */
+        --svi-border: #316e7d;          /* 描边 */
+        --svi-title: #e96c4c;           /* 标题 / 警告 */
+        --svi-error: #db4245;           /* 错误 */
+        --svi-success: #317c4e;         /* 成功 */
+        /* —— 深色底上的可读性派生量 (DR 只用其角色色, 本项目的文字对比需求略高) —— */
+        --svi-bg-deep: #0f161b;         /* 更深一层底 (模态 / 卡片下半) */
+        --svi-text-strong: #e8f4f6;     /* 高对比正文与标题 */
+        --svi-text-dim: #6f9aa6;        /* 次要文字（由 fg 降饱和派生） */
+        --svi-success-bright: #5fbf8a;  /* 深底上可读的成功色 */
+        --svi-error-bright: #e8756f;    /* 深底上可读的错误色 */
+        --svi-scrim: rgba(10, 15, 18, 0.72);   /* 模态蒙层 */
+        --svi-outline: rgba(var(--svi-fg-rgb), 0.35); /* 焦点 / 悬停描边 */
+        /* —— 供 rgba() 消费的三元组 (与上面的角色同源) —— */
+        --svi-bg-rgb: 20, 30, 36;
+        --svi-fg-rgb: 83, 161, 179;
+        --svi-success-rgb: 49, 124, 78;
+        --svi-error-rgb: 219, 66, 69;
+        --svi-warn-rgb: 233, 108, 76;
+        --svi-dim-rgb: 111, 154, 166;
+        --svi-white-rgb: 255, 255, 255;
+        --svi-black-rgb: 0, 0, 0;
+        /* —— 度量 token (字号 / 行高 / 描边 / 圆角 / 缩进 / 过渡) —— */
+        --svi-fs-sm: .625rem;
+        --svi-fs: .75rem;
+        --svi-fs-lg: .875rem;
+        --svi-lh-sm: .875rem;
+        --svi-lh: 1rem;
+        --svi-border-w: .125rem;
+        --svi-ctl-h: 1.5rem;
+        --svi-r-sm: .25rem;
+        --svi-r: .375rem;
+        --svi-r-lg: .75rem;
+        --svi-gap-sm: .5rem;
+        --svi-gap: .75rem;
+        --svi-tr-fast: 125ms;
+        --svi-tr-slow: 250ms;
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--svi-bg);
+      color: var(--svi-text-strong);
+      font: var(--svi-fs-lg)/var(--svi-lh) system-ui, "Segoe UI", "Microsoft YaHei", sans-serif;
+      padding: var(--svi-gap) calc(var(--svi-gap) * 2);
+    }
+    header { display: flex; align-items: baseline; gap: var(--svi-gap-sm); padding: var(--svi-gap) 0; border-bottom: var(--svi-border-w) solid var(--svi-border); }
+    header h1 { font-size: var(--svi-fs-lg); color: var(--svi-title); font-weight: 600; }
+    header .ver { color: var(--svi-text-dim); font-size: var(--svi-fs-sm); }
+    main { padding: var(--svi-gap) 0; color: var(--svi-fg); }
+    .svi-note { border: var(--svi-border-w) solid var(--svi-border); border-radius: var(--svi-r); padding: var(--svi-gap-sm); margin-top: var(--svi-gap); color: var(--svi-text-dim); font-size: var(--svi-fs-sm); }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>智能反色 · 设置</h1>
+    <span class="ver" id="ver"></span>
+  </header>
+  <main id="svi-options-root">
+    <!-- v6.4 重建层在此挂载全部设置区块 (12 个区块, 与内嵌面板同源控件库与 token) -->
+  </main>
+  <div class="svi-note">
+    本页与用户脚本内嵌面板、扩展弹窗共用同一份设计 token(构建时注入)与同一套控件库。
+    设置项与偏好键与内嵌面板完全一致 —— 任一处修改, 另一处刷新即见。
+  </div>
+  <script src="options.js"></script>
+</body>
+</html>

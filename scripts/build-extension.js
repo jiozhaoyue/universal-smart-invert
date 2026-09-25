@@ -186,6 +186,11 @@ function main() {
       default_title: extName,
       default_icon: {},
     },
+    // v6.4: 独立设置页 (与内嵌面板 / popup 同源 token 与控件库)
+    options_ui: {
+      page: 'options.html',
+      open_in_tab: true,
+    },
     permissions: ['storage'],
     content_scripts: [
       {
@@ -203,14 +208,33 @@ function main() {
   }
   fs.writeFileSync(MANIFEST_OUT, JSON.stringify(manifest, null, 2) + '\n', 'utf8');
 
-  // v4.5: popup sources live in scripts/extension-src/ and are copied verbatim —
+  // v4.5: popup / options sources live in scripts/extension-src/ and are copied —
   // the extension/ directory stays fully generated (no hand-edited artifacts).
-  const POPUP_FILES = ['popup.html', 'popup.js'];
+  //
+  // v6.4: HTML 产物在**构建时注入设计 token** —— token 的唯一真源是用户脚本里
+  //   `v6.4-TOKENS-START/END` 之间的那一块; 这里把它抽出来, 替换掉 HTML 里的
+  //   `/* SVI_TOKEN_INJECT */` 占位。三处(用户脚本 / popup / options)的逐字节一致性
+  //   由 test.js 断言把关 —— 这是「单文件真源」约束下唯一可行的同源机制。
+  let tokenLines = 0;
+  const tokenBlock = (() => {
+    const m = /\/\* v6\.4-TOKENS-START \*\/([\s\S]*?)\/\* v6\.4-TOKENS-END \*\//.exec(source);
+    if (!m) fail('design tokens not found in userscript (expected v6.4-TOKENS-START/END block)');
+    tokenLines = m[1].trim().split(String.fromCharCode(10)).length;
+    return m[1];
+  })();
+  const HTML_FILES = ['popup.html', 'popup.js', 'options.html', 'options.js'];
   const popupSrcDir = path.join(__dirname, 'extension-src');
-  for (const f of POPUP_FILES) {
+  for (const f of HTML_FILES) {
     const from = path.join(popupSrcDir, f);
-    if (!fs.existsSync(from)) fail('popup source missing: ' + path.relative(ROOT, from));
-    fs.writeFileSync(path.join(OUT_DIR, f), fs.readFileSync(from, 'utf8'), 'utf8');
+    if (!fs.existsSync(from)) fail('popup/options source missing: ' + path.relative(ROOT, from));
+    let out = fs.readFileSync(from, 'utf8');
+    if (f.endsWith('.html')) {
+      if (out.indexOf('/* SVI_TOKEN_INJECT */') < 0) {
+        fail(f + ' is missing the /* SVI_TOKEN_INJECT */ placeholder — tokens must be injected, never hand-written');
+      }
+      out = out.replace('/* SVI_TOKEN_INJECT */', tokenBlock.trim());
+    }
+    fs.writeFileSync(path.join(OUT_DIR, f), out, 'utf8');
   }
 
   // Icons are produced by scripts/gen-icons.js; verify presence so the
@@ -229,7 +253,8 @@ function main() {
   console.log('[build-extension] description: ' + manifest.description + (manifest.description.length < meta.description.length ? ' ... [clipped to ' + MAX_DESCRIPTION + ' chars]' : ''));
   console.log('[build-extension] wrote      : ' + path.relative(ROOT, CONTENT_OUT) + ' (' + content.length + ' bytes, ' + content.split('\n').length + ' lines)');
   console.log('[build-extension] wrote      : ' + path.relative(ROOT, MANIFEST_OUT));
-  console.log('[build-extension] wrote      : ' + POPUP_FILES.map((f) => path.relative(ROOT, path.join(OUT_DIR, f))).join(', '));
+  console.log('[build-extension] wrote      : ' + HTML_FILES.map((f) => path.relative(ROOT, path.join(OUT_DIR, f))).join(', '));
+  console.log('[build-extension] tokens     : 已注入 popup/options (' + tokenLines + ' 行, 真源 = userscript 的 v6.4-TOKENS 块)');
   console.log('[build-extension] icons OK   : ' + ICON_SIZES.map((s) => `icon${s}.png`).join(', '));
   console.log('[build-extension] prelude    : EXT_MODE=true (wrapper scope) + GM_xmlhttpRequest/GM.xmlHttpRequest/GM_addStyle shims; Store uses chrome.storage natively');
 }

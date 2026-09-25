@@ -100,6 +100,11 @@ removed after it bound loopback-only and was unreachable via LAN/proxied browser
   `.trellis/spec/frontend/region-mask-contract.md` — any change goes back to planning first.
   `buildRegionMask` must stay a pure function; side effects (cache/counters/timing) live only in the
   `regionMaskTake` shell. With `regionSegment` off, no region code may run, cache, or write anything.
+- **Design tokens have exactly one source** (the `v6.4-TOKENS-START/END` block in the userscript),
+  injected into `popup.html` / `options.html` at build time. Never hand-write a colour in panel CSS
+  or in either HTML artifact; the only allowed literal is the flash-guard `background:#000`.
+  All UI controls are built by the single `SviControls` library (`ui` is a zero-DOM delegation
+  shim) — one implementation per control, verified by unit test.
 - **Region correction is a DATA channel, not a drawing tool.** The only gesture is a single
   `click` on a visualized region (a click flips that connected component's verdict). Never add
   polygon/lasso/brush interaction. Corrections persist as a **flip set** keyed by

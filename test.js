@@ -4674,6 +4674,186 @@ setTimeout(() => {
   }
 
   console.log('✓ v6.3 单测 passed: 点击→格号(含越界) / 连通域整体翻转与翻回原位 / 差分统计 / 持久化(键命中·上限·清空·坏数据降级) / 自校准四护栏(累积门·方向不一致·幅度上限·钳制) / 应用与回滚且只动一个参数 / 关闭态零动作零施压');
+
+// ============================================================
+// v6.4 单测 (设计 token 单一真源: 三处逐字节一致 + 零字面量残留)
+// 契约来源: .trellis/tasks/09-25-v6-ui-rebuild/prd.md R1 / R7 (配色取 DR theme.less 实读表)
+// ============================================================
+(function () {
+  const fs = require('fs');
+  const path = require('path');
+  const ROOT = __dirname;
+
+  const TOKEN_RE = /\/\* v6\.4-TOKENS-START \*\/([\s\S]*?)\/\* v6\.4-TOKENS-END \*\//;
+  const userscript = fs.readFileSync(path.join(ROOT, 'universal-smart-invert.user.js'), 'utf8');
+
+  // ---- 1. token 块存在且是唯一真源 ----
+  {
+    const m = TOKEN_RE.exec(userscript);
+    assert.ok(m, 'R1: 用户脚本里必须有 v6.4-TOKENS-START/END 块');
+    const block = m[1];
+    // 关键角色必须在 (数量按 PRD R7 的 DR 表 + 本项目需求声明)
+    const need = ['--svi-bg', '--svi-fg', '--svi-ctl-bg', '--svi-ctl-hover', '--svi-ctl-active',
+      '--svi-input-fg', '--svi-input-active', '--svi-input-ph', '--svi-border', '--svi-title',
+      '--svi-error', '--svi-success', '--svi-fs-sm', '--svi-fs', '--svi-fs-lg', '--svi-lh-sm',
+      '--svi-lh', '--svi-border-w', '--svi-ctl-h', '--svi-r-sm', '--svi-r', '--svi-r-lg',
+      '--svi-gap-sm', '--svi-gap', '--svi-tr-fast', '--svi-tr-slow'];
+    for (let i = 0; i < need.length; i++) {
+      assert.ok(block.indexOf(need[i] + ':') >= 0, 'R1: token 缺失 ' + need[i]);
+    }
+    // 逐值照搬 DR (抽查 PRD R7 表里的几个值, 防止被"顺手调色")
+    assert.ok(/--svi-bg:\s*#141e24/.test(block), 'R1: 底色 = DR #141e24');
+    assert.ok(/--svi-fg:\s*#53a1b3/.test(block), 'R1: 前景 = DR #53a1b3');
+    assert.ok(/--svi-ctl-hover:\s*#193945/.test(block), 'R1: 悬停 = DR #193945');
+    assert.ok(/--svi-ctl-active:\s*#316e7d/.test(block), 'R1: 激活 = DR #316e7d');
+    assert.ok(/--svi-title:\s*#e96c4c/.test(block), 'R1: 标题 = DR #e96c4c');
+    assert.ok(/--svi-error:\s*#db4245/.test(block), 'R1: 错误 = DR #db4245');
+    assert.ok(/--svi-success:\s*#317c4e/.test(block), 'R1: 成功 = DR #317c4e');
+    assert.ok(/--svi-fs:\s*\.75rem/.test(block), 'R1: 正文字号 = DR .75rem');
+  }
+
+  // ---- 2. 三处消费点逐字节一致 (用户脚本 / popup / options) ----
+  {
+    const mine = TOKEN_RE.exec(userscript)[1].trim();
+    const consumers = ['extension/popup.html', 'extension/options.html'];
+    for (let i = 0; i < consumers.length; i++) {
+      const f = consumers[i];
+      const p = path.join(ROOT, f);
+      assert.ok(fs.existsSync(p), 'R1: 消费点产物必须存在: ' + f + ' (先跑 build-extension.js)');
+      const text = fs.readFileSync(p, 'utf8');
+      assert.ok(text.indexOf(mine) >= 0,
+        'R1: ' + f + ' 里的 token 块必须与用户脚本**逐字节一致** (构建时注入, 不得手写)');
+    }
+    // 选项页是被 manifest 引用的第三个消费点
+    const manifest = JSON.parse(fs.readFileSync(path.join(ROOT, 'extension/manifest.json'), 'utf8'));
+    assert.ok(manifest.options_ui && manifest.options_ui.page === 'options.html',
+      'R1: manifest 必须把 options.html 注册为设置页');
+  }
+
+  // ---- 3. 零字面量残留: 面板 CSS 与两个 HTML 里, token 块之外不得再有颜色字面量 ----
+  {
+    // 面板 CSS 块 (injectStyles 里的模板串)。
+    //   注意: 真源文件是 CRLF 行尾, 用 indexOf('\n...') 定位会找不到 —— 用正则抓模板体更稳。
+    const cssMatch = /const css = `([\s\S]*?)`;/.exec(userscript);
+    assert.ok(cssMatch, 'R1: 必须能定位 injectStyles 里的 CSS 模板串');
+    const block = cssMatch[1];
+    const afterTokens = block.slice(block.indexOf('--svi-tr-slow: 250ms;'));
+    assert.deepStrictEqual(afterTokens.match(/#[0-9a-fA-F]{3,8}\b/g) || [], [],
+      'R1: 面板 CSS 里 token 块之外不得再有 #hex 字面量');
+    const strayRgba = (afterTokens.match(/rgba?\([^)]*\)/g) || []).filter((x) => x.indexOf('var(') < 0 && /[0-9]/.test(x));
+    assert.deepStrictEqual(strayRgba, [], 'R1: 面板 CSS 里 token 块之外不得再有 rgba() 字面量');
+
+    // 两个 HTML 产物: 同样只允许 token 块内有颜色字面量
+    //   注入时做的是 trim 过的块 (去掉真源里的缩进), 所以这里也必须拿 trim 版本去剔除
+    const mine = TOKEN_RE.exec(userscript)[1].trim();
+    for (const f of ['extension/popup.html', 'extension/options.html']) {
+      const text = fs.readFileSync(path.join(ROOT, f), 'utf8');
+      const outside = text.replace(mine, '');
+      const hex = outside.match(/#[0-9a-fA-F]{3,8}\b/g) || [];
+      assert.deepStrictEqual(hex, [], f + ' 里 token 块之外不得再有 #hex 字面量, got ' + JSON.stringify(hex));
+      const rgba = (outside.match(/rgba?\([^)]*\)/g) || []).filter((x) => x.indexOf('var(') < 0);
+      assert.deepStrictEqual(rgba, [], f + ' 里 token 块之外不得再有 rgba() 字面量, got ' + JSON.stringify(rgba));
+    }
+  }
+
+  // ---- 4. 无第二份 token 定义: 除真源与两个注入产物外, 不得有第三处 --svi-bg: 定义 ----
+  {
+    const files = ['test.js', 'test-browser.js', 'scripts/build-extension.js',
+      'scripts/extension-src/popup.html', 'scripts/extension-src/options.html'];
+    for (const f of files) {
+      const text = fs.readFileSync(path.join(ROOT, f), 'utf8');
+      assert.strictEqual(/--svi-bg:\s*#/.test(text), false,
+        'R1: ' + f + ' 里不得再定义 --svi-bg (token 只有一处真源)');
+    }
+  }
+
+  console.log('✓ v6.4 token 单测 passed: 唯一真源(DR 逐值照搬抽查) / 三处逐字节一致(用户脚本·popup·options) / 面板 CSS 与 HTML 零颜色字面量残留 / 无第二份定义');
+})();
+
+// ============================================================
+// v6.4 控件库单测 (收口: 单一实现点 + 词汇表完整 + 无第二套行渲染 + 内联色策略)
+// 契约来源: .trellis/tasks/09-25-v6-ui-rebuild/prd.md R2
+// ============================================================
+(function () {
+  const fs = require('fs');
+  const path = require('path');
+  const { SviControls } = svi;
+  const src = fs.readFileSync(path.join(__dirname, 'universal-smart-invert.user.js'), 'utf8');
+
+  // ---- 1. 词汇表完整 (DR 控件词汇 + 本项目既有的行形状) ----
+  {
+    const need = ['h', 'labelBox', 'section', 'group',
+      'toggleRow', 'multiSwitch', 'sliderRow', 'selectRow', 'checkRow',
+      'chipRow', 'btnRow', 'navButton', 'resetButton',
+      'colorPicker', 'shortcutRow', 'collapsible', 'messageBar',
+      'textRow', 'infoLine', 'pickerRow'];
+    for (let i = 0; i < need.length; i++) {
+      assert.strictEqual(typeof SviControls[need[i]], 'function', 'R2: 控件缺失 ' + need[i]);
+    }
+    assert.ok(need.length >= 14, 'R2: 控件数量不低于 DR 词汇表规模');
+  }
+
+  // ---- 2. 构造不抛 + 返回形状正确 (Node 桩只有极简 DOM, 这里只验形状与同步协议) ----
+  {
+    const g = SviControls.group('标题', '描述', 'grp-1');
+    assert.ok(g.el, 'R2: group 返回 {el}');
+    assert.strictEqual(typeof g.add, 'function', 'R2: group.add 可加行');
+    assert.strictEqual(typeof g.syncAll, 'function', 'R2: group.syncAll 可同步');
+
+    const c = SviControls.collapsible('折叠', '提示', true);
+    assert.ok(c.el, 'R2: collapsible 返回 {el}');
+    assert.strictEqual(typeof c.setOpen, 'function', 'R2: collapsible.setOpen 可编程展开');
+
+    assert.ok(SviControls.messageBar('文案', 'warn'), 'R2: messageBar 构造成功');
+    assert.ok(SviControls.messageBar('文案', '不认识的 kind'), 'R2: messageBar 对未知 kind 降级为 info');
+
+    const r = SviControls.checkRow('复选', '提示', () => false, () => {});
+    assert.ok(r.row && typeof r.sync === 'function', 'R2: checkRow 返回 {row, sync}');
+
+    const ms = SviControls.multiSwitch('档位', '提示', [{ label: 'A', value: 'a' }, { label: 'B', value: 'b' }],
+      () => 'a', () => {});
+    assert.ok(ms.row && typeof ms.sync === 'function', 'R2: multiSwitch 返回 {row, sync}');
+
+    const nb = SviControls.navButton('打开设置', '', () => {});
+    assert.ok(nb.row, 'R2: navButton 返回 {row, sync}');
+    assert.ok(SviControls.resetButton('重置', '', () => {}).row, 'R2: resetButton 返回 {row}');
+    assert.ok(SviControls.shortcutRow('快捷键', '', () => 'Alt+I', () => {}).row, 'R2: shortcutRow 返回 {row}');
+    assert.ok(SviControls.colorPicker('颜色', '', () => '#fff', () => {}).row, 'R2: colorPicker 返回 {row}');
+  }
+
+  // ---- 3. 单一实现点: 每个行工厂在整份真源里只允许出现一次定义 ----
+  {
+    const factories = ['toggleRow', 'sliderRow', 'selectRow', 'chipRow', 'btnRow', 'textRow',
+      'infoLine', 'pickerRow', 'checkRow', 'multiSwitch', 'collapsible', 'messageBar',
+      'labelBox', 'section', 'group', 'navButton', 'resetButton', 'colorPicker', 'shortcutRow'];
+    for (let i = 0; i < factories.length; i++) {
+      const re = new RegExp('^\\s{4}' + factories[i] + '\\(', 'gm');
+      const defs = (src.match(re) || []).length;
+      assert.strictEqual(defs, 1, 'R2: ' + factories[i] + ' 必须只有一处实现 (收口), 实际 ' + defs);
+    }
+  }
+
+  // ---- 4. 旧 `ui` 只是转发垫片: 它自己不得构造任何节点 ----
+  {
+    const m = /const ui = \{([\s\S]*?)\n  \};/.exec(src);
+    assert.ok(m, 'R2: 必须存在 ui 兼容垫片');
+    const body = m[1];
+    assert.strictEqual(body.indexOf('createElement'), -1, 'R2: ui 垫片不得自己 createElement');
+    assert.strictEqual(body.indexOf('appendChild'), -1, 'R2: ui 垫片不得自己 appendChild');
+    assert.ok(body.indexOf('SviControls.') >= 0, 'R2: ui 垫片必须转发到 SviControls');
+  }
+
+  // ---- 5. 内联样式里的颜色必须走 token (唯一例外: 防闪光黑底) ----
+  {
+    const inline = src.match(/color: ?#[0-9a-fA-F]{3,8}|background: ?#[0-9a-fA-F]{3,8}/g) || [];
+    assert.deepStrictEqual(inline, ['background:#000'],
+      'R1: 内联样式里的颜色必须走 token (唯一例外是防闪光黑底), got ' + JSON.stringify(inline));
+  }
+
+  console.log('✓ v6.4 控件库单测 passed: 词汇表 20 项齐全 / 构造与 {row,sync} 协议正确 / 每个工厂只有一处实现(收口) / ui 垫片零节点构造 / 内联色策略(仅防闪光黑底例外)');
+})();
+
+
 })();
 
 })();

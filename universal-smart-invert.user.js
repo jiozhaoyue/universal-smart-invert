@@ -2645,7 +2645,7 @@
           left: 50%;
           transform: translateX(-50%);
           background: rgba(15, 23, 42, 0.94);
-          color: #e2e8f0;
+          color: var(--svi-text-strong);
           padding: 7px 10px 7px 14px;
           border-radius: 20px;
           font-size: 12px;
@@ -2670,7 +2670,7 @@
         const btn = document.createElement('button');
         btn.type = 'button';
         btn.textContent = String(actionLabel);
-        btn.style.cssText = 'background:rgba(56,189,248,0.18);color:#38bdf8;border:1px solid rgba(56,189,248,0.45);'
+        btn.style.cssText = 'background:rgba(var(--svi-fg-rgb),0.18);color:var(--svi-fg);border:1px solid rgba(var(--svi-fg-rgb),0.45);'
           + 'border-radius:12px;padding:3px 10px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;';
         btn.addEventListener('click', (ev) => {
           ev.preventDefault();
@@ -3242,7 +3242,7 @@
           left: 50%;
           transform: translateX(-50%);
           background: rgba(15, 23, 42, 0.92);
-          color: #38bdf8;
+          color: var(--svi-fg);
           padding: 6px 14px;
           border-radius: 20px;
           font-size: 12px;
@@ -3647,6 +3647,63 @@
         --svi-img-filter: invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.90);
         --svi-img-transition: none;
         --svi-video-tune: none;
+
+        /* v6.4-TOKENS-START */
+        /* ==========================================
+           v6.4 设计 token —— **全仓唯一真源**（用户 2026-09-26 裁决: 照搬 Dark Reader 深青调）
+           三处消费点: 用户脚本内嵌面板 / 扩展 popup / 扩展 options 页。
+           后两者由 scripts/build-extension.js 在构建时把本块**逐字注入** HTML 产物,
+           三处一致性由 test.js 的逐字节校验把关 —— 受"单文件真源"约束, 这是唯一可行的同源机制。
+           取色来源: PRD v6-4 R7 的 Dark Reader theme.less 实读表 (逐值照搬, 未自行调色)。
+           禁止在别处再定义颜色字面量: 面板 CSS 里出现任何 #hex / rgba(...) 都视为契约漂移
+           (test.js 有断言把关)。
+           ========================================== */
+        /* —— DR 颜色角色 (逐值照搬) —— */
+        --svi-bg: #141e24;              /* 底色 */
+        --svi-fg: #53a1b3;              /* 前景 / 主强调 */
+        --svi-ctl-bg: #141e24;          /* 控件底 */
+        --svi-ctl-hover: #193945;       /* 控件悬停 */
+        --svi-ctl-active: #316e7d;      /* 控件激活 */
+        --svi-input-fg: #53a1b3;        /* 输入前景 */
+        --svi-input-active: #ffffff;    /* 输入激活前景 */
+        --svi-input-ph: #316e7d;        /* 输入占位 */
+        --svi-border: #316e7d;          /* 描边 */
+        --svi-title: #e96c4c;           /* 标题 / 警告 */
+        --svi-error: #db4245;           /* 错误 */
+        --svi-success: #317c4e;         /* 成功 */
+        /* —— 深色底上的可读性派生量 (DR 只用其角色色, 本项目的文字对比需求略高) —— */
+        --svi-bg-deep: #0f161b;         /* 更深一层底 (模态 / 卡片下半) */
+        --svi-text-strong: #e8f4f6;     /* 高对比正文与标题 */
+        --svi-text-dim: #6f9aa6;        /* 次要文字（由 fg 降饱和派生） */
+        --svi-success-bright: #5fbf8a;  /* 深底上可读的成功色 */
+        --svi-error-bright: #e8756f;    /* 深底上可读的错误色 */
+        --svi-scrim: rgba(10, 15, 18, 0.72);   /* 模态蒙层 */
+        --svi-outline: rgba(var(--svi-fg-rgb), 0.35); /* 焦点 / 悬停描边 */
+        /* —— 供 rgba() 消费的三元组 (与上面的角色同源) —— */
+        --svi-bg-rgb: 20, 30, 36;
+        --svi-fg-rgb: 83, 161, 179;
+        --svi-success-rgb: 49, 124, 78;
+        --svi-error-rgb: 219, 66, 69;
+        --svi-warn-rgb: 233, 108, 76;
+        --svi-dim-rgb: 111, 154, 166;
+        --svi-white-rgb: 255, 255, 255;
+        --svi-black-rgb: 0, 0, 0;
+        /* —— 度量 token (字号 / 行高 / 描边 / 圆角 / 缩进 / 过渡) —— */
+        --svi-fs-sm: .625rem;
+        --svi-fs: .75rem;
+        --svi-fs-lg: .875rem;
+        --svi-lh-sm: .875rem;
+        --svi-lh: 1rem;
+        --svi-border-w: .125rem;
+        --svi-ctl-h: 1.5rem;
+        --svi-r-sm: .25rem;
+        --svi-r: .375rem;
+        --svi-r-lg: .75rem;
+        --svi-gap-sm: .5rem;
+        --svi-gap: .75rem;
+        --svi-tr-fast: 125ms;
+        --svi-tr-slow: 250ms;
+        /* v6.4-TOKENS-END */
       }
       /* v3.2: 独立视频画面调节 (非反色视频经样式表生效; 反色活动视频由内联滤镜组合链覆盖) */
       html.svi-video-tune video {
@@ -3668,47 +3725,47 @@
         width: 14px;
         height: 38px;
         border-radius: 8px 0 0 8px;
-        background: rgba(30, 32, 40, 0.75);
+        background: rgba(var(--svi-bg-rgb), 0.75);
         backdrop-filter: blur(8px);
         -webkit-backdrop-filter: blur(8px);
-        border: 1px solid rgba(255, 255, 255, 0.15);
+        border: 1px solid rgba(var(--svi-white-rgb), 0.15);
         border-right: none;
         cursor: pointer;
         display: flex;
         align-items: center;
         justify-content: center;
         transition: width 0.15s ease, background 0.15s ease, opacity 0.15s ease;
-        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+        box-shadow: 0 4px 14px rgba(var(--svi-black-rgb), 0.25);
         opacity: 0.55;
       }
       .svi-trigger-pill.left-edge {
         border-radius: 0 8px 8px 0;
-        border-right: 1px solid rgba(255, 255, 255, 0.15);
+        border-right: 1px solid rgba(var(--svi-white-rgb), 0.15);
         border-left: none;
       }
       .svi-trigger-pill:hover {
         width: 20px;
         opacity: 1;
-        background: rgba(30, 32, 40, 0.95);
+        background: rgba(var(--svi-bg-rgb), 0.95);
       }
       /* 状态指示点 */
       .svi-status-dot {
         width: 6px;
         height: 6px;
         border-radius: 50%;
-        background: #888;
+        background: var(--svi-text-dim);
         transition: background 0.2s ease;
       }
       .svi-status-dot.active-auto {
-        background: #10b981;
-        box-shadow: 0 0 6px #10b981;
+        background: var(--svi-success-bright);
+        box-shadow: 0 0 6px var(--svi-success-bright);
       }
       .svi-status-dot.active-manual {
-        background: #3b82f6;
-        box-shadow: 0 0 6px #3b82f6;
+        background: var(--svi-fg);
+        box-shadow: 0 0 6px var(--svi-fg);
       }
       .svi-status-dot.cors-warn {
-        background: #f59e0b;
+        background: var(--svi-title);
       }
 
       /* 展开式微型控制面板 */
@@ -3718,14 +3775,14 @@
         top: -60px;
         right: 22px;
         width: 250px;
-        background: rgba(22, 24, 30, 0.95);
+        background: rgba(var(--svi-bg-rgb), 0.95);
         backdrop-filter: blur(12px);
         -webkit-backdrop-filter: blur(12px);
-        border: 1px solid rgba(255, 255, 255, 0.12);
-        box-shadow: 0 12px 36px rgba(0, 0, 0, 0.45);
+        border: 1px solid rgba(var(--svi-white-rgb), 0.12);
+        box-shadow: 0 12px 36px rgba(var(--svi-black-rgb), 0.45);
         border-radius: 12px;
         padding: 12px;
-        color: #f1f3f9;
+        color: var(--svi-text-strong);
         font-size: 13px;
         flex-direction: column;
         gap: 10px;
@@ -3745,27 +3802,27 @@
         font-weight: 600;
         font-size: 13px;
         padding-bottom: 6px;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        border-bottom: 1px solid rgba(var(--svi-white-rgb), 0.08);
       }
       .svi-card-status-badge {
         font-size: 11px;
         font-weight: 500;
         padding: 2px 6px;
         border-radius: 6px;
-        background: rgba(255, 255, 255, 0.08);
-        color: #bbb;
+        background: rgba(var(--svi-white-rgb), 0.08);
+        color: var(--svi-text-dim);
       }
       .svi-card-status-badge.green {
-        background: rgba(16, 185, 129, 0.15);
-        color: #34d399;
+        background: rgba(var(--svi-success-rgb), 0.15);
+        color: var(--svi-success-bright);
       }
       .svi-card-status-badge.blue {
-        background: rgba(59, 130, 246, 0.15);
-        color: #60a5fa;
+        background: rgba(var(--svi-fg-rgb), 0.15);
+        color: var(--svi-fg);
       }
       .svi-card-status-badge.yellow {
-        background: rgba(245, 158, 11, 0.15);
-        color: #fbbf24;
+        background: rgba(var(--svi-warn-rgb), 0.15);
+        color: var(--svi-title);
       }
 
       .svi-btn-row {
@@ -3775,9 +3832,9 @@
       .svi-action-btn {
         flex: 1;
         padding: 6px 4px;
-        border: 1px solid rgba(255, 255, 255, 0.12);
-        background: rgba(255, 255, 255, 0.06);
-        color: #e2e8f0;
+        border: 1px solid rgba(var(--svi-white-rgb), 0.12);
+        background: rgba(var(--svi-white-rgb), 0.06);
+        color: var(--svi-text-strong);
         border-radius: 8px;
         cursor: pointer;
         font-size: 11px;
@@ -3789,13 +3846,13 @@
         white-space: nowrap;
       }
       .svi-action-btn:hover {
-        background: rgba(255, 255, 255, 0.12);
-        border-color: rgba(255, 255, 255, 0.2);
+        background: rgba(var(--svi-white-rgb), 0.12);
+        border-color: rgba(var(--svi-white-rgb), 0.2);
       }
       .svi-action-btn.active {
-        background: #2563eb;
-        border-color: #3b82f6;
-        color: #fff;
+        background: var(--svi-fg);
+        border-color: var(--svi-fg);
+        color: var(--svi-text-strong);
         font-weight: 600;
       }
       .svi-btn-row-4 .svi-action-btn {
@@ -3810,9 +3867,9 @@
       .svi-preset-btn {
         flex: 1;
         padding: 4px 6px;
-        border: 1px solid rgba(255, 255, 255, 0.08);
-        background: rgba(255, 255, 255, 0.04);
-        color: #94a3b8;
+        border: 1px solid rgba(var(--svi-white-rgb), 0.08);
+        background: rgba(var(--svi-white-rgb), 0.04);
+        color: var(--svi-text-dim);
         border-radius: 6px;
         font-size: 11px;
         cursor: pointer;
@@ -3820,18 +3877,18 @@
         transition: all 0.15s ease;
       }
       .svi-preset-btn.selected {
-        border-color: #3b82f6;
-        background: rgba(59, 130, 246, 0.15);
-        color: #93c5fd;
+        border-color: var(--svi-fg);
+        background: rgba(var(--svi-fg-rgb), 0.15);
+        color: var(--svi-text-strong);
         font-weight: 600;
       }
 
       .svi-open-modal-btn {
         width: 100%;
         padding: 6px 8px;
-        border: 1px solid rgba(59, 130, 246, 0.3);
-        background: rgba(59, 130, 246, 0.12);
-        color: #93c5fd;
+        border: 1px solid rgba(var(--svi-fg-rgb), 0.3);
+        background: rgba(var(--svi-fg-rgb), 0.12);
+        color: var(--svi-text-strong);
         border-radius: 8px;
         font-size: 11px;
         font-weight: 500;
@@ -3840,18 +3897,18 @@
         transition: all 0.15s ease;
       }
       .svi-open-modal-btn:hover {
-        background: rgba(59, 130, 246, 0.25);
-        border-color: #3b82f6;
+        background: rgba(var(--svi-fg-rgb), 0.25);
+        border-color: var(--svi-fg);
       }
 
       .svi-card-footer {
         font-size: 11px;
-        color: #64748b;
+        color: var(--svi-text-dim);
         display: flex;
         justify-content: space-between;
         align-items: center;
         padding-top: 4px;
-        border-top: 1px solid rgba(255, 255, 255, 0.06);
+        border-top: 1px solid rgba(var(--svi-white-rgb), 0.06);
       }
       .svi-hidden-fullscreen {
         opacity: 0 !important;
@@ -3898,9 +3955,9 @@
 
       /* v2.0 模态新增区块 (站点规则 / 原色屏蔽 / 数据统计) */
       .svi-modal-select {
-        background: rgba(15, 23, 42, 0.9);
-        color: #e2e8f0;
-        border: 1px solid rgba(255, 255, 255, 0.15);
+        background: rgba(var(--svi-bg-rgb), 0.9);
+        color: var(--svi-text-strong);
+        border: 1px solid rgba(var(--svi-white-rgb), 0.15);
         border-radius: 6px;
         font-size: 12px;
         padding: 4px 6px;
@@ -3912,9 +3969,9 @@
       .svi-modal-textarea {
         width: 100%;
         min-height: 52px;
-        background: rgba(15, 23, 42, 0.8);
-        color: #cbd5e1;
-        border: 1px solid rgba(255, 255, 255, 0.12);
+        background: rgba(var(--svi-bg-rgb), 0.8);
+        color: var(--svi-text-strong);
+        border: 1px solid rgba(var(--svi-white-rgb), 0.12);
         border-radius: 6px;
         font-size: 11px;
         font-family: monospace;
@@ -3924,25 +3981,25 @@
         box-sizing: border-box;
       }
       .svi-modal-textarea:focus {
-        border-color: #38bdf8;
+        border-color: var(--svi-fg);
       }
       .svi-site-check-row {
         display: flex;
         align-items: center;
         justify-content: space-between;
         padding: 4px 0;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        border-bottom: 1px solid rgba(var(--svi-white-rgb), 0.05);
       }
       .svi-check {
         width: 15px;
         height: 15px;
-        accent-color: #38bdf8;
+        accent-color: var(--svi-fg);
         cursor: pointer;
         flex-shrink: 0;
       }
       .svi-hint-line {
         font-size: 10px;
-        color: #64748b;
+        color: var(--svi-text-dim);
         line-height: 1.6;
       }
       /* 本地统计: 表格化网格, 每项独立成格 (元素隔离, 严禁行内拼接) */
@@ -3956,14 +4013,14 @@
         flex-direction: column;
         gap: 2px;
         padding: 6px 8px;
-        background: rgba(15, 23, 42, 0.55);
-        border: 1px solid rgba(255, 255, 255, 0.08);
+        background: rgba(var(--svi-bg-rgb), 0.55);
+        border: 1px solid rgba(var(--svi-white-rgb), 0.08);
         border-radius: 8px;
         min-width: 0;
       }
       .svi-stats-label {
         font-size: 10px;
-        color: #94a3b8;
+        color: var(--svi-text-dim);
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
@@ -3971,45 +4028,45 @@
       .svi-stats-value {
         font-size: 13px;
         font-weight: 600;
-        color: #38bdf8;
+        color: var(--svi-fg);
         font-family: monospace;
       }
       .svi-mini-btn {
         padding: 5px 10px;
-        background: rgba(59, 130, 246, 0.12);
-        border: 1px solid rgba(59, 130, 246, 0.3);
-        color: #93c5fd;
+        background: rgba(var(--svi-fg-rgb), 0.12);
+        border: 1px solid rgba(var(--svi-fg-rgb), 0.3);
+        color: var(--svi-text-strong);
         border-radius: 6px;
         font-size: 11px;
         cursor: pointer;
         transition: all 0.15s ease;
       }
       .svi-mini-btn:hover {
-        background: rgba(59, 130, 246, 0.25);
+        background: rgba(var(--svi-fg-rgb), 0.25);
       }
       .svi-mini-btn.danger {
-        background: rgba(239, 68, 68, 0.10);
-        border-color: rgba(239, 68, 68, 0.3);
-        color: #f87171;
+        background: rgba(var(--svi-error-rgb), 0.10);
+        border-color: rgba(var(--svi-error-rgb), 0.3);
+        color: var(--svi-error-bright);
       }
       .svi-mini-btn.danger:hover {
-        background: rgba(239, 68, 68, 0.22);
+        background: rgba(var(--svi-error-rgb), 0.22);
       }
       .svi-shield-chip {
         display: inline-flex;
         align-items: center;
         gap: 6px;
         padding: 4px 8px;
-        background: rgba(255, 255, 255, 0.05);
-        border: 1px solid rgba(255, 255, 255, 0.12);
+        background: rgba(var(--svi-white-rgb), 0.05);
+        border: 1px solid rgba(var(--svi-white-rgb), 0.12);
         border-radius: 12px;
         font-size: 11px;
-        color: #cbd5e1;
+        color: var(--svi-text-strong);
         font-family: monospace;
       }
       .svi-shield-chip .svi-shield-x {
         cursor: pointer;
-        color: #f87171;
+        color: var(--svi-error-bright);
         font-weight: 700;
         padding: 0 2px;
       }
@@ -4026,7 +4083,7 @@
         display: none;
         position: fixed;
         inset: 0;
-        background: rgba(0, 0, 0, 0.65);
+        background: rgba(var(--svi-black-rgb), 0.65);
         backdrop-filter: blur(8px);
         -webkit-backdrop-filter: blur(8px);
         z-index: 2147483647;
@@ -4048,20 +4105,20 @@
       }
       .svi-modal-mask.docked .svi-modal-window {
         pointer-events: auto;
-        background: #161922; /* 停靠形态无遮罩模糊, 用实底防页面内容透底 */
+        background: var(--svi-bg-deep); /* 停靠形态无遮罩模糊, 用实底防页面内容透底 */
       }
       .svi-modal-window {
         width: min(600px, 94vw);
         max-width: 94vw;
         max-height: 86vh;
-        background: rgba(22, 25, 34, 0.98);
-        border: 1px solid rgba(255, 255, 255, 0.14);
-        box-shadow: 0 24px 64px rgba(0, 0, 0, 0.65);
+        background: rgba(var(--svi-bg-rgb), 0.98);
+        border: 1px solid rgba(var(--svi-white-rgb), 0.14);
+        box-shadow: 0 24px 64px rgba(var(--svi-black-rgb), 0.65);
         border-radius: 16px;
         display: flex;
         flex-direction: column;
         overflow: hidden;
-        color: #f1f5f9;
+        color: var(--svi-text-strong);
         animation: sviFadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
       }
       /* v3.3 停靠形态: 全高侧边抽屉, 宽度可拖拽并记忆 */
@@ -4081,13 +4138,13 @@
         left: 0;
         right: auto;
         --svi-slide-from: -32px;
-        border-right: 1px solid rgba(255, 255, 255, 0.14);
+        border-right: 1px solid rgba(var(--svi-white-rgb), 0.14);
       }
       .svi-modal-window.layout-right {
         right: 0;
         left: auto;
         --svi-slide-from: 32px;
-        border-left: 1px solid rgba(255, 255, 255, 0.14);
+        border-left: 1px solid rgba(var(--svi-white-rgb), 0.14);
       }
       @keyframes sviSlideIn {
         from { opacity: 0; transform: translateX(var(--svi-slide-from, 24px)); }
@@ -4136,19 +4193,19 @@
       }
       .svi-drag-handle.left-edge { left: 0; }
       .svi-drag-handle.right-edge { right: 0; }
-      .svi-drag-handle:hover { background: rgba(56, 189, 248, 0.28); }
+      .svi-drag-handle:hover { background: rgba(var(--svi-fg-rgb), 0.28); }
       .svi-layout-switch {
         display: flex;
         gap: 2px;
-        background: rgba(255, 255, 255, 0.06);
-        border: 1px solid rgba(255, 255, 255, 0.1);
+        background: rgba(var(--svi-white-rgb), 0.06);
+        border: 1px solid rgba(var(--svi-white-rgb), 0.1);
         border-radius: 8px;
         padding: 2px;
       }
       .svi-layout-btn {
         border: none;
         background: transparent;
-        color: #94a3b8;
+        color: var(--svi-text-dim);
         font-size: 11px;
         padding: 3px 9px;
         border-radius: 6px;
@@ -4156,10 +4213,10 @@
         transition: all 0.15s ease;
         white-space: nowrap;
       }
-      .svi-layout-btn:hover { color: #e2e8f0; }
+      .svi-layout-btn:hover { color: var(--svi-text-strong); }
       .svi-layout-btn.active {
-        background: #2563eb;
-        color: #fff;
+        background: var(--svi-fg);
+        color: var(--svi-text-strong);
         font-weight: 600;
       }
       @keyframes sviFadeIn {
@@ -4168,7 +4225,7 @@
       }
       .svi-modal-header {
         padding: 14px 18px;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+        border-bottom: 1px solid rgba(var(--svi-white-rgb), 0.08);
         display: flex;
         align-items: center;
         justify-content: space-between;
@@ -4179,7 +4236,7 @@
       .svi-modal-title {
         font-size: 15px;
         font-weight: 600;
-        color: #f8fafc;
+        color: var(--svi-text-strong);
         display: flex;
         align-items: center;
         gap: 6px;
@@ -4188,9 +4245,9 @@
       .svi-modal-ver {
         font-size: 11px;
         font-weight: 500;
-        color: #94a3b8;
-        background: rgba(148, 163, 184, 0.12);
-        border: 1px solid rgba(148, 163, 184, 0.25);
+        color: var(--svi-text-dim);
+        background: rgba(var(--svi-dim-rgb), 0.12);
+        border: 1px solid rgba(var(--svi-dim-rgb), 0.25);
         border-radius: 8px;
         padding: 1px 7px;
         margin-left: 4px;
@@ -4199,7 +4256,7 @@
       .svi-modal-close {
         background: none;
         border: none;
-        color: #94a3b8;
+        color: var(--svi-text-dim);
         font-size: 18px;
         cursor: pointer;
         padding: 2px 6px;
@@ -4207,8 +4264,8 @@
         transition: color 0.15s ease, background 0.15s ease;
       }
       .svi-modal-close:hover {
-        color: #fff;
-        background: rgba(255, 255, 255, 0.1);
+        color: var(--svi-text-strong);
+        background: rgba(var(--svi-white-rgb), 0.1);
       }
       .svi-modal-body {
         padding: 16px 18px;
@@ -4218,7 +4275,7 @@
         flex-direction: column;
         gap: 16px;
         scrollbar-width: thin;
-        scrollbar-color: rgba(148, 163, 184, 0.35) transparent;
+        scrollbar-color: rgba(var(--svi-dim-rgb), 0.35) transparent;
       }
       .svi-modal-body::-webkit-scrollbar {
         width: 8px;
@@ -4227,15 +4284,15 @@
         background: transparent;
       }
       .svi-modal-body::-webkit-scrollbar-thumb {
-        background: rgba(148, 163, 184, 0.35);
+        background: rgba(var(--svi-dim-rgb), 0.35);
         border-radius: 4px;
       }
       .svi-modal-body::-webkit-scrollbar-thumb:hover {
-        background: rgba(148, 163, 184, 0.55);
+        background: rgba(var(--svi-dim-rgb), 0.55);
       }
       .svi-modal-section {
-        background: rgba(255, 255, 255, 0.03);
-        border: 1px solid rgba(255, 255, 255, 0.06);
+        background: rgba(var(--svi-white-rgb), 0.03);
+        border: 1px solid rgba(var(--svi-white-rgb), 0.06);
         border-radius: 10px;
         padding: 12px;
         display: flex;
@@ -4246,7 +4303,7 @@
       .svi-sec-title {
         font-size: 12px;
         font-weight: 600;
-        color: #38bdf8;
+        color: var(--svi-fg);
         display: flex;
         align-items: center;
         justify-content: space-between;
@@ -4266,11 +4323,11 @@
       }
       .svi-modal-label {
         font-size: 12px;
-        color: #e2e8f0;
+        color: var(--svi-text-strong);
       }
       .svi-modal-hint {
         font-size: 10px;
-        color: #64748b;
+        color: var(--svi-text-dim);
         line-height: 1.5;
       }
       .svi-modal-controls {
@@ -4284,10 +4341,10 @@
       /* v3.3: 选中项的动态说明行 */
       .svi-row-describe {
         font-size: 10px;
-        color: #7dd3fc;
+        color: var(--svi-text-strong);
         line-height: 1.5;
-        background: rgba(56, 189, 248, 0.07);
-        border-left: 2px solid rgba(56, 189, 248, 0.4);
+        background: rgba(var(--svi-fg-rgb), 0.07);
+        border-left: 2px solid rgba(var(--svi-fg-rgb), 0.4);
         padding: 3px 8px;
         border-radius: 0 6px 6px 0;
       }
@@ -4295,10 +4352,10 @@
       .svi-sub-title {
         font-size: 11px;
         font-weight: 600;
-        color: #94a3b8;
+        color: var(--svi-text-dim);
         letter-spacing: 0.4px;
         padding-top: 8px;
-        border-top: 1px dashed rgba(255, 255, 255, 0.1);
+        border-top: 1px dashed rgba(var(--svi-white-rgb), 0.1);
       }
       /* v3.3: 元素规则添加表单 */
       .svi-er-form {
@@ -4313,72 +4370,72 @@
       .svi-modal-text {
         flex: 1;
         min-width: 140px;
-        background: rgba(15, 23, 42, 0.8);
-        border: 1px solid rgba(255, 255, 255, 0.15);
+        background: rgba(var(--svi-bg-rgb), 0.8);
+        border: 1px solid rgba(var(--svi-white-rgb), 0.15);
         border-radius: 6px;
-        color: #cbd5e1;
+        color: var(--svi-text-strong);
         font-size: 11px;
         padding: 5px 8px;
         outline: none;
       }
       .svi-modal-text:focus {
-        border-color: #38bdf8;
+        border-color: var(--svi-fg);
       }
       /* v3.3: 操作技巧行 */
       .svi-tip-line {
         font-size: 11px;
-        color: #94a3b8;
+        color: var(--svi-text-dim);
         line-height: 1.7;
         display: flex;
         gap: 8px;
       }
       .svi-tip-line b {
-        color: #cbd5e1;
+        color: var(--svi-text-strong);
         flex-shrink: 0;
       }
       .svi-modal-slider {
         flex: 1;
         height: 4px;
-        accent-color: #38bdf8;
+        accent-color: var(--svi-fg);
         cursor: pointer;
-        background: rgba(255, 255, 255, 0.15);
+        background: rgba(var(--svi-white-rgb), 0.15);
         border-radius: 2px;
       }
       .svi-modal-num-input {
         width: 60px;
         padding: 4px 6px;
-        background: rgba(15, 23, 42, 0.8);
-        border: 1px solid rgba(255, 255, 255, 0.15);
+        background: rgba(var(--svi-bg-rgb), 0.8);
+        border: 1px solid rgba(var(--svi-white-rgb), 0.15);
         border-radius: 6px;
-        color: #38bdf8;
+        color: var(--svi-fg);
         font-size: 12px;
         font-family: monospace;
         text-align: right;
         outline: none;
       }
       .svi-modal-num-input:focus {
-        border-color: #38bdf8;
-        box-shadow: 0 0 0 1px #38bdf8;
+        border-color: var(--svi-fg);
+        box-shadow: 0 0 0 1px var(--svi-fg);
       }
       .svi-modal-unit {
         font-size: 11px;
-        color: #94a3b8;
+        color: var(--svi-text-dim);
         width: 24px;
         flex-shrink: 0;
       }
       .svi-modal-footer {
         padding: 12px 18px;
-        border-top: 1px solid rgba(255, 255, 255, 0.08);
+        border-top: 1px solid rgba(var(--svi-white-rgb), 0.08);
         display: flex;
         align-items: center;
         justify-content: space-between;
         flex-wrap: wrap;
         row-gap: 6px;
-        background: rgba(15, 23, 42, 0.4);
+        background: rgba(var(--svi-bg-rgb), 0.4);
       }
       .svi-modal-perf {
         font-size: 11px;
-        color: #10b981;
+        color: var(--svi-success-bright);
         font-family: monospace;
       }
       .svi-footer-actions {
@@ -4387,22 +4444,22 @@
       }
       .svi-btn-reset {
         padding: 6px 12px;
-        background: rgba(239, 68, 68, 0.12);
-        border: 1px solid rgba(239, 68, 68, 0.3);
-        color: #f87171;
+        background: rgba(var(--svi-error-rgb), 0.12);
+        border: 1px solid rgba(var(--svi-error-rgb), 0.3);
+        color: var(--svi-error-bright);
         border-radius: 8px;
         font-size: 12px;
         cursor: pointer;
         transition: all 0.15s ease;
       }
       .svi-btn-reset:hover {
-        background: rgba(239, 68, 68, 0.25);
+        background: rgba(var(--svi-error-rgb), 0.25);
       }
       .svi-btn-done {
         padding: 6px 14px;
-        background: #2563eb;
-        border: 1px solid #3b82f6;
-        color: #fff;
+        background: var(--svi-fg);
+        border: 1px solid var(--svi-fg);
+        color: var(--svi-text-strong);
         border-radius: 8px;
         font-size: 12px;
         cursor: pointer;
@@ -4410,7 +4467,7 @@
         transition: all 0.15s ease;
       }
       .svi-btn-done:hover {
-        background: #1d4ed8;
+        background: var(--svi-fg);
       }
 
       /* 浅色色卡网格与色图选择器 */
@@ -4425,32 +4482,32 @@
         align-items: center;
         gap: 8px;
         padding: 8px 10px;
-        background: rgba(255, 255, 255, 0.04);
-        border: 1px solid rgba(255, 255, 255, 0.1);
+        background: rgba(var(--svi-white-rgb), 0.04);
+        border: 1px solid rgba(var(--svi-white-rgb), 0.1);
         border-radius: 8px;
         cursor: pointer;
         transition: all 0.15s ease;
         user-select: none;
-        color: #94a3b8;
+        color: var(--svi-text-dim);
         font-size: 12px;
       }
       .svi-color-chip:hover {
-        background: rgba(255, 255, 255, 0.08);
-        color: #f1f5f9;
+        background: rgba(var(--svi-white-rgb), 0.08);
+        color: var(--svi-text-strong);
       }
       .svi-color-chip.active {
-        background: rgba(56, 189, 248, 0.14);
-        border-color: #38bdf8;
-        color: #38bdf8;
+        background: rgba(var(--svi-fg-rgb), 0.14);
+        border-color: var(--svi-fg);
+        color: var(--svi-fg);
         font-weight: 500;
-        box-shadow: 0 0 12px rgba(56, 189, 248, 0.15);
+        box-shadow: 0 0 12px rgba(var(--svi-fg-rgb), 0.15);
       }
       .svi-color-chip-swatch {
         width: 16px;
         height: 16px;
         border-radius: 50%;
-        border: 1px solid rgba(0, 0, 0, 0.25);
-        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+        border: 1px solid rgba(var(--svi-black-rgb), 0.25);
+        box-shadow: 0 1px 3px rgba(var(--svi-black-rgb), 0.4);
         flex-shrink: 0;
       }
       .svi-color-chip-check {
@@ -4467,14 +4524,14 @@
         align-items: center;
         justify-content: space-between;
         padding: 8px 10px;
-        background: rgba(255, 255, 255, 0.04);
-        border: 1px solid rgba(255, 255, 255, 0.1);
+        background: rgba(var(--svi-white-rgb), 0.04);
+        border: 1px solid rgba(var(--svi-white-rgb), 0.1);
         border-radius: 8px;
         margin-top: 6px;
       }
       .svi-color-picker-label {
         font-size: 12px;
-        color: #e2e8f0;
+        color: var(--svi-text-strong);
         display: flex;
         align-items: center;
         gap: 6px;
@@ -4503,18 +4560,18 @@
         align-items: center;
         gap: 6px;
         padding: 3px 8px;
-        background: rgba(15, 23, 42, 0.8);
-        border: 1px solid rgba(255, 255, 255, 0.15);
+        background: rgba(var(--svi-bg-rgb), 0.8);
+        border: 1px solid rgba(var(--svi-white-rgb), 0.15);
         border-radius: 6px;
         font-size: 11px;
         font-family: monospace;
-        color: #38bdf8;
+        color: var(--svi-fg);
       }
       .svi-color-preview-circle {
         width: 14px;
         height: 14px;
         border-radius: 50%;
-        border: 1px solid rgba(0, 0, 0, 0.3);
+        border: 1px solid rgba(var(--svi-black-rgb), 0.3);
       }
 
       /* ==========================================
@@ -4583,16 +4640,16 @@
         position: absolute;
         inset: 0;
         pointer-events: none;
-        background: var(--svi-mask-dim-color, #0f172a);
+        background: var(--svi-mask-dim-color, var(--svi-bg));
         opacity: var(--svi-mask-dim-opacity, 0.75);
         transition: opacity 140ms ease;
       }
       [data-svi-masked="solid"]::after {
-        background: var(--svi-mask-solid-color, #0f172a);
+        background: var(--svi-mask-solid-color, var(--svi-bg));
         opacity: var(--svi-mask-solid-opacity, 1);
       }
       [data-svi-masked="frost"]::after {
-        background: var(--svi-mask-frost-color, #0f172a);
+        background: var(--svi-mask-frost-color, var(--svi-bg));
         opacity: var(--svi-mask-frost-opacity, 0.35);
         backdrop-filter: blur(var(--svi-mask-blur-user, 8px));
       }
@@ -4601,16 +4658,16 @@
         position: absolute;
         pointer-events: none;
         z-index: 1;
-        background: var(--svi-mask-dim-color, #0f172a);
+        background: var(--svi-mask-dim-color, var(--svi-bg));
         opacity: var(--svi-mask-dim-opacity, 0.75);
         transition: opacity 140ms ease;
       }
       [data-svi-mask-layer="solid"] {
-        background: var(--svi-mask-solid-color, #0f172a);
+        background: var(--svi-mask-solid-color, var(--svi-bg));
         opacity: var(--svi-mask-solid-opacity, 1);
       }
       [data-svi-mask-layer="frost"] {
-        background: var(--svi-mask-frost-color, #0f172a);
+        background: var(--svi-mask-frost-color, var(--svi-bg));
         opacity: var(--svi-mask-frost-opacity, 0.35);
         backdrop-filter: blur(var(--svi-mask-blur-user, 8px));
       }
@@ -4630,7 +4687,7 @@
         position: fixed;
         pointer-events: none;
         z-index: 2147483644;
-        background: var(--svi-mask-dim-color, #0f172a);
+        background: var(--svi-mask-dim-color, var(--svi-bg));
         opacity: var(--svi-mask-dim-opacity, 0.75);
         transition: opacity 140ms ease;
       }
@@ -4644,7 +4701,7 @@
         inset: 0;
         pointer-events: none !important;
         z-index: 2147483640;
-        background: #000;
+        background: var(--svi-black-rgb);
         opacity: var(--svi-mask-dim-rest, 0.35);
         transition: opacity 160ms ease;
       }
@@ -4661,8 +4718,8 @@
 
       /* --- 区域选取框 (与 rect 反色框共用视觉, 独立类避免影响既有选择器) --- */      .svi-mask-select {
         position: fixed;
-        border: 1px dashed #a78bfa;
-        background: rgba(167, 139, 250, 0.15);
+        border: 1px dashed var(--svi-fg);
+        background: rgba(var(--svi-fg-rgb), 0.15);
         pointer-events: none;
         z-index: 2147483646;
       }
@@ -4670,8 +4727,8 @@
       /* 区域反色 (Alt+Shift+拖拽) 选择框 */
       .svi-rect-select {
         position: fixed;
-        border: 1px dashed #38bdf8;
-        background: rgba(56, 189, 248, 0.15);
+        border: 1px dashed var(--svi-fg);
+        background: rgba(var(--svi-fg-rgb), 0.15);
         pointer-events: none;
         z-index: 2147483646;
       }
@@ -4680,9 +4737,9 @@
       .svi-pip-btn {
         flex: 1;
         padding: 6px 4px;
-        border: 1px solid rgba(255, 255, 255, 0.12);
-        background: rgba(255, 255, 255, 0.06);
-        color: #e2e8f0;
+        border: 1px solid rgba(var(--svi-white-rgb), 0.12);
+        background: rgba(var(--svi-white-rgb), 0.06);
+        color: var(--svi-text-strong);
         border-radius: 8px;
         cursor: pointer;
         font-size: 11px;
@@ -4694,8 +4751,8 @@
         white-space: nowrap;
       }
       .svi-pip-btn:hover {
-        background: rgba(255, 255, 255, 0.12);
-        border-color: rgba(255, 255, 255, 0.2);
+        background: rgba(var(--svi-white-rgb), 0.12);
+        border-color: rgba(var(--svi-white-rgb), 0.2);
       }
 
       /* 存储管理键列表 */
@@ -4705,10 +4762,10 @@
         justify-content: space-between;
         gap: 6px;
         padding: 4px 0;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        border-bottom: 1px solid rgba(var(--svi-white-rgb), 0.05);
         font-family: monospace;
         font-size: 10px;
-        color: #94a3b8;
+        color: var(--svi-text-dim);
       }
       .svi-store-key-name {
         flex: 1;
@@ -4716,11 +4773,11 @@
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
-        color: #7dd3fc;
+        color: var(--svi-text-strong);
       }
       .svi-store-key-size {
         flex-shrink: 0;
-        color: #64748b;
+        color: var(--svi-text-dim);
       }
 
       /* 自学习规则列表 */
@@ -4730,9 +4787,9 @@
         justify-content: space-between;
         gap: 6px;
         padding: 4px 0;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        border-bottom: 1px solid rgba(var(--svi-white-rgb), 0.05);
         font-size: 11px;
-        color: #cbd5e1;
+        color: var(--svi-text-strong);
       }
       .svi-learned-stem {
         flex: 1;
@@ -4746,17 +4803,17 @@
         font-size: 10px;
         padding: 1px 6px;
         border-radius: 6px;
-        background: rgba(16, 185, 129, 0.15);
-        color: #34d399;
+        background: rgba(var(--svi-success-rgb), 0.15);
+        color: var(--svi-success-bright);
       }
       .svi-learned-action.protect {
-        background: rgba(245, 158, 11, 0.15);
-        color: #fbbf24;
+        background: rgba(var(--svi-warn-rgb), 0.15);
+        color: var(--svi-title);
       }
       .svi-learned-hits {
         flex-shrink: 0;
         font-size: 10px;
-        color: #64748b;
+        color: var(--svi-text-dim);
       }
 
       /* 后端徽章 */
@@ -4768,9 +4825,9 @@
         border-radius: 10px;
         font-size: 10px;
         font-family: monospace;
-        background: rgba(56, 189, 248, 0.12);
-        color: #38bdf8;
-        border: 1px solid rgba(56, 189, 248, 0.3);
+        background: rgba(var(--svi-fg-rgb), 0.12);
+        color: var(--svi-fg);
+        border: 1px solid rgba(var(--svi-fg-rgb), 0.3);
       }
 
       /* ==========================================
@@ -4781,14 +4838,14 @@
         align-items: center;
         gap: 6px;
         padding: 4px 0;
-        border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        border-bottom: 1px solid rgba(var(--svi-white-rgb), 0.05);
         font-size: 11px;
-        color: #cbd5e1;
+        color: var(--svi-text-strong);
       }
       .svi-media-type {
         flex-shrink: 0;
         width: 46px;
-        color: #7dd3fc;
+        color: var(--svi-text-strong);
         font-family: monospace;
         font-size: 10px;
       }
@@ -4806,17 +4863,17 @@
         font-size: 10px;
         padding: 1px 6px;
         border-radius: 6px;
-        background: rgba(255, 255, 255, 0.07);
-        color: #94a3b8;
+        background: rgba(var(--svi-white-rgb), 0.07);
+        color: var(--svi-text-dim);
         white-space: nowrap;
       }
       .svi-media-state.inverted {
-        background: rgba(16, 185, 129, 0.15);
-        color: #34d399;
+        background: rgba(var(--svi-success-rgb), 0.15);
+        color: var(--svi-success-bright);
       }
       .svi-media-state.skipped {
-        background: rgba(245, 158, 11, 0.12);
-        color: #fbbf24;
+        background: rgba(var(--svi-warn-rgb), 0.12);
+        color: var(--svi-title);
       }
       .svi-media-actions {
         flex-shrink: 0;
@@ -4829,9 +4886,9 @@
       }
       /* 定位高亮: scrollIntoView 后 1.2s 描边闪烁 (仅 outline/box-shadow, 绝不改布局) */
       .svi-locate-flash {
-        outline: 3px solid #38bdf8 !important;
+        outline: 3px solid var(--svi-fg) !important;
         outline-offset: 1px !important;
-        box-shadow: 0 0 0 4px rgba(56, 189, 248, 0.35) !important;
+        box-shadow: 0 0 0 4px rgba(var(--svi-fg-rgb), 0.35) !important;
       }
 
       /* ==========================================
@@ -4845,8 +4902,8 @@
         gap: 12px;
         flex-wrap: wrap;
         padding: 12px 14px;
-        background: linear-gradient(135deg, rgba(56, 189, 248, 0.10), rgba(16, 185, 129, 0.06));
-        border: 1px solid rgba(56, 189, 248, 0.25);
+        background: linear-gradient(135deg, rgba(var(--svi-fg-rgb), 0.10), rgba(var(--svi-success-rgb), 0.06));
+        border: 1px solid rgba(var(--svi-fg-rgb), 0.25);
         border-radius: 14px;
       }
       .svi4-power-info {
@@ -4859,7 +4916,7 @@
       .svi4-host {
         font-size: 14px;
         font-weight: 700;
-        color: #f8fafc;
+        color: var(--svi-text-strong);
         font-family: monospace;
         overflow: hidden;
         text-overflow: ellipsis;
@@ -4867,15 +4924,15 @@
       }
       .svi4-power-status {
         font-size: 11px;
-        color: #7dd3fc;
+        color: var(--svi-text-strong);
       }
       .svi4-switch {
         position: relative;
         width: 52px;
         height: 28px;
         border-radius: 999px;
-        border: 1px solid rgba(255, 255, 255, 0.22);
-        background: rgba(71, 85, 105, 0.9);
+        border: 1px solid rgba(var(--svi-white-rgb), 0.22);
+        background: rgba(var(--svi-dim-rgb), 0.9);
         cursor: pointer;
         flex-shrink: 0;
         transition: background 0.18s ease, border-color 0.18s ease;
@@ -4888,30 +4945,30 @@
         width: 22px;
         height: 22px;
         border-radius: 50%;
-        background: #e2e8f0;
+        background: var(--svi-text-strong);
         transition: transform 0.18s ease, background 0.18s ease;
       }
       .svi4-switch.on {
-        background: #059669;
-        border-color: #34d399;
+        background: var(--svi-success);
+        border-color: var(--svi-success-bright);
       }
       .svi4-switch.on::after {
         transform: translateX(24px);
-        background: #ecfdf5;
+        background: var(--svi-input-active);
       }
       .svi4-tabs {
         display: grid;
         grid-template-columns: 1fr 1fr;
         gap: 4px;
-        background: rgba(15, 23, 42, 0.75);
-        border: 1px solid rgba(255, 255, 255, 0.08);
+        background: rgba(var(--svi-bg-rgb), 0.75);
+        border: 1px solid rgba(var(--svi-white-rgb), 0.08);
         border-radius: 12px;
         padding: 4px;
       }
       .svi4-tab {
         border: none;
         background: transparent;
-        color: #94a3b8;
+        color: var(--svi-text-dim);
         font-size: 13px;
         font-weight: 600;
         padding: 8px 0;
@@ -4919,10 +4976,10 @@
         cursor: pointer;
         transition: all 0.15s ease;
       }
-      .svi4-tab:hover { color: #e2e8f0; }
+      .svi4-tab:hover { color: var(--svi-text-strong); }
       .svi4-tab.active {
-        background: #0ea5e9;
-        color: #fff;
+        background: var(--svi-fg);
+        color: var(--svi-text-strong);
       }
       .svi4-cards {
         display: grid;
@@ -4935,15 +4992,15 @@
         align-items: center;
         gap: 4px;
         padding: 12px 6px 10px;
-        background: rgba(15, 23, 42, 0.55);
-        border: 1px solid rgba(255, 255, 255, 0.10);
+        background: rgba(var(--svi-bg-rgb), 0.55);
+        border: 1px solid rgba(var(--svi-white-rgb), 0.10);
         border-radius: 12px;
         cursor: pointer;
         transition: all 0.15s ease;
         min-width: 0;
       }
       .svi4-card:hover {
-        border-color: rgba(56, 189, 248, 0.5);
+        border-color: rgba(var(--svi-fg-rgb), 0.5);
       }
       .svi4-card-icon {
         font-size: 20px;
@@ -4952,23 +5009,23 @@
       .svi4-card-name {
         font-size: 12px;
         font-weight: 600;
-        color: #e2e8f0;
+        color: var(--svi-text-strong);
       }
       .svi4-card-state {
         font-size: 10px;
-        color: #64748b;
+        color: var(--svi-text-dim);
         text-align: center;
       }
       .svi4-card.st-on {
-        border-color: rgba(52, 211, 153, 0.55);
-        background: rgba(16, 185, 129, 0.10);
+        border-color: rgba(var(--svi-success-rgb), 0.55);
+        background: rgba(var(--svi-success-rgb), 0.10);
       }
-      .svi4-card.st-on .svi4-card-state { color: #34d399; }
+      .svi4-card.st-on .svi4-card-state { color: var(--svi-success-bright); }
       .svi4-card.st-off {
-        border-color: rgba(251, 146, 60, 0.55);
-        background: rgba(249, 115, 22, 0.08);
+        border-color: rgba(var(--svi-warn-rgb), 0.55);
+        background: rgba(var(--svi-warn-rgb), 0.08);
       }
-      .svi4-card.st-off .svi4-card-state { color: #fb923c; }
+      .svi4-card.st-off .svi4-card-state { color: var(--svi-title); }
       /* 停用态: 胶囊折叠为单枚电源徽标 */
       .svi-off-badge {
         display: none;
@@ -4976,12 +5033,12 @@
         gap: 5px;
         padding: 5px 11px;
         border-radius: 999px;
-        border: 1px solid rgba(251, 146, 60, 0.55);
-        background: rgba(249, 115, 22, 0.15);
-        color: #fdba74;
+        border: 1px solid rgba(var(--svi-warn-rgb), 0.55);
+        background: rgba(var(--svi-warn-rgb), 0.15);
+        color: var(--svi-title);
         font-size: 11px;
         cursor: pointer;
-        box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+        box-shadow: 0 6px 18px rgba(var(--svi-black-rgb), 0.45);
       }
       .svi-capsule-root.svi-site-off .svi-trigger-pill,
       .svi-capsule-root.svi-site-off .svi-panel-card {
@@ -11460,7 +11517,7 @@
       const legend = doc.createElement('div');
       legend.className = 'svi-region-correct-legend';
       legend.textContent = '区域纠正: 红=反色 · 蓝=保持原色 · 点一下切换该区域 (Esc 退出)';
-      legend.style.cssText = 'position:absolute;left:0;bottom:0;background:rgba(15,23,42,.86);color:#e2e8f0;'
+      legend.style.cssText = 'position:absolute;left:0;bottom:0;background:rgba(var(--svi-bg-rgb),.86);color:var(--svi-text-strong);'
         + 'font-size:11px;padding:3px 8px;border-radius:0 6px 0 0;pointer-events:none;';
       layer.appendChild(legend);
 
@@ -11749,7 +11806,7 @@
   // 22. UI 组件库 (R5: 去重全部模态/面板构建; 行返回 {row, sync()}, 区块聚合 syncAll)
   //     XSS 加固: 动态数据一律 textContent/DOM API, 绝不 innerHTML 插值
   // ==========================================
-  const ui = {
+  const SviControls = {
     // 基础元素构造器: attrs 支持 class/style/on*/常用属性; children 支持 字符串/节点/数组/null
     h(tag, attrs, ...children) {
       const el = document.createElement(tag);
@@ -11799,7 +11856,7 @@
     section(title, hint, id) {
       const el = this.h('div', { class: 'svi-modal-section', id: id || '' });
       const secTitle = this.h('div', { class: 'svi-sec-title' }, this.h('span', { text: title }));
-      if (hint) secTitle.appendChild(this.h('span', { text: hint, style: 'font-size:10px; color:#64748b;' }));
+      if (hint) secTitle.appendChild(this.h('span', { text: hint, style: 'font-size:10px; color:var(--svi-text-dim);' }));
       el.appendChild(secTitle);
       const syncs = [];
       return {
@@ -11967,7 +12024,7 @@
       const row = this.h('div', { class: 'svi-color-picker-row' });
       const labelBox = this.h('div', { class: 'svi-color-picker-label' },
         this.h('span', { text: label }),
-        hint ? this.h('span', { text: hint, style: 'font-size:10px; color:#64748b;' }) : null);
+        hint ? this.h('span', { text: hint, style: 'font-size:10px; color:var(--svi-text-dim);' }) : null);
       const previewCircle = this.h('div', { class: 'svi-color-preview-circle' });
       const previewBox = this.h('div', { class: 'svi-color-preview-box' }, previewCircle);
       const native = this.h('input', { type: 'color', class: 'svi-color-input-native' });
@@ -11985,7 +12042,142 @@
         },
       };
     },
+  
+    // ---- v6.4 新增控件 (DR 词汇表的其余部分; 三处消费点共用同一 DOM 语义) ----
+    //   全部走既有 class 词汇与 token 变量 —— 不在 JS 里写颜色字面量 (那种漂移 test.js 会抓)。
+
+    // 分组卡: 标题 + 描述 + 控件槽 (popup / options 的主要骨架)
+    group(title, desc, id) {
+      const g = this.section(title, '', id);
+      if (desc) g.el.appendChild(this.h('div', { class: 'svi-modal-hint', text: desc }));
+      return g;
+    },
+
+    // 多态开关: 多个互斥档位 (chip 形态)
+    multiSwitch(label, hint, options, getVal, onSet) {
+      const row = this.h('div', { class: 'svi-modal-row' }, this.labelBox(label, hint));
+      const wrap = this.h('div', { class: 'svi-chip-wrap' });
+      const chips = [];
+      for (const opt of options) {
+        const chip = this.h('button', { type: 'button', class: 'svi-chip', text: opt.label });
+        chip.addEventListener('click', () => { onSet(opt.value); sync(); });
+        chips.push({ chip: chip, value: opt.value });
+        wrap.appendChild(chip);
+      }
+      const sync = () => {
+        const cur = getVal();
+        for (const c of chips) c.chip.classList.toggle('active', c.value === cur);
+      };
+      row.appendChild(wrap);
+      sync();
+      return { row: row, sync: sync };
+    },
+
+    // 导航按钮 (进入子页 / 打开设置页)
+    navButton(label, hint, onClick) {
+      const btn = this.h('button', { type: 'button', class: 'svi-btn svi-btn-nav', text: label });
+      btn.addEventListener('click', onClick);
+      const row = this.h('div', { class: 'svi-modal-row' }, this.labelBox(label, hint), btn);
+      return { row: row, sync: () => {} };
+    },
+
+    // 重置按钮
+    resetButton(label, hint, onReset) {
+      const btn = this.h('button', { type: 'button', class: 'svi-btn svi-btn-reset', text: label });
+      btn.addEventListener('click', onReset);
+      const row = this.h('div', { class: 'svi-modal-row' }, this.labelBox(label, hint), btn);
+      return { row: row, sync: () => {} };
+    },
+
+    // 折叠面板: 标题行可点, 内容默认收起
+    collapsible(title, hint, collapsed) {
+      const el = this.h('div', { class: 'svi-modal-section svi-collapsible' });
+      const head = this.h('div', { class: 'svi-sec-title svi-collapsible-head' },
+        this.h('span', { text: title }),
+        hint ? this.h('span', { class: 'svi-collapsible-hint', text: hint }) : null);
+      const body = this.h('div', { class: 'svi-collapsible-body' });
+      let open = collapsed !== true;
+      const apply = () => { body.style.display = open ? '' : 'none'; head.classList.toggle('open', open); };
+      head.addEventListener('click', () => { open = !open; apply(); });
+      apply();
+      el.appendChild(head);
+      el.appendChild(body);
+      const syncs = [];
+      return {
+        el: el,
+        add(row) {
+          if (row && row.row) {
+            body.appendChild(row.row);
+            if (typeof row.sync === 'function') syncs.push(row.sync);
+          } else if (row && row.nodeType === 1) {
+            body.appendChild(row);
+          }
+          return row;
+        },
+        syncAll() { for (const f of syncs) { try { f(); } catch (e) { /* ignore */ } } },
+        setOpen(v) { open = !!v; apply(); },
+      };
+    },
+
+    // 消息条 (诊断 / 提示; 三种语义色由 token 提供)
+    messageBar(text, kind) {
+      const k = kind === 'error' ? 'error' : (kind === 'warn' ? 'warn' : (kind === 'ok' ? 'ok' : 'info'));
+      return this.h('div', { class: 'svi-msg svi-msg-' + k, text: text });
+    },
+
+    // 复选行 (checkbox; 与开关语义不同: 可多选、无即时副作用)
+    checkRow(label, hint, getVal, onSet) {
+      const box = this.h('input', { type: 'checkbox', class: 'svi-check' });
+      const setVal = () => { box.checked = getVal() === true; };
+      box.addEventListener('change', () => onSet(box.checked));
+      setVal();
+      const row = this.h('div', { class: 'svi-modal-row' }, this.labelBox(label, hint), box);
+      return { row: row, sync: setVal };
+    },
+
+    // 颜色选择: 原生取色器 + 十六进制输入 (与既有 pickerRow 同源, 供 popup/options 复用)
+    colorPicker(label, hint, getVal, onSet) { return this.pickerRow(label, hint, getVal, onSet); },
+
+    // 快捷键录入: 聚焦后按组合键即录 (不引入任何绘制手势)
+    shortcutRow(label, hint, getVal, onSet) {
+      const input = this.h('input', { type: 'text', class: 'svi-input svi-shortcut', readonly: 'readonly' });
+      const setVal = () => { input.value = String(getVal() || ''); };
+      input.addEventListener('keydown', (ev) => {
+        try {
+          ev.preventDefault();
+          const parts = [];
+          if (ev.ctrlKey) parts.push('Ctrl');
+          if (ev.altKey) parts.push('Alt');
+          if (ev.shiftKey) parts.push('Shift');
+          const k = ev.key && ev.key.length === 1 ? ev.key.toUpperCase() : ev.key;
+          if (k && ['Control', 'Alt', 'Shift', 'Meta'].indexOf(k) < 0) parts.push(k);
+          if (!parts.length) return;
+          onSet(parts.join('+'));
+          setVal();
+        } catch (e) { /* ignore */ }
+      });
+      setVal();
+      const row = this.h('div', { class: 'svi-modal-row' }, this.labelBox(label, hint), input);
+      return { row: row, sync: setVal };
+    },
   };
+
+  // v6.4 兼容垫片: 旧 `ui` 名字保留为**转发** —— 控件的 DOM 构造只有 SviControls 一处实现,
+  //   不再存在第二套行渲染 (重建层会把调用点直接改成 SviControls.*, 那时再删掉这个垫片)。
+  const ui = {
+    h: function () { return SviControls.h.apply(SviControls, arguments); },
+    labelBox: function () { return SviControls.labelBox.apply(SviControls, arguments); },
+    section: function () { return SviControls.section.apply(SviControls, arguments); },
+    toggleRow: function () { return SviControls.toggleRow.apply(SviControls, arguments); },
+    sliderRow: function () { return SviControls.sliderRow.apply(SviControls, arguments); },
+    selectRow: function () { return SviControls.selectRow.apply(SviControls, arguments); },
+    chipRow: function () { return SviControls.chipRow.apply(SviControls, arguments); },
+    btnRow: function () { return SviControls.btnRow.apply(SviControls, arguments); },
+    textRow: function () { return SviControls.textRow.apply(SviControls, arguments); },
+    infoLine: function () { return SviControls.infoLine.apply(SviControls, arguments); },
+    pickerRow: function () { return SviControls.pickerRow.apply(SviControls, arguments); },
+  };
+
 
   // ==========================================
   // 23. 极简悬浮胶囊 UI 控制器与高级设置页 (全部区块经 ui 组件库构建)
@@ -13770,7 +13962,7 @@
 
       const secTitle = document.createElement('div');
       secTitle.className = 'svi-sec-title';
-      secTitle.innerHTML = `<span>🌐 本站能力</span><span id="svi-site-host" style="font-size:10px; color:#64748b;"></span>`;
+      secTitle.innerHTML = `<span>🌐 本站能力</span><span id="svi-site-host" style="font-size:10px; color:var(--svi-text-dim);"></span>`;
       sec.appendChild(secTitle);
 
       const host = profileKey();
@@ -15464,6 +15656,8 @@
     manualStateFor,
     ImageFxEngine,
     MediaCoverageEngine,
+    // v6.4 控件库 (单测契约 + 三处消费点共用; ui 只是它的兼容垫片)
+    SviControls,
     // v3.3 纯函数导出 (单测契约): 元素级规则归一化 / 首条命中
     normalizeElementRules,
     firstMatchingElementRule,

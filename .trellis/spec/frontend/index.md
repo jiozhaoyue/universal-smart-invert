@@ -20,6 +20,7 @@ This directory contains guidelines for frontend development. Fill in each file w
 | [State Management](./state-management.md) | Local state, global state, server state | To fill |
 | [Quality Guidelines](./quality-guidelines.md) | Code standards, forbidden patterns | Filled |
 | [Type Safety](./type-safety.md) | Type patterns, validation | To fill |
+| [设计 token 与控件库](./ui-design-tokens.md) | v6-4：设计 token 唯一真源 + 构建注入到 popup/options + `SviControls` 单一构造点（20 项）+ 零手写颜色 | Filled（中文） |
 | [区域掩码契约 RegionMask](./region-mask-contract.md) | **冻结**（2026-09-25）：区域掩码的唯一权威契约 + 不变量 I0~I8 + 消费纪律。v6-2/v6-3 只消费不修改 | Filled（中文，见文件内说明） |
 
 ---

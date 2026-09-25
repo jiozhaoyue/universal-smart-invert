@@ -4,12 +4,68 @@
   <meta charset="UTF-8">
   <title>智能反色</title>
   <style>
+    /* 构建时由 scripts/build-extension.js 从用户脚本的 v6.4-TOKENS-START/END 块逐字注入。
+       绝不要在这里手写颜色 —— 三处 token 的逐字节一致性由 test.js 把关。 */
+    /* ==========================================
+           v6.4 设计 token —— **全仓唯一真源**（用户 2026-09-26 裁决: 照搬 Dark Reader 深青调）
+           三处消费点: 用户脚本内嵌面板 / 扩展 popup / 扩展 options 页。
+           后两者由 scripts/build-extension.js 在构建时把本块**逐字注入** HTML 产物,
+           三处一致性由 test.js 的逐字节校验把关 —— 受"单文件真源"约束, 这是唯一可行的同源机制。
+           取色来源: PRD v6-4 R7 的 Dark Reader theme.less 实读表 (逐值照搬, 未自行调色)。
+           禁止在别处再定义颜色字面量: 面板 CSS 里出现任何 #hex / rgba(...) 都视为契约漂移
+           (test.js 有断言把关)。
+           ========================================== */
+        /* —— DR 颜色角色 (逐值照搬) —— */
+        --svi-bg: #141e24;              /* 底色 */
+        --svi-fg: #53a1b3;              /* 前景 / 主强调 */
+        --svi-ctl-bg: #141e24;          /* 控件底 */
+        --svi-ctl-hover: #193945;       /* 控件悬停 */
+        --svi-ctl-active: #316e7d;      /* 控件激活 */
+        --svi-input-fg: #53a1b3;        /* 输入前景 */
+        --svi-input-active: #ffffff;    /* 输入激活前景 */
+        --svi-input-ph: #316e7d;        /* 输入占位 */
+        --svi-border: #316e7d;          /* 描边 */
+        --svi-title: #e96c4c;           /* 标题 / 警告 */
+        --svi-error: #db4245;           /* 错误 */
+        --svi-success: #317c4e;         /* 成功 */
+        /* —— 深色底上的可读性派生量 (DR 只用其角色色, 本项目的文字对比需求略高) —— */
+        --svi-bg-deep: #0f161b;         /* 更深一层底 (模态 / 卡片下半) */
+        --svi-text-strong: #e8f4f6;     /* 高对比正文与标题 */
+        --svi-text-dim: #6f9aa6;        /* 次要文字（由 fg 降饱和派生） */
+        --svi-success-bright: #5fbf8a;  /* 深底上可读的成功色 */
+        --svi-error-bright: #e8756f;    /* 深底上可读的错误色 */
+        --svi-scrim: rgba(10, 15, 18, 0.72);   /* 模态蒙层 */
+        --svi-outline: rgba(var(--svi-fg-rgb), 0.35); /* 焦点 / 悬停描边 */
+        /* —— 供 rgba() 消费的三元组 (与上面的角色同源) —— */
+        --svi-bg-rgb: 20, 30, 36;
+        --svi-fg-rgb: 83, 161, 179;
+        --svi-success-rgb: 49, 124, 78;
+        --svi-error-rgb: 219, 66, 69;
+        --svi-warn-rgb: 233, 108, 76;
+        --svi-dim-rgb: 111, 154, 166;
+        --svi-white-rgb: 255, 255, 255;
+        --svi-black-rgb: 0, 0, 0;
+        /* —— 度量 token (字号 / 行高 / 描边 / 圆角 / 缩进 / 过渡) —— */
+        --svi-fs-sm: .625rem;
+        --svi-fs: .75rem;
+        --svi-fs-lg: .875rem;
+        --svi-lh-sm: .875rem;
+        --svi-lh: 1rem;
+        --svi-border-w: .125rem;
+        --svi-ctl-h: 1.5rem;
+        --svi-r-sm: .25rem;
+        --svi-r: .375rem;
+        --svi-r-lg: .75rem;
+        --svi-gap-sm: .5rem;
+        --svi-gap: .75rem;
+        --svi-tr-fast: 125ms;
+        --svi-tr-slow: 250ms;
     :root { color-scheme: dark; }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
       width: 320px;
-      background: #0b1220;
-      color: #e2e8f0;
+      background: var(--svi-bg-deep);
+      color: var(--svi-text-strong);
       font: 13px/1.5 system-ui, "Segoe UI", "Microsoft YaHei", sans-serif;
     }
     header {
@@ -18,76 +74,76 @@
     }
     header .logo {
       width: 14px; height: 14px; border-radius: 50%;
-      background: conic-gradient(from 180deg, #38bdf8 0 50%, #f8fafc 0);
-      box-shadow: 0 0 8px rgba(56, 189, 248, .55);
+      background: conic-gradient(from 180deg, var(--svi-fg) 0 50%, var(--svi-text-strong) 0);
+      box-shadow: 0 0 8px rgba(var(--svi-fg-rgb), 0.55);
     }
     header h1 { font-size: 14px; font-weight: 600; }
     header .ver {
-      margin-left: auto; font-size: 10px; color: #64748b;
-      border: 1px solid #1e293b; border-radius: 8px; padding: 1px 7px;
+      margin-left: auto; font-size: 10px; color: var(--svi-text-dim);
+      border: 1px solid var(--svi-ctl-hover); border-radius: 8px; padding: 1px 7px;
     }
     #host-row {
       display: flex; align-items: center; gap: 6px;
-      padding: 0 14px 10px; color: #94a3b8; font-size: 12px;
+      padding: 0 14px 10px; color: var(--svi-text-dim); font-size: 12px;
     }
-    #host { color: #38bdf8; font-weight: 600; max-width: 200px;
+    #host { color: var(--svi-fg); font-weight: 600; max-width: 200px;
             overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .power-row {
       display: flex; align-items: center; justify-content: space-between;
       margin: 0 10px; padding: 10px 12px;
-      background: #101a2c; border: 1px solid #1e293b; border-radius: 12px;
+      background: var(--svi-bg); border: 1px solid var(--svi-ctl-hover); border-radius: 12px;
     }
-    .power-row.off { border-color: #7f1d1d55; }
+    .power-row.off { border-color: rgba(var(--svi-error-rgb), 0.33); }
     .power-row .label b { display: block; font-size: 13px; }
-    .power-row .label span { display: block; font-size: 10px; color: #64748b; }
+    .power-row .label span { display: block; font-size: 10px; color: var(--svi-text-dim); }
     .switch { position: relative; width: 40px; height: 22px; flex: none; }
     .switch input { opacity: 0; width: 100%; height: 100%; position: absolute; cursor: pointer; margin: 0; }
     .switch .knob {
-      position: absolute; inset: 0; border-radius: 11px; background: #334155;
+      position: absolute; inset: 0; border-radius: 11px; background: var(--svi-ctl-active);
       transition: background .15s; pointer-events: none;
     }
     .switch .knob::after {
       content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px;
-      border-radius: 50%; background: #e2e8f0; transition: transform .15s;
+      border-radius: 50%; background: var(--svi-text-strong); transition: transform .15s;
     }
-    .switch input:checked + .knob { background: #0284c7; }
+    .switch input:checked + .knob { background: var(--svi-fg); }
     .switch input:checked + .knob::after { transform: translateX(18px); }
     section { padding: 10px 14px 4px; }
-    .sec-title { font-size: 10px; letter-spacing: 1px; color: #64748b; margin-bottom: 6px; }
+    .sec-title { font-size: 10px; letter-spacing: 1px; color: var(--svi-text-dim); margin-bottom: 6px; }
     .chips { display: flex; gap: 8px; }
     .chip {
       flex: 1; padding: 8px 0; text-align: center; font-size: 12px;
-      background: #101a2c; border: 1px solid #1e293b; border-radius: 10px;
-      cursor: pointer; color: #cbd5e1;
+      background: var(--svi-bg); border: 1px solid var(--svi-ctl-hover); border-radius: 10px;
+      cursor: pointer; color: var(--svi-text-strong);
     }
-    .chip.on { border-color: #38bdf8; color: #38bdf8; background: #38bdf81a; }
+    .chip.on { border-color: var(--svi-fg); color: var(--svi-fg); background: rgba(var(--svi-fg-rgb), 0.1); }
     .row {
       display: flex; align-items: center; justify-content: space-between;
       padding: 7px 0; gap: 10px;
     }
-    .row label { color: #cbd5e1; font-size: 12px; }
+    .row label { color: var(--svi-text-strong); font-size: 12px; }
     select {
-      background: #101a2c; color: #e2e8f0; border: 1px solid #1e293b;
+      background: var(--svi-bg); color: var(--svi-text-strong); border: 1px solid var(--svi-ctl-hover);
       border-radius: 8px; padding: 4px 8px; font-size: 12px; max-width: 150px;
     }
     .mini { display: flex; align-items: center; justify-content: space-between;
             padding: 7px 0; }
-    .mini label { color: #cbd5e1; font-size: 12px; }
-    .mini input { accent-color: #0284c7; width: 15px; height: 15px; }
+    .mini label { color: var(--svi-text-strong); font-size: 12px; }
+    .mini input { accent-color: var(--svi-fg); width: 15px; height: 15px; }
     #counts {
-      padding: 6px 14px; font-size: 11px; color: #64748b;
+      padding: 6px 14px; font-size: 11px; color: var(--svi-text-dim);
     }
     footer { padding: 8px 14px 14px; }
     button {
       width: 100%; padding: 9px 0; font-size: 12px;
-      background: #101a2c; color: #93c5fd; border: 1px solid #1e293b;
+      background: var(--svi-bg); color: var(--svi-text-strong); border: 1px solid var(--svi-ctl-hover);
       border-radius: 10px; cursor: pointer;
     }
-    button:hover { border-color: #38bdf8; }
+    button:hover { border-color: var(--svi-fg); }
     #unavailable {
       margin: 6px 14px 14px; padding: 14px; text-align: center;
-      color: #94a3b8; font-size: 12px; background: #101a2c;
-      border: 1px dashed #334155; border-radius: 12px;
+      color: var(--svi-text-dim); font-size: 12px; background: var(--svi-bg);
+      border: 1px dashed var(--svi-ctl-active); border-radius: 12px;
     }
     body.unavailable #host-row, body.unavailable .power-row,
     body.unavailable section, body.unavailable #counts, body.unavailable footer { display: none; }
