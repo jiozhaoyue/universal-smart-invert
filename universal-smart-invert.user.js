@@ -264,6 +264,14 @@
     maskSettleTimeoutMs: 800,    // 单元素摘罩超时兜底
     siteInvertRate: 0.35,        // 本站"已知会反色"门: 历史反色率门
     siteMinSeen: 5,              // 本站"已知会反色"门: 最少样本数
+
+    // ===== v6.0 新增偏好: 自动区域分割 (任务 v6-1, 部分反色的内核) =====
+    // 默认**全部关闭** —— 整图反色仍是主路径, 区域分割是同一管线的边际扩展。
+    // 关闭时零分割调用、零属性写入, 与 v5.0.0 行为一致 (父 PRD AC-6)。
+    regionSegment: false,        // 区域分割总开关
+    regionGridN: 16,             // 降采样网格 N×N (8 ~ 32; 越大越细, 耗时越高)
+    regionMinAreaRatio: 0.03,    // 最小连通域面积门 (占全图比例) —— D3「保守大块」
+    regionKRects: 3,             // 矢量快路径的矩形数上限 K (0 ~ 8; 0 = 只保留退化的零矩形表达)
   };
 
   // 运行时状态 (仅存于内存, 每个标签页独立, 绝不写入存储 —— 标签页隔离)
@@ -1041,6 +1049,14 @@
     merged.maskSettleTimeoutMs = Math.round(clampNumber(merged.maskSettleTimeoutMs, 200, 5000, 800));
     merged.siteInvertRate = clampNumber(merged.siteInvertRate, 0.05, 0.95, 0.35);
     merged.siteMinSeen = Math.round(clampNumber(merged.siteMinSeen, 1, 50, 5));
+    // v6.0 字段规范化: 自动区域分割 (默认关, 保守; 数值钳制)
+    //   注意: 此处刻意内联默认字面量而**不**引用 REGION_DEFAULTS —— 后者是 const 且定义在
+    //   像素管线段 (远晚于 loadState 的调用可能时刻), 会撞 TDZ。与 v5.0 actions / settingsLayout
+    //   的既有写法保持一致 (见 .trellis/spec/frontend/quality-guidelines.md v5.0 §8.4)。
+    merged.regionSegment = merged.regionSegment === true;
+    merged.regionGridN = Math.round(clampNumber(merged.regionGridN, 8, 32, 16));
+    merged.regionMinAreaRatio = clampNumber(merged.regionMinAreaRatio, 0.01, 0.25, 0.03);
+    merged.regionKRects = Math.round(clampNumber(merged.regionKRects, 0, 8, 3));
     // 标签页隔离: 运行时状态绝不入库
     delete merged.invertActive;
 
@@ -2763,6 +2779,8 @@
   // 反色侧原因码中文映射 (刻意**不合并**进 SKIP_REASON_ZH —— 那张表的键是"跳过原因", 语义不同)
   const REASON_ZH = {
     pixel: '像素判定',
+    // v6.0 区域分割来源 (阶段 6 接缝新增的 reason 码; source 仍是 'pixel', 不改 SOURCES 形状)
+    region: '区域分割判定',
     learned: '学习规则',
     protected: '种子保护',
     'seed-force': '种子强制反色',
@@ -5808,78 +5826,77 @@
     });
   }
 
-  function evaluateImagePixelStats(data, s = state) {
-    const lumCutoff = s.imgLumCutoff || 180;
-    const areaThreshold = (s.imgAreaThreshold || 48) / 100;
-    const toleranceSq = ((s.imgTolerance || 35) * 2.55) ** 2;
-    const generalLight = s.imgGeneralLight !== false;
-
+  // 图片浅色判定的**单像素谓词**及其预算上下文 —— 唯一真源。
+  //   整图判定 (evaluateImagePixelStats) 与 v6.0 区域分割的逐格判定 (regionCellGrid) 必须
+  //   共用本谓词: 各写一份必然漂移 (.trellis/spec/frontend/quality-guidelines.md v5.4 §2
+  //   「两条采样路径必须共用同一判定函数」)。
+  //   ctx 预先把色卡 / 容差 / 屏蔽色算好 —— 这些在逐像素循环里重算是纯浪费。
+  function buildLightTestCtx(s) {
+    const p = s || state;
     const activePresets = [];
-    if (s.imgPresets) {
-      for (const p of IMG_COLOR_PRESETS) {
-        if (s.imgPresets[p.id]) {
-          activePresets.push(p.rgb);
-        }
+    if (p.imgPresets) {
+      for (const pr of IMG_COLOR_PRESETS) {
+        if (p.imgPresets[pr.id]) activePresets.push(pr.rgb);
       }
     }
-    const customRgb = s.imgCustomColor ? hexToRgb(s.imgCustomColor) : null;
-    const shieldRgb = parseShieldColors(s.shieldColors);
+    return {
+      generalLight: p.imgGeneralLight !== false,
+      lumCutoff: p.imgLumCutoff || 180,
+      toleranceSq: ((p.imgTolerance || 35) * 2.55) ** 2,
+      activePresets: activePresets,
+      customRgb: p.imgCustomColor ? hexToRgb(p.imgCustomColor) : null,
+      shieldRgb: parseShieldColors(p.shieldColors),
+    };
+  }
+
+  // 单像素分类: -1 = 完全不参与判定 (透明); 0 = 计入不透明但**非浅色**(含被原色屏蔽的);
+  //   1 = 浅色。
+  //   -1 与 0 的区别是有意的: 透明像素**不**计入 opaqueCount, 被屏蔽的**计入** ——
+  //   这是 evaluateImagePixelStats 的既有语义, 抽取时必须逐字保留 (分母不同会改结论)。
+  function classifyLightPixel(r, g, b, a, ctx) {
+    if (a < 64) return -1; // 忽略透明像素
+
+    // 原色屏蔽: 命中屏蔽列表的像素永不参与浅色判定 (但仍计入不透明)
+    const shieldRgb = ctx.shieldRgb;
+    if (shieldRgb.length) {
+      for (let si = 0; si < shieldRgb.length; si++) {
+        const sc = shieldRgb[si];
+        if (Math.abs(r - sc[0]) <= 24 && Math.abs(g - sc[1]) <= 24 && Math.abs(b - sc[2]) <= 24) return 0;
+      }
+    }
+
+    const lum = (r * 77 + g * 150 + b * 29) >> 8;
+    const max = Math.max(r, g, b);
+    const min = Math.min(r, g, b);
+    const sat = max === 0 ? 0 : (max - min) / max;
+
+    // 1. 全浅色通用自适应
+    if (ctx.generalLight && lum >= ctx.lumCutoff && sat <= 0.38) return 1;
+
+    // 2. 匹配预设色卡
+    for (let j = 0; j < ctx.activePresets.length; j++) {
+      const pc = ctx.activePresets[j];
+      if ((r - pc[0]) ** 2 + (g - pc[1]) ** 2 + (b - pc[2]) ** 2 <= ctx.toleranceSq) return 1;
+    }
+    // 3. 匹配自定义色图选色
+    const customRgb = ctx.customRgb;
+    if (customRgb && (r - customRgb[0]) ** 2 + (g - customRgb[1]) ** 2 + (b - customRgb[2]) ** 2 <= ctx.toleranceSq) return 1;
+
+    return 0;
+  }
+
+  function evaluateImagePixelStats(data, s = state) {
+    const areaThreshold = (s.imgAreaThreshold || 48) / 100;
+    const ctx = buildLightTestCtx(s);
 
     let lightCount = 0;
     let opaqueCount = 0;
 
     for (let i = 0; i < data.length; i += 4) {
-      const a = data[i + 3];
-      if (a < 64) continue; // 忽略透明像素
+      const cls = classifyLightPixel(data[i], data[i + 1], data[i + 2], data[i + 3], ctx);
+      if (cls === -1) continue; // 透明像素: 不计入 opaqueCount
       opaqueCount++;
-
-      const r = data[i];
-      const g = data[i + 1];
-      const b = data[i + 2];
-
-      // 原色屏蔽: 命中屏蔽列表的像素永不参与浅色判定
-      if (shieldRgb.length) {
-        let shielded = false;
-        for (let si = 0; si < shieldRgb.length; si++) {
-          const sc = shieldRgb[si];
-          if (Math.abs(r - sc[0]) <= 24 && Math.abs(g - sc[1]) <= 24 && Math.abs(b - sc[2]) <= 24) {
-            shielded = true;
-            break;
-          }
-        }
-        if (shielded) continue;
-      }
-
-      const lum = (r * 77 + g * 150 + b * 29) >> 8;
-      const max = Math.max(r, g, b);
-      const min = Math.min(r, g, b);
-      const sat = max === 0 ? 0 : (max - min) / max;
-
-      let isLight = false;
-
-      // 1. 全浅色通用自适应
-      if (generalLight && lum >= lumCutoff && sat <= 0.38) {
-        isLight = true;
-      } else {
-        // 2. 匹配预设色卡
-        for (let j = 0; j < activePresets.length; j++) {
-          const p = activePresets[j];
-          const d2 = (r - p[0]) ** 2 + (g - p[1]) ** 2 + (b - p[2]) ** 2;
-          if (d2 <= toleranceSq) {
-            isLight = true;
-            break;
-          }
-        }
-        // 3. 匹配自定义色图选色
-        if (!isLight && customRgb) {
-          const d2 = (r - customRgb[0]) ** 2 + (g - customRgb[1]) ** 2 + (b - customRgb[2]) ** 2;
-          if (d2 <= toleranceSq) {
-            isLight = true;
-          }
-        }
-      }
-
-      if (isLight) lightCount++;
+      if (cls === 1) lightCount++;
     }
 
     // v4.5: 返回统计 (lightRatio = 亮像素/不透明像素) —— 自动反色的"白底主导"证据
@@ -5970,34 +5987,60 @@
   }
 
   // 统一解码链: 本地采样 → 跨域污染或空白采样 (SVG/alpha 嫌疑) → blob 回退 (GM/fetch → 嵌套解码)
-  async function analyzeSrc(src, drawable, prefsState = state) {
+  // v6.0: 第 4 参 wantGrid —— 区域分割启用时以 regionGridN 采样, 并在返回值上附带逐格判定网格。
+  //   缺省 false 时采样尺寸与分母**完全不变** (本地 8 / blob 16), 与 v5.0.0 行为逐字节一致。
+  async function analyzeSrc(src, drawable, prefsState = state, wantGrid = false) {
+    // 网格模式下的采样尺寸 (state.regionGridN 已由 loadState 钳制到 8~32)
+    const gridN = wantGrid ? Math.max(8, Math.min(32, Math.round(state.regionGridN || 16))) : 0;
+    const localSize = gridN || 8;
+    const blobSize = gridN || 16;
+
     let sample = null;
+    // v6.0: 失败根因 (fail) 与 ok 一起返回 —— 区域分割的契约要求降级原因**显式可观测**
+    //   (design §10 / 不变量 I4)。对既有调用方零影响 (它们只看 ok)。
+    //   优先级: taint (污染画布) > no-pixels (没有可用像素) > cross-origin (无可采样元素) > decode。
+    let localFail = '';
     if (drawable) {
       try {
-        sample = sampleDrawable(drawable, 8);
+        sample = sampleDrawable(drawable, localSize);
       } catch (e) {
         sample = null; // SecurityError / tainted canvas
+        localFail = 'taint';
       }
+      if (!sample) localFail = localFail || 'cross-origin';
+      else if (sample.opaqueCount < 8) localFail = 'no-pixels';
+    } else {
+      localFail = 'cross-origin';
     }
 
     if (sample && sample.opaqueCount >= 8) {
       const st = evaluateImagePixelStats(sample.data, prefsState);
-      return { ok: true, isLight: st.isLight, lightRatio: st.lightRatio, meanLum: meanLuminance(sample.data), opaqueRatio: sample.opaqueCount / 64, viaFallback: false };
+      const out = { ok: true, isLight: st.isLight, lightRatio: st.lightRatio, meanLum: meanLuminance(sample.data), opaqueRatio: sample.opaqueCount / (localSize * localSize), viaFallback: false };
+      if (gridN) {
+        const g = regionCellGrid(sample.data, gridN, prefsState);
+        out.grid = { gw: gridN, gh: gridN, cellLight: g.cells, ratio: regionGridRatio(g.cells, g.opaque) };
+      }
+      return out;
     }
 
     StatsManager.count('taintFallbacks');
     try {
       const blob = await gmFetchBlob(src);
-      const s16 = await decodeBlobSample(blob, 16);
-      if (s16.opaqueCount < 8) return { ok: false };
-      const st = evaluateImagePixelStats(s16.data, prefsState);
-      return { ok: true, isLight: st.isLight, lightRatio: st.lightRatio, meanLum: meanLuminance(s16.data), opaqueRatio: s16.opaqueCount / 256, viaFallback: true };
+      const sb = await decodeBlobSample(blob, blobSize);
+      if (sb.opaqueCount < 8) return { ok: false, fail: 'no-pixels' };
+      const st = evaluateImagePixelStats(sb.data, prefsState);
+      const out = { ok: true, isLight: st.isLight, lightRatio: st.lightRatio, meanLum: meanLuminance(sb.data), opaqueRatio: sb.opaqueCount / (blobSize * blobSize), viaFallback: true };
+      if (gridN) {
+        const g = regionCellGrid(sb.data, gridN, prefsState);
+        out.grid = { gw: gridN, gh: gridN, cellLight: g.cells, ratio: regionGridRatio(g.cells, g.opaque) };
+      }
+      return out;
     } catch (e) {
       // file:// 页面且本地文件访问被拦 → 记录一次性 UI 提示 (不崩溃, 优雅降级)
       try {
         if (location.protocol === 'file:') runtime.fileAccessBlocked = true;
       } catch (e2) { /* ignore */ }
-      return { ok: false };
+      return { ok: false, fail: localFail || 'decode' };
     }
   }
 
@@ -6253,6 +6296,695 @@
       });
     }
     return out;
+  }
+
+  // ==========================================
+  // 12.5 v6.0 区域分割内核 (任务 v6-1) —— 掩码契约 + 构造 / 校验 / 纯函数骨架
+  //   本片只落地「契约与骨架」: 不接任何调用点、不渲染、不改 DOM 观感、不新增属性写入。
+  //   契约冻结后由 v6-2 (渲染层) 与 v6-3 (纠正回路) 消费; 两者**不得**重新实现分割。
+  //   设计依据: .trellis/tasks/09-25-v6-auto-region/design.md §3 契约 / §4 管线 / §5 双门
+  //
+  //   为什么放在像素管线段: 区域判定的输入就是这一段的采样与双特征口径。v5.4 契约要求
+  //   「两条采样路径必须共用同一判定函数」, 故本段只做**局部化**, 不新建判定路径,
+  //   也不新建第二条解码链; 双特征口径一律经 getEvalPrefs() 读取 (图片路径的唯一读取点,
+  //   含站点级阈值覆盖透传 —— 「透了才生效」)。
+  // ==========================================
+
+  // 契约版本 —— 消费方必须校验; 版本不符视为不可用 (降级为整图判定)
+  const REGION_MASK_VERSION = 1;
+
+  // 面积门的默认值 —— 同时是**双门阈值的来源**: 抠掉的量连「最小特征块」都不到时,
+  //   既不值得进分割, 也不值得挂掩码层。故 双门上界 = 1 - 本值, 双门下界 = 本值。
+  const REGION_MIN_AREA_RATIO = 0.03;
+
+  // 区域分割参数默认值 —— **单一真源** (v6-3 的「一键回滚到默认参数」即回滚到本对象)
+  //   注意: 这些默认值必须与 DEFAULT_PREFS.region* 及 loadState 的钳制默认一致;
+  //   loadState 侧刻意内联字面量以避开 TDZ, 故三处的一致性由 test.js 断言把关。
+  const REGION_DEFAULTS = {
+    gridN: 16,            // 降采样网格 N×N (8 ~ 32)
+    minAreaRatio: REGION_MIN_AREA_RATIO, // 最小连通域面积门 (D3「保守大块」: 占全图比例)
+    kRects: 3,            // 矢量快路径的矩形数上限 K
+    // 双门阈值 —— **不用 0.90/0.10**, 用 0.97/0.03。理由与实测 (2026-09-25 裁决, implement.md 偏离 7):
+    //   ① 门 1 量的是「整图有多单色」, 但它真正要问的是「有没有值得分割的东西」——
+    //      嵌入内容只要 ≥3% 就该被保原色, 而 0.90 让「浅色占比 0.902 的图」(= 一块 9.8% 的
+    //      彩色插图/logo/二维码) 在进分割前就被短路成整图反色, 正是 PRD 背景点名要防的事。
+    //      实测: 16×16、浅底 + 5×5 嵌入块 → 浅色占比 0.902 ≥ 0.90 → 门 1 直接整图反色。
+    //   ② 门 2 量的是「抠掉了多少」, 与门 1 不同量, 但**同一个数值口径**: 抠掉的量 < 最小特征块
+    //      ⟺ 一格都没抠掉 (因为任何存活的特征块都 ≥ 面积门)。所以两门用同一对阈值是自洽的。
+    //   ③ 与面积门硬耦合 (1 - minAreaRatio), 改一处即两处同步 —— 杜绝两个 0.97 各自漂移。
+    //   代价: 浅色占比 0.90~0.97 的图会多付一次 N×N 分割 (实测见 test.js 的 v6.0 阶段 3 bench,
+    //   16×16 量级远低于内部 16ms 预算)。若实测证明该代价不可接受, 改这两个数即可回退。
+    wholeRatioHigh: 1 - REGION_MIN_AREA_RATIO,   // 门 1 上侧: 整图浅色占比 ≥ 此值 → 直接整图反色
+    wholeRatioLow: REGION_MIN_AREA_RATIO,        // 门 1 下侧: ≤ 此值 → 直接不反色
+    segmentRatioHigh: 1 - REGION_MIN_AREA_RATIO, // 门 2 上侧: 抠除后覆盖率 ≥ 此值 → 退回整图反色
+    segmentRatioLow: REGION_MIN_AREA_RATIO,      // 门 2 下侧: ≤ 此值 → 退回不反色
+  };
+
+  // 精确矩形分解的搜索节点预算 (性能护栏, 不是可调参数, 故不进 REGION_DEFAULTS)。
+  //   触顶的唯一后果是**退到位图表达** (慢一点点, 但正确性不变) —— 绝不产出错误掩码。
+  const REGION_RECT_NODE_BUDGET = 4096;
+
+  // 单图掩码构建的内部时限 (同上: 安全阀, 不是用户参数)。
+  //   超时的后果是**退化为整图判定** (design §10 budget 行), 由 regionMaskTake 落实。
+  const REGION_BUILD_BUDGET_MS = 16;
+
+  // 合法来源集合 (契约 §3 的 source 字段)
+  const REGION_SOURCES = { region: 1, whole: 1, none: 1, degraded: 1 };
+
+  // data (逐格 0/1) 的 1 占比 —— coverage 的**唯一**算法, 保证不变量 I6
+  function regionCoverage(data) {
+    if (!data || !data.length) return 0;
+    let n = 0;
+    for (let i = 0; i < data.length; i++) { if (data[i]) n++; }
+    return n / data.length;
+  }
+
+  // 把 N×N 采样切成 N×N 格, 逐格跑**同一套**单像素谓词 —— 区域分割的判定输入。
+  //   每格 = 一个降采样像素。由于 drawImage 的降采样是**区域平均**, 每格代表源图的一小块
+  //   而不是单点采样, 因此逐格判定是有意义的 (这也是为什么逐格不需要再自己算占比)。
+  //
+  //   为什么直接调 classifyLightPixel 而不是 evaluateImagePixelStats:
+  //   后者的 `opaqueCount < 8` 是**聚合级**策略守卫 (整图样本太少不足以判定), **不是谓词
+  //   的一部分**。拿它做逐格判定会让每一格都返回 isLight:false (单像素 opaqueCount 恒为 1)。
+  //   共用谓词本体才是规范 v5.4 §2 说的「同源」。
+  //
+  //   返回 { cells, opaque } —— opaque 是**不透明**格数, 与整图口径一致地当分母。
+  function regionCellGrid(data, size, prefsState) {
+    const ctx = buildLightTestCtx(prefsState || state);
+    const cells = new Uint8Array(size * size);
+    let opaque = 0;
+    for (let i = 0; i < cells.length; i++) {
+      const o = i * 4;
+      const cls = classifyLightPixel(data[o], data[o + 1], data[o + 2], data[o + 3], ctx);
+      if (cls === -1) continue; // 透明格: 与整图口径一致, 不计入不透明
+      opaque++;
+      if (cls === 1) cells[i] = 1;
+    }
+    return { cells: cells, opaque: opaque };
+  }
+
+  // 网格的整图浅色占比 —— 与 evaluateImagePixelStats 的 lightRatio **同口径**
+  //   (分母是**不透明**格数, 不是总格数; 用总格数会让含透明区的图系统性偏低)。
+  function regionGridRatio(cells, opaque) {
+    if (!opaque || !cells || !cells.length) return 0;
+    let light = 0;
+    for (let i = 0; i < cells.length; i++) { if (cells[i]) light++; }
+    return light / opaque;
+  }
+
+  // ---- 形态学 (3×3, 8 邻域) ----
+  //   网格只有 8×8 ~ 32×32 量级 (≤1024 格), 直接在小 Uint8Array 上做, 成本可忽略。
+  //   邻接度必须与 regionComponents 保持一致 (都用 8 邻域) —— 否则"先开后连"的语义会拧:
+  //   开运算按 8 邻域拆掉的东西, 可能按 4 邻域本来就断开, 面积门就会算错。
+  function regionDilate(cells, gw, gh) {
+    const out = new Uint8Array(cells.length);
+    for (let y = 0; y < gh; y++) {
+      for (let x = 0; x < gw; x++) {
+        if (!cells[y * gw + x]) continue;
+        for (let dy = -1; dy <= 1; dy++) {
+          const yy = y + dy;
+          if (yy < 0 || yy >= gh) continue;
+          for (let dx = -1; dx <= 1; dx++) {
+            const xx = x + dx;
+            if (xx < 0 || xx >= gw) continue;
+            out[yy * gw + xx] = 1;
+          }
+        }
+      }
+    }
+    return out;
+  }
+
+  // 腐蚀: **边界复制** (越界取最近的边缘格), 不是按背景处理。
+  //   为什么: 按背景处理会让触边对象被收缩, 而在 close = erode(dilate(...)) 里会造出一圈
+  //   0 值边界环 —— 那一环面积够大 (16×16 下 60 格) 会被面积门当成"特征大块"抠掉,
+  //   后果是**图片最外一圈永远不被反色** (白底幻灯片会出现一圈白框)。实测抓到, 见
+  //   test.js 的形态学断言。掩码语义上图片边缘不是"背景", 边缘格就是边界, 复制是正确的
+  //   有限域约定 (等同 scipy.ndimage 的 mode='nearest')。
+  function regionErode(cells, gw, gh) {
+    const out = new Uint8Array(cells.length);
+    for (let y = 0; y < gh; y++) {
+      for (let x = 0; x < gw; x++) {
+        let all = 1;
+        for (let dy = -1; dy <= 1 && all; dy++) {
+          const yy = Math.min(gh - 1, Math.max(0, y + dy));
+          for (let dx = -1; dx <= 1; dx++) {
+            const xx = Math.min(gw - 1, Math.max(0, x + dx));
+            if (!cells[yy * gw + xx]) { all = 0; break; }
+          }
+        }
+        out[y * gw + x] = all;
+      }
+    }
+    return out;
+  }
+
+  function regionClose(cells, gw, gh) { return regionErode(regionDilate(cells, gw, gh), gw, gh); }
+  function regionOpen(cells, gw, gh) { return regionDilate(regionErode(cells, gw, gh), gw, gh); }
+
+  // 连通域标记 (8 邻域)。返回 [{ idx: number[], area: number }], 只含值等于 target 的连通域。
+  //   用显式队列的迭代 BFS —— 网格上限 1024 格, 递归会爆栈。
+  function regionComponents(cells, target, gw, gh) {
+    const seen = new Uint8Array(cells.length);
+    const queue = new Int32Array(cells.length);
+    const comps = [];
+    for (let s = 0; s < cells.length; s++) {
+      if (seen[s] || cells[s] !== target) continue;
+      let head = 0;
+      let tail = 0;
+      queue[tail++] = s;
+      seen[s] = 1;
+      const idx = [];
+      while (head < tail) {
+        const i = queue[head++];
+        idx.push(i);
+        const x = i % gw;
+        const y = (i / gw) | 0;
+        for (let dy = -1; dy <= 1; dy++) {
+          const yy = y + dy;
+          if (yy < 0 || yy >= gh) continue;
+          for (let dx = -1; dx <= 1; dx++) {
+            const xx = x + dx;
+            if (xx < 0 || xx >= gw) continue;
+            const j = yy * gw + xx;
+            if (seen[j] || cells[j] !== target) continue;
+            seen[j] = 1;
+            queue[tail++] = j;
+          }
+        }
+      }
+      comps.push({ idx: idx, area: idx.length });
+    }
+    return comps;
+  }
+
+  // 默认方向 (design §4 ④, **不得搞反**) + 面积门。
+  //   carve-color (整图偏浅, 主场景): 反色 = 全图 ∖ (面积达标的「非浅色」连通域)
+  //   carve-light (整图偏深, 对偶):   反色 = 面积达标的「浅色」连通域
+  //
+  //   为什么 carve-color 要反过来做 (先找大块再取补, 而不是直接找"该反色的格"):
+  //   白底黑字里字与字之间的白缝若被单独识别成区块, 会产生碎裂掩码; 先找大面积彩色/深色块
+  //   再取补, 得到的是「大块连续」的反色区域。
+  //
+  //   面积门的语义 = 「小块跟随邻域多数」: 面积不足的特征块**不进** big 表, 于是 carve-color 里
+  //   它们跟着多数走(被反色), carve-light 里也跟多数走(不被反色)。不需要单独再写一遍跟随逻辑。
+  function regionCarve(cells, gw, gh, opts) {
+    const o = opts || REGION_DEFAULTS;
+    const ratio = regionCoverage(cells);
+    const polarity = ratio > 0.5 ? 'carve-color' : 'carve-light';
+    const minArea = Math.max(1, Math.round(o.minAreaRatio * gw * gh));
+
+    // 特征集 F —— **形态学必须施加在"要被连通域分析的那个集合"上**, 而不是笼统地施加在 cells 上。
+    //   carve-color 分析的是「非浅色」集, carve-light 分析的是「浅色」集。
+    //   (初版把 close→open 施加在 cells 上: 对 carve-light 恰好等价, 对 carve-color 是**反的** ——
+    //    open 侵蚀浅色集反而制造出更多非浅色格, 等于把噪点喂给面积门。)
+    const F = new Uint8Array(cells.length);
+    if (polarity === 'carve-color') {
+      for (let i = 0; i < F.length; i++) F[i] = cells[i] ? 0 : 1;
+    } else {
+      for (let i = 0; i < F.length; i++) F[i] = cells[i] ? 1 : 0;
+    }
+
+    // **先开后闭** (2026-09-25 用户裁决, implement.md 偏离 5): 开运算(去细碎/细线) → 闭运算(填小洞)。
+    //   顺序不可颠倒的原因, 实测教训 (原设计写的是「先闭后开」, 是错的):
+    //   闭运算的第一步是**膨胀**, 它会把行距 ≤2 格的多条 1 格厚文字带合并成一条实心带,
+    //   之后的开运算只能腐蚀不能拆开 —— 结果是「白底黑字整片文字区」被当成一个大特征块抠掉,
+    //   文字保持原色 → 整图反色后白字印在白底上(实为深底) → **文字消失**。
+    //   实测数据: 16×16 网格, 5 条 1 格厚文字带 → 先闭后开被抠 60/60; 先开后闭被抠 0/60。
+    //   先开后闭还让下面那句「厚度门挡细笔划」**真的成立** (先闭后开时它只是注释里的一厢情愿):
+    const work = regionClose(regionOpen(F, gw, gh), gw, gh);
+
+    const big = new Uint8Array(cells.length);
+    const comps = regionComponents(work, 1, gw, gh);
+    for (let c = 0; c < comps.length; c++) {
+      if (comps[c].area < minArea) continue;
+      const idx = comps[c].idx;
+      for (let k = 0; k < idx.length; k++) big[idx[k]] = 1;
+    }
+
+    const data = new Uint8Array(cells.length);
+    if (polarity === 'carve-color') {
+      for (let i = 0; i < data.length; i++) data[i] = big[i] ? 0 : 1; // 反色 = 全图 ∖ 大块
+    } else {
+      for (let i = 0; i < data.length; i++) data[i] = big[i] ? 1 : 0; // 反色 = 只有大块
+    }
+    return { data: data, polarity: polarity, minArea: minArea, feature: F };
+  }
+
+  // ---- 表达选择 (契约 §6 / R6) ----
+
+  // 精确矩形铺满: 用 ≤ kMax 个**互不相交**的矩形把 set 恰好铺满 (并集 === set, 一格不多不少)。
+  //   返回矩形数组 [{x,y,w,h}] (格坐标) 或 null (铺不出来 / 超预算)。
+  //
+  //   为什么必须**互不相交**: 消费方用 clip-path 的多边形 / mask-image 的矩形叠加渲染,
+  //   重叠子路径在 nonzero 与 evenodd 两种填充规则下语义分叉 (可能互相抵消), 互不相交就没有二义性。
+  //   为什么必须**精确**: R6 的 AC 要求「两种表达在同一掩码上的渲染结果像素级等价」, 而
+  //   design §6 原稿的「面积偏差 < 2% 容差即认为等价」是**近似**——近似不可能像素级等价,
+  //   二者只能取一。取 PRD 的 AC, 故本实现只做精确分解 (见 implement.md 偏离 8)。
+  //
+  //   算法 (为什么枢轴一定是矩形左上角): 每次取**行主序第一个未覆盖格**作枢轴。因为:
+  //   ① 矩形不含 set 外的格 (精确); ② 互不相交 (已覆盖的格不能再进新矩形);
+  //   ③ 行主序在枢轴之前的格要么已覆盖, 要么本来就不在 set 内。
+  //   若矩形左上角在枢轴左边 (同一行) → 必然含枢轴左侧那个格 → 它已覆盖 → 违反 ②;
+  //   若在枢轴上方 (更早的行) → 整行都在枢轴之前 → 同为已覆盖 → 违反 ②。
+  //   故左上角 === 枢轴本身, 候选集只剩「以枢轴为左上、完全落在 set 内的所有矩形」。
+  //   深度上限 kMax (默认 3) + 「剩余格数 / 单矩形最大面积」下界剪枝, 网格 ≤1024 格下开销可忽略。
+  function regionRectsExact(set, gw, gh, kMax, budget) {
+    let remaining = 0;
+    for (let i = 0; i < set.length; i++) { if (set[i]) remaining++; }
+    if (remaining === 0) return [];
+    if (kMax <= 0) return null;
+
+    const pending = Uint8Array.from(set); // 尚未被铺满的目标格
+    const rects = [];
+    const nodes = { n: 0 };
+    const nodeMax = budget || REGION_RECT_NODE_BUDGET;
+
+    function fill(x, y, w, h, val) {
+      for (let yy = y; yy < y + h; yy++) {
+        const row = yy * gw;
+        for (let xx = x; xx < x + w; xx++) pending[row + xx] = val;
+      }
+    }
+
+    function solve(left) {
+      if (left === 0) return true;
+      if (rects.length >= kMax) return false;
+      if (++nodes.n > nodeMax) return false;
+
+      let pivot = -1;
+      for (let i = 0; i < pending.length; i++) { if (pending[i]) { pivot = i; break; } }
+      if (pivot < 0) return true;
+      const x0 = pivot % gw;
+      const y0 = (pivot / gw) | 0;
+
+      // 枚举以枢轴为左上的候选矩形: width[h-1] = 前 h 行都成立的连续宽度
+      const width = [];
+      const cand = [];
+      let maxArea = 0;
+      for (let h = 1; y0 + h <= gh; h++) {
+        const row = (y0 + h - 1) * gw;
+        let w = 0;
+        while (x0 + w < gw && pending[row + x0 + w]) w++;
+        if (w === 0) break;
+        const limit = h === 1 ? w : Math.min(width[h - 2], w);
+        width[h - 1] = limit;
+        for (let ww = limit; ww >= 1; ww--) { // 大矩形优先: 更早得到少矩形的解
+          const area = ww * h;
+          if (area > maxArea) maxArea = area;
+          cand.push([ww, h, area]);
+        }
+      }
+      if (!cand.length) return false;
+
+      // 下界剪枝: 就算每次都用上最大矩形也铺不完 → 直接失败
+      const slots = kMax - rects.length;
+      if (Math.ceil(left / maxArea) > slots) return false;
+
+      cand.sort(function (a, b) { return b[2] - a[2]; });
+      for (let c = 0; c < cand.length; c++) {
+        const w = cand[c][0];
+        const h = cand[c][1];
+        fill(x0, y0, w, h, 0);
+        rects.push({ x: x0, y: y0, w: w, h: h });
+        if (solve(left - w * h)) return true;
+        rects.pop();
+        fill(x0, y0, w, h, 1);
+        if (nodes.n > nodeMax) return false;
+      }
+      return false;
+    }
+
+    return solve(remaining) ? rects : null;
+  }
+
+  // 掩码 → 渲染就绪表达 (契约 §6 / R6 / 不变量 I7·I8)。
+  //   优先试**少数侧** (覆盖率高 → 洞式 holes; 低 → 孤岛式 islands), 失败再试另一侧;
+  //   两侧都铺不出来才落位图。这样「整图反色 + 挖一个洞」与「深底 + 圈一块孤岛」都能走矢量快路径,
+  //   消费方不需要分支 (只读 expr.kind)。
+  function deriveRegionExpr(data, gw, gh, opts) {
+    const o = opts || REGION_DEFAULTS;
+    const gwv = Math.max(1, Math.round(gw || o.gridN));
+    const ghv = Math.max(1, Math.round(gh || gwv));
+    const cov = regionCoverage(data);
+    // 全反 / 全不反 都能用**零个**矩形精确表达 → 走矢量快路径, 省一次位图解码
+    if (cov === 1) return { kind: 'holes', holes: [] };
+    if (cov === 0) return { kind: 'islands', polys: [] };
+
+    const kMax = Math.max(0, Math.round(o.kRects != null ? o.kRects : REGION_DEFAULTS.kRects));
+    const firstHoles = cov >= 0.5;
+    for (let pass = 0; pass < 2; pass++) {
+      const wantHoles = pass === 0 ? firstHoles : !firstHoles;
+      const set = new Uint8Array(data.length);
+      for (let i = 0; i < data.length; i++) {
+        set[i] = wantHoles ? (data[i] ? 0 : 1) : (data[i] ? 1 : 0);
+      }
+      const rects = regionRectsExact(set, gwv, ghv, kMax, o.rectBudget);
+      if (rects) {
+        // 归一化 0~1 (契约 §3: 与渲染尺寸无关, 供 objectBoundingBox 口径消费)
+        const norm = [];
+        for (let r = 0; r < rects.length; r++) {
+          const q = rects[r];
+          norm.push({ x: q.x / gwv, y: q.y / ghv, w: q.w / gwv, h: q.h / ghv });
+        }
+        return wantHoles ? { kind: 'holes', holes: norm } : { kind: 'islands', polys: norm };
+      }
+    }
+
+    const bytes = new Uint8Array(data.length);
+    for (let i = 0; i < data.length; i++) bytes[i] = data[i] ? 255 : 0;
+    return { kind: 'bitmap', bytes: bytes };
+  }
+
+  // 构造 RegionMask —— **唯一构造入口**。
+  //   data 是权威数据; coverage 与 expr 一律由 data 派生 (调用方不得自己算, 否则 I6/I8 会漂)。
+  //   source 语义:
+  //     'whole'    整图反色   → data 全 1
+  //     'none'     不反色     → data 全 0
+  //     'region'   走完分割   → 必须传入 data, 且 coverage 落在 (0,1) 开区间
+  //     'degraded' 读不到像素 → 退化为整图结论 + degrade.reason (必填)
+  function makeRegionMask(opts) {
+    const o = opts || {};
+    const gw = Math.max(1, Math.round(o.gw || REGION_DEFAULTS.gridN));
+    const gh = Math.max(1, Math.round(o.gh || gw));
+    const source = REGION_SOURCES[o.source] ? o.source : 'region';
+
+    let data;
+    if (o.data && o.data.length === gw * gh) {
+      data = Uint8Array.from(o.data);
+    } else {
+      data = new Uint8Array(gw * gh);
+      if (source === 'whole') data.fill(1);
+    }
+
+    let degrade = (o.degrade && typeof o.degrade === 'object')
+      ? { reason: String(o.degrade.reason || 'unknown') }
+      : null;
+    // I4: degraded 必须带原因, 缺失时补一个显式的 'unknown' 而不是静默放行
+    if (source === 'degraded' && !degrade) degrade = { reason: 'unknown' };
+
+    return {
+      v: REGION_MASK_VERSION,
+      key: String(o.key || ''),
+      gw: gw,
+      gh: gh,
+      data: data,
+      coverage: regionCoverage(data),
+      polarity: o.polarity === 'carve-light' ? 'carve-light' : 'carve-color',
+      source: source,
+      degrade: degrade,
+      expr: o.expr || deriveRegionExpr(data, gw, gh, o.exprOpts),
+    };
+  }
+
+  // 契约校验 —— 覆盖 design §3.1 的 I0~I7。返回 { ok, errors[] }。
+  //   v6-2 / v6-3 消费任何掩码前必须先过这一道 (防契约漂移), 不通过即按降级处理。
+  function validateRegionMask(m) {
+    const errs = [];
+    if (!m || typeof m !== 'object') return { ok: false, errors: ['mask 不是对象'] };
+    if (m.v !== REGION_MASK_VERSION) errs.push('I0 契约版本不符: ' + m.v);
+    if (!REGION_SOURCES[m.source]) errs.push('I0 source 非法: ' + m.source);
+    const gw = m.gw;
+    const gh = m.gh;
+    if (!Number.isInteger(gw) || !Number.isInteger(gh) || gw <= 0 || gh <= 0) {
+      errs.push('I1 网格尺寸非法: ' + gw + 'x' + gh);
+    } else if (!(m.data instanceof Uint8Array) || m.data.length !== gw * gh) {
+      errs.push('I1 data 长度不等于 gw*gh');
+    }
+    if (errs.length) return { ok: false, errors: errs };
+
+    const cov = regionCoverage(m.data);
+    if (Math.abs(cov - m.coverage) > 1e-9) errs.push('I6 coverage 与 data 不一致');
+    if (m.source === 'whole' && cov !== 1) errs.push('I2 whole 要求 data 全 1');
+    if (m.source === 'none' && cov !== 0) errs.push('I3 none 要求 data 全 0');
+    if (m.source === 'degraded' && !m.degrade) errs.push('I4 degraded 必须带 degrade');
+    if (m.source === 'region') {
+      if (m.degrade !== null) errs.push('I5 region 不得带 degrade');
+      if (!(cov > 0 && cov < 1)) errs.push('I5 region 要求 coverage ∈ (0,1)');
+    }
+    if (!m.expr || !m.expr.kind) errs.push('I7 expr 缺失');
+    else {
+      // I7 / I8: 矢量表达必须与 data 严格互译 (矩形并集 === 目标集合, 互不相交)。
+      //   这一条是「两种表达渲染结果像素级等价」的**可证明前提** —— 若矢量与 data 已经不一致,
+      //   下游再怎么渲染都不可能等价。校验成本 O(格数) ≤ 1024, 消费方每次挂掩码前都跑得起。
+      const kind = m.expr.kind;
+      if (kind === 'holes' || kind === 'islands') {
+        const rects = kind === 'holes' ? m.expr.holes : m.expr.polys;
+        if (!Array.isArray(rects)) {
+          errs.push('I7 矢量表达缺矩形数组');
+        } else {
+          const cover = new Uint8Array(m.data.length);
+          for (let r = 0; r < rects.length; r++) {
+            const q = rects[r];
+            if (!q || typeof q.x !== 'number' || typeof q.y !== 'number'
+              || typeof q.w !== 'number' || typeof q.h !== 'number'
+              || !isFinite(q.x) || !isFinite(q.y) || !isFinite(q.w) || !isFinite(q.h)
+              || q.w <= 0 || q.h <= 0) { errs.push('I7 矩形字段非法: ' + r); break; }
+            const x0 = Math.round(q.x * gw);
+            const y0 = Math.round(q.y * gh);
+            const x1 = x0 + Math.round(q.w * gw);
+            const y1 = y0 + Math.round(q.h * gh);
+            if (x0 < 0 || y0 < 0 || x1 > gw || y1 > gh) { errs.push('I7 矩形越界: ' + r); break; }
+            for (let yy = y0; yy < y1; yy++) {
+              for (let xx = x0; xx < x1; xx++) {
+                const j = yy * gw + xx;
+                if (cover[j]) { errs.push('I7 矩形重叠: ' + r); yy = y1; break; }
+                cover[j] = 1;
+              }
+            }
+            if (errs.length) break;
+          }
+          if (!errs.length) {
+            // 目标集合: holes = 保持原色的格 (data 的补集), islands = 反色的格 (data 本身)
+            for (let i = 0; i < cover.length; i++) {
+              const want = (kind === 'holes') ? (m.data[i] ? 0 : 1) : (m.data[i] ? 1 : 0);
+              if (cover[i] !== want) { errs.push('I8 矢量表达与 data 不一致 (第 ' + i + ' 格)'); break; }
+            }
+          }
+        }
+      } else if (kind === 'bitmap') {
+        if (!(m.expr.bytes instanceof Uint8Array) || m.expr.bytes.length !== gw * gh) {
+          errs.push('I7 位图长度不等于 gw*gh');
+        }
+      } else {
+        errs.push('I7 未知的 expr.kind: ' + kind);
+      }
+    }
+    return { ok: errs.length === 0, errors: errs };
+  }
+
+  // 区域分割主入口 —— **纯函数** (无副作用、同输入同输出; v6-2 的帧间沿用依赖这一点)。
+  //   grid: { gw, gh, cellLight: Uint8Array(逐格 lightLike 0/1), ratio: 整图 lightLike 占比 }
+  //         传 null 表示读不到像素 (跨域 / 解码失败)。
+  //   已落地: 读不到像素的降级 + 门 1 + 分区判定(形态学/连通域/面积门/默认方向) + 门 2。
+  //   TODO(v6-1 阶段 4): 表达选择 —— 把「≤K 个矩形精确表达」的判定补进 deriveRegionExpr,
+  //   目前非退化掩码一律落位图 (正确但少一次省解码的机会)。
+  function buildRegionMask(grid, opts) {
+    const o = Object.assign({}, REGION_DEFAULTS, opts || {});
+    const key = String((opts && opts.key) || '');
+
+    // 读不到像素 → degraded, 由消费方退化为整图判定
+    //   (设计 §10: 判定失败必放行, 绝不「拿不到像素就乱挂掩码」)
+    //   具体原因由调用侧给 (taint / decode / cross-origin / no-pixels / budget); 缺省 no-pixels
+    //   —— 原因只是**标注**, 不改变「退化为整图」这条行为。
+    if (!grid || !grid.cellLight || !grid.cellLight.length) {
+      return makeRegionMask({
+        key: key, gw: o.gridN, gh: o.gridN, source: 'degraded',
+        degrade: { reason: o.degradeReason || 'no-pixels' },
+      });
+    }
+
+    const gw = grid.gw || o.gridN;
+    const gh = grid.gh || gw;
+    const ratio = (typeof grid.ratio === 'number' && !isNaN(grid.ratio))
+      ? grid.ratio
+      : regionCoverage(grid.cellLight);
+
+    // 门 1 (进分割前): 整图高度一致 → 直接退化为整图, **零分割开销**
+    if (ratio >= o.wholeRatioHigh || ratio <= o.wholeRatioLow) {
+      return makeRegionMask({ key: key, gw: gw, gh: gh, source: ratio >= o.wholeRatioHigh ? 'whole' : 'none' });
+    }
+
+    // 分区判定 (形态学 + 连通域 + 面积门 + 默认方向)
+    const carved = regionCarve(grid.cellLight, gw, gh, o);
+
+    // 门 2 (分割后): 抠除量退到两端 → 退回整图, **连掩码层都不产出**。
+    //   阈值**独立于门 1** (默认 0.97 / 0.03, 见 REGION_DEFAULTS 的注释与 implement.md 偏离 7):
+    //   门 1 量的是「整图有多单色」, 门 2 量的是「抠掉了多少」—— 两者不是同一个量, 不该共用 0.90。
+    const cov = regionCoverage(carved.data);
+    if (cov >= o.segmentRatioHigh || cov <= o.segmentRatioLow) {
+      return makeRegionMask({ key: key, gw: gw, gh: gh, source: cov >= o.segmentRatioHigh ? 'whole' : 'none' });
+    }
+
+    // 两道门之间 → 真正的区域掩码。coverage 必然落在 (segmentRatioLow, segmentRatioHigh) 开区间,
+    //   而它必然 ⊂ (0,1), 满足不变量 I5。
+    return makeRegionMask({
+      key: key, gw: gw, gh: gh, source: 'region',
+      polarity: carved.polarity, data: carved.data,
+      // 表达选择的参数 (K 值等) 走**同一份合并后的 opts** —— 这样 state.regionKRects 才能真正生效
+      exprOpts: o,
+    });
+  }
+
+  // ---- 掩码缓存 (契约 §8 / R8) ----
+  //   键 = `${host}|${selectorStem}|${nw}x${nh}`: host 复用现有 profileKey() (站点/配置维度),
+  //   stem 复用 selectorStem() (元素词干) —— **不新建键体系**; 尺寸用**固有**尺寸
+  //   (naturalWidth/Height) 而非 clientWidth/Height: 归一化掩码走 objectBoundingBox 口径,
+  //   与渲染尺寸无关, 用固有尺寸才不会因布局变化抖动/击穿缓存。
+  //   LRU 上限 200, 对齐 ImageFxEngine.lruMax 的既有先例。
+  //   淘汰**不需要 revoke**: 本片不产出 blob URL (位图表达是字节数组, 编码与对象 URL 属 v6-2);
+  //   若 v6-2 起缓存里出现 blobUrl, 必须按 design §8 补 pendingRevoke (留待 v6-2)。
+  //   失效: 参数/阈值变更经 clearCacheAndRescan 统一清空 (见那里的 regionCacheClear())。
+  const REGION_CACHE_MAX = 200;
+  const regionCache = new Map();   // key → RegionMask (Map 插入序即 LRU 序)
+  const regionSession = {          // 本会话实时诊断量 (「面板只读诊断行」的数据源)
+    segmented: 0,                  // 真正执行了分区判定的次数 (过门 1)
+    buildMs: 0,                    // 掩码构建累计耗时 (含门 1 直接退出的廉价情形)
+    hits: 0,
+    misses: 0,
+    evictions: 0,
+    byReason: {},                  // 降级次数, 按 degrade.reason 分别计
+  };
+
+  const regionNow = () => ((typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now());
+
+  function regionMaskKey(host, stem, nw, nh) {
+    return String(host || '') + '|' + String(stem || '') + '|'
+      + Math.round(nw || 0) + 'x' + Math.round(nh || 0);
+  }
+
+  function regionCacheClear() {
+    regionCache.clear();
+  }
+
+  // 降级原因 → StatsManager 计数键 (固定键集, 不动态拼名 —— 对齐 freshCounters 的既有约定)
+  const REGION_DEGRADE_COUNTERS = {
+    taint: 'regionDegradeTaint',
+    decode: 'regionDegradeDecode',
+    'cross-origin': 'regionDegradeCrossOrigin',
+    'no-pixels': 'regionDegradeNoPixels',
+    budget: 'regionDegradeBudget',
+    unknown: 'regionDegradeUnknown',
+  };
+
+  // 掩码取用入口 (薄外壳, **唯一**该被调用点使用的一层)。分工:
+  //   buildRegionMask 保持**纯函数** (design §7 要求 v6-2 的帧间调度可安全复用同一份输入),
+  //   一切副作用 —— 缓存读写、计数、计时 —— 全部收在这里。
+  //   为什么缓存放在这里而不是 buildRegionMask 里面: 纯函数里做缓存会让「同输入同输出」
+  //   变成「同输入同输出(首次)」, 破坏 v6-2 依赖的可重放性。
+  function regionMaskTake(grid, opts) {
+    // 与 buildRegionMask 同一套默认值 —— 门限判定 (下面数 regionSegmented) 必须与内核一致,
+    //   否则「过门 1」的判定会用 undefined 比较而恒为 false, 计数静默失效。
+    //   用户可调项从这里注入 state (R9: 网格粒度 / 面积门 / 矢量 K 值都可读写):
+    //   内核读的是 opts, state 是**唯一**来源 —— 面板 (v6-4) 只需改 state 就能生效。
+    const o = Object.assign({}, REGION_DEFAULTS, {
+      gridN: state.regionGridN != null ? state.regionGridN : REGION_DEFAULTS.gridN,
+      minAreaRatio: state.regionMinAreaRatio != null ? state.regionMinAreaRatio : REGION_DEFAULTS.minAreaRatio,
+      kRects: state.regionKRects != null ? state.regionKRects : REGION_DEFAULTS.kRects,
+    }, opts || {});
+    const key = String(o.key || '');
+    if (key) {
+      const hit = regionCache.get(key);
+      if (hit) {
+        regionCache.delete(key);      // LRU 提升
+        regionCache.set(key, hit);
+        regionSession.hits++;
+        StatsManager.count('regionCacheHits');
+        return hit;
+      }
+    }
+    regionSession.misses++;
+    StatsManager.count('regionCacheMisses');
+
+    const t0 = regionNow();
+    let mask = buildRegionMask(grid, o);
+    const elapsed = regionNow() - t0;
+    regionSession.buildMs += elapsed;
+
+    // 预算门 (design §10 的 budget 行): 正确但**太慢**的分割不许拖住调用方 → 退化为整图判定。
+    //   这是内部安全阀 (不是用户参数), 默认 16ms —— 正常图在 16×16 网格上远低于此值。
+    //   本片不渲染, 此举的可见后果只是计数与来源标签; 但它把这条路径**接通并可观测**,
+    //   v6-2 挂掩码层时不会第一次遇到它。
+    if (mask.source === 'region' && elapsed > (o.buildBudgetMs != null ? o.buildBudgetMs : REGION_BUILD_BUDGET_MS)) {
+      mask = makeRegionMask({ key: key, gw: mask.gw, gh: mask.gh, source: 'degraded', degrade: { reason: 'budget' } });
+    }
+
+    // 过门 1 = 真的执行了分区判定 (无论门 2 最终是否把它退回整图)
+    const cells = grid && grid.cellLight;
+    if (cells && cells.length) {
+      const ratio = (typeof grid.ratio === 'number' && !isNaN(grid.ratio))
+        ? grid.ratio
+        : regionCoverage(cells);
+      if (ratio < o.wholeRatioHigh && ratio > o.wholeRatioLow) {
+        regionSession.segmented++;
+        StatsManager.count('regionSegmented');
+      }
+    }
+    if (mask.source === 'whole') StatsManager.count('regionWhole');
+    else if (mask.source === 'none') StatsManager.count('regionNone');
+    if (mask.source === 'degraded') {
+      const why = (mask.degrade && mask.degrade.reason) || 'unknown';
+      regionSession.byReason[why] = (regionSession.byReason[why] || 0) + 1;
+      StatsManager.count(REGION_DEGRADE_COUNTERS[why] || REGION_DEGRADE_COUNTERS.unknown);
+    }
+
+    // degraded **不写缓存**: 失败多半是暂时的 (下一轮解码可能成功), 把失败锁进缓存会让它一直失败。
+    //   这同时保证「跨域失败页」不会污染同键的成功路径 (bench 里那条零掩码断言的另一半)。
+    if (key && mask.source !== 'degraded') {
+      regionCache.set(key, mask);
+      while (regionCache.size > REGION_CACHE_MAX) {
+        regionCache.delete(regionCache.keys().next().value);
+        regionSession.evictions++;
+        StatsManager.count('regionCacheEvictions');
+      }
+    }
+    return mask;
+  }
+
+  // 只读诊断快照 (PRD R9 的「面板只读诊断行」数据源; 渲染属 v6-4 的 UI 重建)。
+  //   只读、无副作用 —— 面板每次展开现算, 不引入新的持久化字段。
+  function regionDiagnostics() {
+    const total = regionSession.hits + regionSession.misses;
+    return {
+      segmented: regionSession.segmented,
+      avgMs: regionSession.segmented ? regionSession.buildMs / regionSession.segmented : 0,
+      degrade: Object.assign({}, regionSession.byReason),
+      cacheHitRate: total ? regionSession.hits / total : 0,
+      cacheSize: regionCache.size,
+      hits: regionSession.hits,
+      misses: regionSession.misses,
+      evictions: regionSession.evictions,
+    };
+  }
+
+  // ---- 与 Action Registry 的接缝 (design §9 / 阶段 6) ----
+
+  // 区域掩码的键: `${host}|${元素词干}|${固有尺寸}` (design §8)。
+  //   元素侧**只读固有尺寸属性**, 不碰 getComputedStyle / 布局查询 —— 区域判定不进热路径。
+  function regionMaskKeyFor(el) {
+    let nw = 0;
+    let nh = 0;
+    let stem = '';
+    try {
+      nw = (el && (el.naturalWidth || el.videoWidth || el.width)) || 0;
+      nh = (el && (el.naturalHeight || el.videoHeight || el.height)) || 0;
+    } catch (e) { /* ignore */ }
+    try { stem = selectorStem(el); } catch (e) { stem = ''; }
+    return regionMaskKey(profileKey(), stem, nw, nh);
+  }
+
+  // 区域结论的 reason 决断 —— 接缝的全部内容。
+  //   本片**不渲染** (覆盖层属 v6-2), 所以这里的唯一作用是把来源标签从 'pixel' 换成 'region':
+  //   反色结论本身与整图路径逐字一致, 用户可见变化为零, 只有在诊断计数与撤销栈里能看到来源。
+  //   区域模式关闭 → 直接返回 'pixel', **不进入该分支** (design §9: 关闭时行为与 v5.0.0 一致)。
+  //   grid 缺失 (像素结论来自决策缓存) 时**只查表不构建** —— 绝不为了一个标签重算分割,
+  //   那会让 decide-once 的缓存快路径凭空变贵。
+  //   注意 reason 码不改 SOURCES 表形状: 'region' 只是像素路径内部的一支 (source 仍是 'pixel')。
+  function regionReasonFor(el, grid) {
+    if (state.regionSegment !== true) return 'pixel';
+    const key = regionMaskKeyFor(el);
+    const mask = grid ? regionMaskTake(grid, { key: key }) : regionCache.get(key);
+    return (mask && mask.source === 'region') ? 'region' : 'pixel';
   }
 
   // ==========================================
@@ -6987,6 +7719,9 @@
       if (this.pendingEls) this.pendingEls.clear(); // v4.6: pending 登记随全量重扫一并清空
       const bg = window.__svi && window.__svi.engines ? window.__svi.engines.bgImage : null;
       if (bg && bg.cache) bg.cache.clear();
+      // v6.0: 区域掩码缓存随全量重扫一并清空 —— 缓存键里**没有**网格粒度与各阈值,
+      //   参数变更必须靠这里失效 (design §8 的键形状如此规定); 漏了这一步会让「改参数没反应」。
+      regionCacheClear();
       const root = document.body || document.documentElement;
       if (!root) return;
       try {
@@ -7688,7 +8423,8 @@
       //    并发入口共享一次分析 —— eager/IO/补扫同时触达同一图片时绝不重复解码)
       if (this.cache.has(src)) {        const isLight = this.cache.get(src);
         if (isLight && maskedVeto()) return; // v4.6: 遮罩否决 (缓存像素判定为亮时仍需过蒙层上下文)
-        this.applyDecision(img, src, this.recordDecision(src, isLight ? 'invert' : 'keep', 'pixel'));
+        // v6.0: 缓存快路径只**查**区域掩码表决定来源标签, 不构建 (见 regionReasonFor)
+        this.applyDecision(img, src, this.recordDecision(src, isLight ? 'invert' : 'keep', regionReasonFor(img, null)));
         return;
       }
 
@@ -7697,7 +8433,8 @@
       if (inflightJob) {
         r = await inflightJob;
       } else {
-        const job = analyzeSrc(src, img, getEvalPrefs());
+        // v6.0: 区域模式开启时才多要一份逐格网格 (wantGrid) —— 关闭时采样尺寸与返回形状不变
+        const job = analyzeSrc(src, img, getEvalPrefs(), state.regionSegment === true);
         this.inflightSrcs.set(src, job);
         try {
           r = await job;
@@ -7711,6 +8448,11 @@
       } catch (e) { /* ignore */ }
       if (!r || !r.ok) {
         // 网络或格式异常: 不落决策 (未决), 记录失败 TTL 防抖 (≤3 次, 之后永久跳过)
+        // v6.0: 区域模式下的降级必须**可观测** (design §10) —— 记原因 + 计数, 且不写掩码缓存
+        //   (失败多半是暂时的, 锁进缓存会让它一直失败)。行为与整图路径一致: 仍然是"未决不反色"。
+        if (state.regionSegment === true) {
+          regionMaskTake(null, { key: regionMaskKeyFor(img), degradeReason: (r && r.fail) || 'decode' });
+        }
         this.markFailure(img, src);
         return;
       }
@@ -7751,7 +8493,8 @@
 
       if (r.isLight && maskedVeto()) return; // v4.6: 遮罩否决 (合成观感已暗, 不反色; 不入复检网避免翻转)
 
-      this.applyDecision(img, src, this.recordDecision(src, r.isLight ? 'invert' : 'keep', 'pixel'));
+      // v6.0 阶段 6 接缝: 区域模式开启且掩码有效 → 来源标签记为 'region' (结论不变, 不渲染)
+      this.applyDecision(img, src, this.recordDecision(src, r.isLight ? 'invert' : 'keep', regionReasonFor(img, r.grid)));
 
       // v4.3 智能纠错 (复检网): 像素反色决策限时复检 —— 分类翻转则改写缓存/作废旧快照并重扫,
       // "反错的白色"不再永远错下去 (有界: 每源至多一次, 队列上限 12)
@@ -7779,7 +8522,8 @@
       for (const src of srcs) {
         if (runtime.siteActive === false) return;
         const old = this.decisionBySrc.get(src);
-        if (!old || old.reason !== 'pixel' || old.verdict !== 'invert') continue; // 只复检仍为像素反色的
+        // v6.0: 区域来源同样是「像素反色」, 一并纳入复检网 (否则开了区域模式后自愈覆盖会留缺口)
+        if (!old || (old.reason !== 'pixel' && old.reason !== 'region') || old.verdict !== 'invert') continue;
         let r = null;
         try { r = await analyzeSrc(src, null, getEvalPrefs()); } catch (e) { continue; }
         if (!r || !r.ok) continue;
@@ -9606,6 +10350,19 @@
         canvasesAnalyzed: 0,
         postersInverted: 0,
         pipActivations: 0,
+        // v6.0 区域分割 (R9 / 阶段 3·7): 分割次数 / 双门两端 / 降级分原因 / 缓存
+        regionSegmented: 0,
+        regionWhole: 0,
+        regionNone: 0,
+        regionDegradeTaint: 0,
+        regionDegradeDecode: 0,
+        regionDegradeCrossOrigin: 0,
+        regionDegradeNoPixels: 0,
+        regionDegradeBudget: 0,
+        regionDegradeUnknown: 0,
+        regionCacheHits: 0,
+        regionCacheMisses: 0,
+        regionCacheEvictions: 0,
       };
     },
 
@@ -13418,6 +14175,39 @@
     // v3.3 纯函数导出 (单测契约): 元素级规则归一化 / 首条命中
     normalizeElementRules,
     firstMatchingElementRule,
+    // v6.0 区域分割内核导出: 单测契约 + v6-2 (渲染层) / v6-3 (纠正回路) 的消费入口。
+    //   v6-2 / v6-3 **只消费**这里的构造函数与校验, 不得自行实现分割或自造掩码结构。
+    REGION_MASK_VERSION,
+    REGION_DEFAULTS,
+    makeRegionMask,
+    validateRegionMask,
+    buildRegionMask,
+    regionCoverage,
+    // v6.0 逐格判定 (与整图判定共用同一单像素谓词 —— 规范 v5.4 §2「同源」)
+    evaluateImagePixelStats,
+    buildLightTestCtx,
+    classifyLightPixel,
+    regionCellGrid,
+    regionGridRatio,
+    // v6.0 形态学 / 连通域 / 默认方向 (单测契约)
+    regionDilate,
+    regionErode,
+    regionClose,
+    regionOpen,
+    regionComponents,
+    regionCarve,
+    // v6.0 表达选择 (单测契约): 精确矩形分解 + 掩码 → expr
+    regionRectsExact,
+    deriveRegionExpr,
+    // v6.0 掩码缓存与诊断 (单测契约 + v6-4 的面板诊断行数据源)
+    REGION_CACHE_MAX,
+    regionMaskKey,
+    regionMaskTake,
+    regionCacheClear,
+    regionDiagnostics,
+    // v6.0 与 Action Registry 的接缝 (单测契约): 键构造 + 来源标签决断
+    regionMaskKeyFor,
+    regionReasonFor,
     exportStats: () => StatsManager.exportJson(),
     stats: StatsManager,
     engines: {},

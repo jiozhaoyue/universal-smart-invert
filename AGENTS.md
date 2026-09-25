@@ -29,7 +29,10 @@ Chrome extension DERIVED from it. Key paths:
 - `universal-smart-invert.user.js` — all engines (video HIL state machine, image/bg-image/canvas
   decision pipeline, background replace, WebGL video FX, Store, RuleLearner, TimelineLearner, UI,
   and the v5.0 **Action Registry** = ordered `SOURCES` table + `resolveStage` + `arbitrate` +
-  `ACTIONS` executors, with the switch matrix read only through `actionEnabled(id)`)
+  `ACTIONS` executors, with the switch matrix read only through `actionEnabled(id)`), plus the
+  v6.0 **region-segmentation kernel** (section 12.5: `RegionMask` frozen contract + two performance
+  gates + morphology/connected-components/area gate + exact rectangle decomposition + LRU cache;
+  all reachable through `window.__svi`; off by default, renders nothing yet)
 - `extension/` — GENERATED output (content.js + manifest.json + icons). **Never hand-edit**;
   rebuild after every header change with `node scripts/build-extension.js`
 - `scripts/` — zero-dependency build chain (build-extension, gen-icons, pack, zip lib) and live
@@ -89,6 +92,12 @@ removed after it bound loopback-only and was unreachable via LAN/proxied browser
   UI built exclusively with the `ui.*` component builders.
 - Userscript and extension coexist via the `dataset.sviOwner` handshake — first booter claims the
   page, the other goes dormant. Bump `@version` and run `build-extension.js` in the same change.
+- **Region masks have exactly one constructor and one validator** (`makeRegionMask` /
+  `validateRegionMask`). v6-2 (rendering) and v6-3 (correction loop) **consume, never re-implement**
+  segmentation or reshape the mask. The contract is FROZEN in
+  `.trellis/spec/frontend/region-mask-contract.md` — any change goes back to planning first.
+  `buildRegionMask` must stay a pure function; side effects (cache/counters/timing) live only in the
+  `regionMaskTake` shell. With `regionSegment` off, no region code may run, cache, or write anything.
 - **Committing without pushing is incomplete (不得只提交).** After every work commit, push to
   `origin main` (`git push`) before the session ends — all four gate commands green first.
 - GitHub Actions: the `secrets` context is NOT allowed in `if:` — use a `$GITHUB_ENV` gate step.

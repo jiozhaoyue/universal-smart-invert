@@ -54,6 +54,47 @@ Specifically designed to tame **blinding white PowerPoint/PDF lecture slides in 
 
 ---
 
+## 🧪 v6.0 in progress (automatic partial inversion · kernel landed)
+
+> **Status: the kernel has landed and its contract is frozen, but the whole feature is OFF by
+> default and this stage changes nothing you can see.** Install this build and nothing looks
+> different — the rendering layer (v6-2) is not written yet.
+
+The problem it solves: when one image mixes light areas that *should* be inverted with colour
+content that should not, whole-image inversion gets it wrong either way. Invert a white slide that
+has a colour photo / QR code / brand logo embedded and the photo turns into a negative.
+
+The first v6 slice moves the **decision unit from the whole image down to connected regions** and
+freezes the region-mask contract
+([`RegionMask`](.trellis/spec/frontend/region-mask-contract.md); v6-2 rendering and v6-3 correction
+consume it and never re-implement it):
+
+- **Zero new dependencies, zero ML, zero network**: the signals are the two features that already
+  exist (perceptual-luminance share + mean saturation), just evaluated per block (N = 16 by
+  default, 8–32 adjustable) instead of once for the whole image.
+- **The default direction is "carve out what must not be inverted"**, not "find what should be" —
+  the latter turns the white gaps between black glyphs into their own blocks and produces a
+  shattered mask.
+- **Morphological tail cleanup**: a 3×3 opening acts as a **thickness gate** first (1–2 cell thin
+  strokes never qualify as feature blocks, so a pure-text slide inverts whole and the text stays
+  readable in white), then a closing fills pinholes; the minimum-area gate is 3% (smaller blobs
+  follow their neighbourhood majority instead of punching a button out of the mask).
+- **Two performance gates**: images with ≥ 97% or ≤ 3% overall light share pay **zero segmentation
+  cost** and keep the original whole-image path; if carving collapses back to either end, no mask
+  layer is attached at all. Measured mask build ≈ 0.04 ms (N = 16, typical path).
+- **Unreadable pixels always pass through**: cross-origin / decode failure / fully transparent →
+  no segmentation, no mask, fall back to the whole-image verdict, with the reason observable
+  (`taint` / `decode` / `cross-origin` / `no-pixels` / `budget`).
+- **Masks are cached per image** (LRU 200; key = site + element stem + intrinsic size), so a
+  repeated image is never segmented twice.
+
+The `regionSegment` switch is **off by default**; with it off, behaviour matches v5.0.0 exactly
+(29 browser end-to-end scenarios, zero regressions). The read-only diagnostics row in the panel
+(segmentation count / average cost / degrade counts by reason / cache hit rate) ships with the
+v6.0 UI rebuild.
+
+---
+
 ## 🆕 What's New in v5.0 (Page-Media Governance Layer · Unified Actions)
 
 > v5.0 grows the script from an "inverter" into a **general page-media governance layer**:

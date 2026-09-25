@@ -1,0 +1,5 @@
+{"file": ".trellis/tasks/09-25-v6-auto-region/prd.md", "reason": "本任务需求、约束与验收标准（R1-R9）"}
+{"file": ".trellis/tasks/09-25-v6-auto-region/design.md", "reason": "RegionMask 契约（冻结）、判定管线、双性能门、降级纪律"}
+{"file": ".trellis/tasks/09-25-v6-auto-region/implement.md", "reason": "分阶段执行清单与评审门 G1-G4"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "必须复用现有解码链与双特征判定，不得出现第二处实现"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "契约跨 v6-1/v6-2/v6-3 三层消费，需核对层间数据形状"}

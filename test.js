@@ -2868,4 +2868,1273 @@ setTimeout(() => {
   console.log('✓ v5.5 unit tests passed: 三档与旧布尔无损迁移 / 本站启用门四类条件(含首访不遮与边界) / pending 打标与白名单与预算 / settleAll 幂等 / 逃生暂停');
 })();
 
+// ============================================================
+// v6.0 单测 (区域分割内核: 掩码契约不变量 + 双性能门 + 偏好规范化)
+// 契约来源: .trellis/tasks/09-25-v6-auto-region/design.md §3.1 (I0~I7) / §5 (双门) / §10 (降级)
+// ============================================================
+(function () {
+  const {
+    REGION_MASK_VERSION, REGION_DEFAULTS, makeRegionMask, validateRegionMask,
+    buildRegionMask, regionCoverage, prefs, loadState, Store,
+  } = svi;
+
+  // ---- 1. 契约版本 + 网格尺寸 (I1) ----
+  assert.strictEqual(REGION_MASK_VERSION, 1, '契约版本必须是 1');
+  {
+    const m = makeRegionMask({ gw: 4, gh: 3, source: 'region', data: [1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0] });
+    assert.ok(m.data instanceof Uint8Array, 'I1: data 必须是 Uint8Array');
+    assert.strictEqual(m.data.length, 12, 'I1: data 长度 === gw*gh');
+    assert.ok(validateRegionMask(m).ok, 'I1: 自洽掩码应通过校验');
+  }
+  {
+    // data 长度与 gw*gh 不符 → 回退为全 0 (而不是产出一份长度错的数据)
+    const m = makeRegionMask({ gw: 4, gh: 4, source: 'none', data: [1, 1] });
+    assert.strictEqual(m.data.length, 16, 'I1: 长度不符时回退为按网格新建');
+    assert.ok(validateRegionMask(m).ok, 'I1: 回退后仍自洽');
+  }
+
+  // ---- 2. source 语义 (I2 / I3) ----
+  {
+    const w = makeRegionMask({ gw: 4, gh: 4, source: 'whole' });
+    assert.strictEqual(w.coverage, 1, 'I2: whole → data 全 1');
+    assert.deepStrictEqual(w.expr, { kind: 'holes', holes: [] }, 'I2: 整图反色 = 零个洞的矢量表达');
+    assert.ok(validateRegionMask(w).ok, 'I2 自洽');
+
+    const n = makeRegionMask({ gw: 4, gh: 4, source: 'none' });
+    assert.strictEqual(n.coverage, 0, 'I3: none → data 全 0');
+    assert.deepStrictEqual(n.expr, { kind: 'islands', polys: [] }, 'I3: 不反色 = 零个孤岛的矢量表达');
+    assert.ok(validateRegionMask(n).ok, 'I3 自洽');
+  }
+
+  // ---- 3. 降级 (I4) ----
+  {
+    const d = makeRegionMask({ gw: 4, gh: 4, source: 'degraded', degrade: { reason: 'taint' } });
+    assert.strictEqual(d.degrade.reason, 'taint', 'I4: degrade 原因透传');
+    assert.ok(validateRegionMask(d).ok, 'I4 自洽');
+    // 带 degraded 但漏传原因 → 补显式 unknown, 不静默放行
+    const d2 = makeRegionMask({ gw: 4, gh: 4, source: 'degraded' });
+    assert.strictEqual(d2.degrade.reason, 'unknown', 'I4: 缺失原因补 unknown');
+  }
+
+  // ---- 4. region 的边界 (I5) ----
+  {
+    const half = new Uint8Array(16);
+    half[0] = 1;
+    half[1] = 1;
+    const r = makeRegionMask({ gw: 4, gh: 4, source: 'region', data: half });
+    assert.strictEqual(r.coverage, 0.125, 'I5: coverage 落在 (0,1)');
+    assert.strictEqual(r.degrade, null, 'I5: region 不带 degrade');
+    assert.ok(validateRegionMask(r).ok, 'I5 自洽');
+
+    // 全 1 的 data 标成 region → 违反 I5 (该走 whole)
+    const bad = validateRegionMask({ ...r, data: new Uint8Array(16).fill(1), coverage: 1 });
+    assert.ok(!bad.ok && bad.errors.join('|').indexOf('I5') >= 0, 'I5: 全 1 不许标成 region');
+    // 带 degrade 又标 region → 违反 I5
+    const bad2 = validateRegionMask({ ...r, degrade: { reason: 'x' } });
+    assert.ok(!bad2.ok && bad2.errors.join('|').indexOf('I5') >= 0, 'I5: region 不许带 degrade');
+  }
+
+  // ---- 5. coverage 与 data 算术一致 (I6) ----
+  {
+    const m = makeRegionMask({ gw: 4, gh: 4, source: 'region', data: new Uint8Array(16).fill(0).map((_, i) => (i < 4 ? 1 : 0)) });
+    assert.strictEqual(m.coverage, 0.25, 'I6: coverage 由 data 派生');
+    assert.strictEqual(regionCoverage(m.data), m.coverage, 'I6: regionCoverage 与字段一致');
+    // 篡改 coverage → 校验必须抓到
+    const tampered = validateRegionMask({ ...m, coverage: 0.9 });
+    assert.ok(!tampered.ok && tampered.errors.join('|').indexOf('I6') >= 0, 'I6: 篡改 coverage 会被抓到');
+    // data 不是 Uint8Array → I1
+    const badType = validateRegionMask({ ...m, data: [1, 0] });
+    assert.ok(!badType.ok && badType.errors.join('|').indexOf('I1') >= 0, 'I1: 非 Uint8Array 被拒');
+    // 版本不符 → I0
+    const badVer = validateRegionMask({ ...m, v: 2 });
+    assert.ok(!badVer.ok && badVer.errors.join('|').indexOf('I0') >= 0, 'I0: 版本不符被拒');
+    // 非对象 → 直接拒
+    assert.strictEqual(validateRegionMask(null).ok, false, 'null 被拒');
+  }
+
+  // ---- 6. expr (I7/I8): 可矩形化 → 矢量; 不可矩形化 → 位图, 灰度取 0/255 ----
+  {
+    // 4×4 棋盘: 8 个孤立格, 用 ≤3 个矩形精确表达不了 → 位图
+    const cb = new Uint8Array(16);
+    for (let i = 0; i < 16; i++) cb[i] = ((i + ((i / 4) | 0)) % 2 === 1) ? 1 : 0;
+    const m = makeRegionMask({ gw: 4, gh: 4, source: 'region', data: cb });
+    assert.strictEqual(m.expr.kind, 'bitmap', 'I8: 棋盘掩码无法用 ≤K 矩形表达 → 位图');
+    assert.strictEqual(m.expr.bytes.length, 16, 'I7: 位图长度 === gw*gh');
+    assert.deepStrictEqual(Array.from(m.expr.bytes), Array.from(cb).map(v => (v ? 255 : 0)), 'I7: 位图取 0/255 灰度');
+
+    // 一个矩形块 → 矢量快路径 (阶段 4 起): 主流是 1, 抠掉的那块是 0 → 洞式
+    const block = new Uint8Array(16).fill(1);
+    for (let y = 1; y < 3; y++) for (let x = 1; x < 3; x++) block[y * 4 + x] = 0;
+    const mb = makeRegionMask({ gw: 4, gh: 4, source: 'region', data: block });
+    assert.strictEqual(mb.expr.kind, 'holes', 'I8: 矩形块可精确表达 → 洞式矢量');
+    assert.deepStrictEqual(mb.expr.holes, [{ x: 0.25, y: 0.25, w: 0.5, h: 0.5 }], 'I8: 洞 = 归一化矩形');
+    assert.ok(validateRegionMask(mb).ok, 'I8: 矢量表达必须与 data 互译');
+  }
+
+  // ---- 7. 双性能门 (门 1) 的边界与降级 ----
+  {
+    const grid = (ratio) => ({ gw: 16, gh: 16, cellLight: new Uint8Array(256), ratio: ratio });
+    const HI = REGION_DEFAULTS.wholeRatioHigh;   // 0.97 = 1 - minAreaRatio
+    const LO = REGION_DEFAULTS.wholeRatioLow;    // 0.03 = minAreaRatio
+
+    assert.strictEqual(HI, 1 - REGION_DEFAULTS.minAreaRatio, '门 1 上界由面积门派生 (1 - minAreaRatio)');
+    assert.strictEqual(buildRegionMask(grid(0.99)).source, 'whole', '门 1 上侧: 0.99 → 整图反色');
+    assert.strictEqual(buildRegionMask(grid(HI)).source, 'whole', '门 1 上界闭区间: 0.97 → 整图反色');
+
+    assert.strictEqual(buildRegionMask(grid(0.01)).source, 'none', '门 1 下侧: 0.01 → 不反色');
+    assert.strictEqual(buildRegionMask(grid(LO)).source, 'none', '门 1 下界闭区间: 0.03 → 不反色');
+
+    // 边界外侧 (0.96 / 0.04): 不再短路, 而是**进分割** —— 这才是「含 3% 嵌入内容」的图。
+    //   本例的 cellLight 全 0 (整图非浅色), 故走 carve-light: 浅色集为空 → 抠不到东西 →
+    //   门 2 下界判 none。断言「进过分割」这条路径本身: 计数在 regionMaskTake 里, 这里只断言自洽 + 结论。
+    for (const r of [LO + 0.01, 0.5, HI - 0.01]) {
+      const m = buildRegionMask(grid(r));
+      assert.ok(validateRegionMask(m).ok, '中间带 ratio=' + r + ' 的掩码必须自洽');
+      assert.strictEqual(m.source, 'none', '中间带 ratio=' + r + ' (整图非浅色) → 抠不到东西 → none');
+    }
+
+    // 读不到像素 → degraded + no-pixels (设计 §10: 失败必放行)
+    for (const g of [null, { gw: 16, gh: 16, cellLight: new Uint8Array(0) }, {}]) {
+      const m = buildRegionMask(g);
+      assert.strictEqual(m.source, 'degraded', '读不到像素 → degraded');
+      assert.strictEqual(m.degrade.reason, 'no-pixels', '降级原因必须是 no-pixels');
+      assert.ok(validateRegionMask(m).ok, '降级掩码自洽 (I4)');
+    }
+
+    // ratio 缺失时由 cellLight 聚合 (纯函数, 不依赖调用方传 ratio)
+    const agg = buildRegionMask({ gw: 4, gh: 4, cellLight: new Uint8Array(16).fill(1) });
+    assert.strictEqual(agg.source, 'whole', 'ratio 缺失 → 由 cellLight 聚合为 1.0 → whole');
+  }
+
+  // ---- 8. 纯函数性: 同输入同输出, 且不共享 data 引用 ----
+  {
+    const g = { gw: 8, gh: 8, cellLight: new Uint8Array(64).fill(0), ratio: 0.5 };
+    const a = buildRegionMask(g);
+    const b = buildRegionMask(g);
+    assert.deepStrictEqual(Array.from(a.data), Array.from(b.data), '纯函数: 同输入同输出');
+    assert.notStrictEqual(a.data, b.data, '纯函数: 不共享同一 data 引用');
+    g.cellLight[0] = 1;               // 改输入不应影响已产出的掩码
+    assert.strictEqual(b.data[0], 0, '已产出掩码不被后续输入变更影响');
+  }
+
+  // ---- 9. 偏好规范化 + 三处默认值一致 ----
+  {
+    const origStorePrefs = Store.get('prefs', null);
+    const withPrefs = (obj) => { Store.set('prefs', obj || {}); return loadState(); };
+
+    assert.strictEqual(withPrefs({}).regionSegment, false, '默认关 (父 PRD AC-6 零回归)');
+    assert.strictEqual(withPrefs({ regionSegment: 'yes' }).regionSegment, false, '非 true 一律视为关');
+    assert.strictEqual(withPrefs({ regionSegment: true }).regionSegment, true, '显式 true 才开');
+    assert.strictEqual(withPrefs({ regionGridN: 999 }).regionGridN, 32, '网格 N 钳到上限');
+    assert.strictEqual(withPrefs({ regionGridN: 1 }).regionGridN, 8, '网格 N 钳到下限');
+    assert.strictEqual(withPrefs({ regionMinAreaRatio: 9 }).regionMinAreaRatio, 0.25, '面积门钳到上限');
+
+    // 三处默认值必须一致: DEFAULT_PREFS / loadState 钳制默认 / REGION_DEFAULTS (单一真源)
+    const d = withPrefs({});
+    assert.strictEqual(d.regionGridN, REGION_DEFAULTS.gridN, '网格 N: 默认值三处一致');
+    assert.strictEqual(d.regionMinAreaRatio, REGION_DEFAULTS.minAreaRatio, '面积门: 默认值三处一致');
+
+    if (origStorePrefs) Store.set('prefs', origStorePrefs); else Store.remove('prefs');
+  }
+
+  console.log('✓ v6.0 unit tests passed: 掩码契约不变量 I0~I7 / source 语义(whole·none·region·degraded) / 双门边界(0.90 与 0.10 闭区间) / 读不到像素必降级 / 纯函数性与引用隔离 / 偏好钳制与三处默认值一致');
+})();
+
+// ============================================================
+// v6.0 阶段 1 单测 (分区判定管线: 谓词抽取等价性 + 逐格判定 + 分母口径)
+// 契约来源: design.md §4 (管线) / .trellis/spec/frontend/quality-guidelines.md v5.4 §2 (同源)
+// ============================================================
+(function () {
+  const {
+    evaluateImagePixelStats, buildLightTestCtx, classifyLightPixel,
+    regionCellGrid, regionGridRatio,
+  } = svi;
+
+  // 显式偏好, 避免依赖 svi.prefs 的现场状态 (色卡开关会影响判定, 不显式给就不可复现)
+  const P = { imgPresets: {}, imgGeneralLight: true, imgLumCutoff: 180, imgTolerance: 35, shieldColors: [] };
+  // 无屏蔽版本的 ctx
+  const CTX = buildLightTestCtx(P);
+
+  // 像素构造器: px(r,g,b,a) → RGBA 数组; grid(rows) → 扁平 RGBA
+  const px = (r, g, b, a) => [r, g, b, a === undefined ? 255 : a];
+  function flatten(list) {
+    const out = new Uint8Array(list.length * 4);
+    list.forEach((p, i) => { out[i * 4] = p[0]; out[i * 4 + 1] = p[1]; out[i * 4 + 2] = p[2]; out[i * 4 + 3] = p[3]; });
+    return out;
+  }
+  const WHITE = px(255, 255, 255);
+  const DARK = px(17, 24, 39);        // 深灰 (lum 远低于 180)
+  const BLUE = px(0, 0, 255);         // 高饱和彩色
+
+  // ---- 1. 谓词本体: 三态语义 (-1 透明 / 0 非浅色 / 1 浅色) ----
+  assert.strictEqual(classifyLightPixel(255, 255, 255, 255, CTX), 1, '纯白 → 浅色');
+  assert.strictEqual(classifyLightPixel(17, 24, 39, 255, CTX), 0, '深灰 → 非浅色');
+  assert.strictEqual(classifyLightPixel(0, 0, 255, 255, CTX), 0, '高饱和蓝 → 非浅色 (饱和度门)');
+  assert.strictEqual(classifyLightPixel(255, 255, 255, 10, CTX), -1, '低 alpha → 完全不参与 (不是 0)');
+  assert.strictEqual(classifyLightPixel(255, 255, 255, 64, CTX), 1, 'alpha 恰为 64 → 参与 (闭区间下界)');
+
+  // 原色屏蔽: 命中屏蔽的像素**计入不透明但永不判为浅色** (返回 0 而非 -1)
+  {
+    const shielded = buildLightTestCtx({ imgPresets: {}, imgGeneralLight: true, imgLumCutoff: 180, imgTolerance: 35, shieldColors: ['#ffffff'] });
+    assert.strictEqual(classifyLightPixel(255, 255, 255, 255, shielded), 0,
+      '命中屏蔽色的白像素 → 0 (仍计入不透明)');
+  }
+
+  // ---- 2. 谓词抽取的等价性证明 (这是本次重构不改变行为的证据) ----
+  // 逐像素手算 → 与 evaluateImagePixelStats 的聚合结论必须一致
+  {
+    // 全浅 4×4: 聚合 lightRatio 必为 1
+    const allLight = flatten(new Array(16).fill(WHITE));
+    assert.deepStrictEqual(evaluateImagePixelStats(allLight, P), { isLight: true, lightRatio: 1 },
+      '等价性: 全浅样本聚合结论 = 逐像素谓词');
+
+    // 全深
+    const allDark = flatten(new Array(16).fill(DARK));
+    assert.deepStrictEqual(evaluateImagePixelStats(allDark, P), { isLight: false, lightRatio: 0 },
+      '等价性: 全深样本');
+
+    // 半浅半彩: lightRatio = 8/16 = 0.5, 默认 imgAreaThreshold 48% → isLight = true
+    const mixed = flatten([].concat(new Array(8).fill(WHITE), new Array(8).fill(BLUE)));
+    assert.deepStrictEqual(evaluateImagePixelStats(mixed, P), { isLight: true, lightRatio: 0.5 },
+      '等价性: 半浅半彩 → 0.5 ≥ 0.48 判为浅色');
+
+    // 逐像素独立复核: 手工按谓词数一遍, 必须与聚合函数逐位一致
+    for (const sample of [allLight, allDark, mixed]) {
+      let manualOpaque = 0;
+      let manualLight = 0;
+      for (let i = 0; i < sample.length; i += 4) {
+        const c = classifyLightPixel(sample[i], sample[i + 1], sample[i + 2], sample[i + 3], CTX);
+        if (c === -1) continue;
+        manualOpaque++;
+        if (c === 1) manualLight++;
+      }
+      const agg = evaluateImagePixelStats(sample, P);
+      assert.strictEqual(manualOpaque && manualLight / manualOpaque, agg.lightRatio,
+        '等价性: 手工逐像素计数 === 聚合 lightRatio');
+    }
+
+    // 透明像素不进分母: 12 白 + 4 全透明 → lightRatio 仍是 1 (不是 0.75)
+    const withHoles = flatten([].concat(new Array(12).fill(WHITE), new Array(4).fill(px(0, 0, 0, 0))));
+    assert.strictEqual(evaluateImagePixelStats(withHoles, P).lightRatio, 1,
+      '等价性: 透明像素不进分母');
+
+    // 屏蔽像素**进**分母: 8 白 + 8 被屏蔽的白 → lightRatio 0.5 (不是 1)
+    const Pshield = { imgPresets: {}, imgGeneralLight: true, imgLumCutoff: 180, imgTolerance: 35, shieldColors: ['#ffffff'] };
+    const allShielded = flatten(new Array(16).fill(WHITE));
+    assert.strictEqual(evaluateImagePixelStats(allShielded, Pshield).lightRatio, 0,
+      '等价性: 全部命中屏蔽色 → lightRatio 0 (但 opaqueCount 仍为 16, 故 isLight 判定有效)');
+  }
+
+  // ---- 3. 逐格判定 (N×N 网格) ----
+  const N = 4;
+  {
+    // 全浅 → 全 1
+    const g1 = regionCellGrid(flatten(new Array(N * N).fill(WHITE)), N, P);
+    assert.deepStrictEqual(Array.from(g1.cells), new Array(N * N).fill(1), '全浅图 → 逐格全 1');
+    assert.strictEqual(g1.opaque, N * N, '全浅图 → 不透明格数 = 总格数');
+    assert.strictEqual(regionGridRatio(g1.cells, g1.opaque), 1, '全浅图 → 占比 1');
+
+    // 全深 → 全 0
+    const g2 = regionCellGrid(flatten(new Array(N * N).fill(DARK)), N, P);
+    assert.deepStrictEqual(Array.from(g2.cells), new Array(N * N).fill(0), '全深图 → 逐格全 0');
+    assert.strictEqual(regionGridRatio(g2.cells, g2.opaque), 0, '全深图 → 占比 0');
+
+    // 左浅右彩: 每行左 2 格白, 右 2 格蓝
+    const rowPattern = [].concat(new Array(N / 2).fill(WHITE), new Array(N / 2).fill(BLUE));
+    const leftRight = flatten([].concat(...new Array(N).fill(rowPattern)));
+    const g3 = regionCellGrid(leftRight, N, P);
+    const expected3 = [];
+    for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) expected3.push(x < N / 2 ? 1 : 0);
+    assert.deepStrictEqual(Array.from(g3.cells), expected3, '左浅右彩 → 逐格按列切分正确');
+    assert.strictEqual(regionGridRatio(g3.cells, g3.opaque), 0.5, '左浅右彩 → 占比 0.5');
+
+    // 棋盘: 逐格交错, 占比仍 0.5 (验证不是按行/按列塌缩)
+    const chess = [];
+    for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) chess.push((x + y) % 2 === 0 ? WHITE : BLUE);
+    const g4 = regionCellGrid(flatten(chess), N, P);
+    const expected4 = [];
+    for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) expected4.push((x + y) % 2 === 0 ? 1 : 0);
+    assert.deepStrictEqual(Array.from(g4.cells), expected4, '棋盘 → 逐格交错正确');
+    assert.strictEqual(regionGridRatio(g4.cells, g4.opaque), 0.5, '棋盘 → 占比 0.5');
+
+    // 含透明格: 透明格 cells=0 且**不进分母**
+    const holes = [];
+    for (let i = 0; i < N * N; i++) holes.push(i < 3 ? WHITE : (i < 6 ? px(0, 0, 0, 0) : DARK));
+    const g5 = regionCellGrid(flatten(holes), N, P);
+    assert.strictEqual(g5.opaque, 13, '透明格不进不透明计数 (16 - 3)');
+    assert.strictEqual(regionGridRatio(g5.cells, g5.opaque), 3 / 13,
+      '占比分母是不透明格数, 不是总格数');
+    assert.strictEqual(regionGridRatio(g5.cells, 0), 0, '无有效格 → 占比 0 (不产生 NaN)');
+  }
+
+  // ---- 4. 逐格判定与整图判定同源 (同一份数据, 两种粒度必须自洽) ----
+  {
+    const sample = flatten([].concat(new Array(8).fill(WHITE), new Array(8).fill(BLUE)));
+    const agg = evaluateImagePixelStats(sample, P);
+    const g = regionCellGrid(sample, 4, P);
+    assert.strictEqual(regionGridRatio(g.cells, g.opaque), agg.lightRatio,
+      '同源: 逐格占比 === 整图 lightRatio (同一谓词, 同一分母口径)');
+  }
+
+  console.log('✓ v6.0 阶段 1 单测 passed: 单像素谓词三态(含 alpha=64 边界与屏蔽色) / 谓词抽取等价性(手工计数 === 聚合) / 逐格判定矩阵(全浅·全深·左浅右彩·棋盘) / 分母口径(透明不进、屏蔽进) / 逐格与整图同源');
+})();
+
+// ============================================================
+// v6.0 阶段 2 单测 (形态学 / 连通域 / 面积门 / 默认方向)
+// 契约来源: design.md §4 步骤 ④⑤⑥ / §5 门 2
+// ============================================================
+(function () {
+  const {
+    REGION_DEFAULTS, regionDilate, regionErode, regionClose, regionOpen,
+    regionComponents, regionCarve, regionCoverage, buildRegionMask, validateRegionMask,
+  } = svi;
+
+  // 用字符网格构造函数可读的测试输入: '1' = 浅色, '0' = 非浅色
+  function mkGrid(rows) {
+    const gh = rows.length;
+    const gw = rows[0].length;
+    const cells = new Uint8Array(gw * gh);
+    for (let y = 0; y < gh; y++) {
+      for (let x = 0; x < gw; x++) cells[y * gw + x] = rows[y][x] === '1' ? 1 : 0;
+    }
+    return { cells: cells, gw: gw, gh: gh };
+  }
+  const show = (cells, gw, gh) => {
+    const out = [];
+    for (let y = 0; y < gh; y++) out.push(Array.from(cells.slice(y * gw, y * gw + gw)).join(''));
+    return out.join('/');
+  };
+
+  // ---- 1. 形态学四算子 (7×7, 对象居中避开边界) ----
+  {
+    const Z7 = '0000000';
+    const ALL7 = '1111111';
+
+    // 孤立点
+    const dot = mkGrid([Z7, Z7, Z7, '0001000', Z7, Z7, Z7]);
+    assert.strictEqual(show(regionDilate(dot.cells, 7, 7), 7, 7),
+      [Z7, Z7, '0011100', '0011100', '0011100', Z7, Z7].join('/'), '膨胀: 孤立点 → 3×3 (8 邻域)');
+    assert.strictEqual(show(regionErode(dot.cells, 7, 7), 7, 7),
+      [Z7, Z7, Z7, Z7, Z7, Z7, Z7].join('/'), '腐蚀: 孤立点被消掉');
+    assert.strictEqual(show(regionOpen(dot.cells, 7, 7), 7, 7),
+      [Z7, Z7, Z7, Z7, Z7, Z7, Z7].join('/'), '开运算: 去掉孤立小块');
+
+    // 居中 3×3 实心块
+    const BLOB = [Z7, Z7, '0011100', '0011100', '0011100', Z7, Z7];
+    const blob = mkGrid(BLOB);
+    assert.strictEqual(show(regionDilate(blob.cells, 7, 7), 7, 7),
+      [Z7, '0111110', '0111110', '0111110', '0111110', '0111110', Z7].join('/'), '膨胀: 3×3 → 5×5');
+    assert.strictEqual(show(regionClose(blob.cells, 7, 7), 7, 7), BLOB.join('/'),
+      '闭运算: 实心块不变 (无洞可填)');
+    assert.strictEqual(show(regionOpen(blob.cells, 7, 7), 7, 7), BLOB.join('/'),
+      '开运算: 实心块不变');
+    assert.strictEqual(show(regionClose(blob.cells, 7, 7), 7, 7),
+      show(regionClose(regionClose(blob.cells, 7, 7), 7, 7), 7, 7), '闭运算是幂等的');
+
+    // 闭运算填 1 格洞: 3×3 环 → 实心
+    const ring = mkGrid([Z7, Z7, '0011100', '0010100', '0011100', Z7, Z7]);
+    assert.strictEqual(show(regionClose(ring.cells, 7, 7), 7, 7), BLOB.join('/'),
+      '闭运算: 填掉中心 1 格洞');
+    assert.strictEqual(show(regionOpen(ring.cells, 7, 7), 7, 7), [Z7, Z7, Z7, Z7, Z7, Z7, Z7].join('/'),
+      '开运算: 3×3 环被消掉 (每个环格的 3×3 邻域都含洞或图外, 腐蚀后全空)');
+
+    // **边界复制契约 (回归断言)**: 越界取最近的边缘格, 不按背景。
+    //   越界按背景时 close 会在图外造出一圈 0, 那一环面积够大 (16×16 下 60 格) 会被面积门
+    //   当成"特征大块"抠掉 → 图片最外一圈永远不被反色 → 白底幻灯片出现一圈白框。
+    const allOn = mkGrid([ALL7, ALL7, ALL7, ALL7, ALL7, ALL7, ALL7]);
+    assert.strictEqual(show(regionErode(allOn.cells, 7, 7), 7, 7),
+      [ALL7, ALL7, ALL7, ALL7, ALL7, ALL7, ALL7].join('/'),
+      '边界复制: 全浅图腐蚀后仍是全浅 (不得收缩成一圈 0)');
+    assert.strictEqual(show(regionClose(allOn.cells, 7, 7), 7, 7),
+      [ALL7, ALL7, ALL7, ALL7, ALL7, ALL7, ALL7].join('/'),
+      '边界复制: 全浅图 close 后不变 (不得造出 0 边界环)');
+  }
+
+  // ---- 2. 连通域 (8 邻域) ----
+  {
+    // 两个块: 一个 3×3 实心, 一个孤立点
+    const g = mkGrid(['11000', '11000', '00000', '00001', '00001']);
+    const comps = regionComponents(g.cells, 1, 5, 5);
+    comps.sort((a, b) => b.area - a.area);
+    assert.strictEqual(comps.length, 2, '两个 1 值连通域');
+    assert.deepStrictEqual(comps.map((c) => c.area), [4, 2], '面积分别是 4 与 2');
+
+    // 对角相邻算**同一个** 8 邻域连通域 (与形态学保持同一邻接度)
+    const diag = mkGrid(['10000', '01000', '00100', '00000', '00000']);
+    assert.strictEqual(regionComponents(diag.cells, 1, 5, 5).length, 1, '对角相邻 → 8 邻域下是一个连通域');
+
+    // 4 邻域下的同一个例子会断成 3 个 —— 这条断言把"邻接度选择"钉死, 防止以后被改回 4 邻域
+    const fourNeighbor = regionComponents(diag.cells, 1, 5, 5).length;
+    assert.strictEqual(fourNeighbor, 1, '邻接度契约: 必须是 8 邻域');
+
+    // target=0 也能标 (carve-color 要的是非浅色连通域)
+    const g2 = mkGrid(['11111', '11001', '11001', '11111', '11111']);
+    const zeroComps = regionComponents(g2.cells, 0, 5, 5);
+    assert.strictEqual(zeroComps.length, 1, 'target=0 的连通域可标 (2×2 的洞, 一个连通域)');
+    assert.strictEqual(zeroComps[0].area, 4, 'target=0 连通域面积正确');
+  }
+
+  // ---- 3. 面积门边界 (在 N=32 上测, 因为 N=16 时面积门被厚度门盖住, 不具约束力) ----
+  {
+    assert.strictEqual(REGION_DEFAULTS.minAreaRatio, 0.03, '面积门默认 3%');
+    const N32 = 32;
+    const minArea32 = Math.round(REGION_DEFAULTS.minAreaRatio * N32 * N32);
+    assert.strictEqual(minArea32, 31, '32×32 下面积门 = 31 格');
+
+    // 说明: N=16 时 minArea = 8, 而 3×3 结构元的开运算已经保证存活特征 ≥3×3=9 格,
+    //   即面积门在 N=16 下**不具约束力** (厚度门更强)。面积门要到 N=32 才真正生效。
+    //   这不是 bug, 但意味着 N=16 的实际最小特征尺寸 ≈ 3/16 = 19% 图宽 —— 偏粗, 见阶段 2 结论。
+    const blockGrid = (size, bs) => {
+      const rows = [];
+      for (let y = 0; y < size; y++) {
+        let r = '';
+        for (let x = 0; x < size; x++) {
+          r += (y >= 10 && y < 10 + bs && x >= 10 && x < 10 + bs) ? '0' : '1';
+        }
+        rows.push(r);
+      }
+      return mkGrid(rows);
+    };
+    const small = regionCarve(blockGrid(N32, 5).cells, N32, N32, REGION_DEFAULTS); // 5×5 = 25
+    const large = regionCarve(blockGrid(N32, 6).cells, N32, N32, REGION_DEFAULTS); // 6×6 = 36
+    assert.strictEqual(small.data[12 * N32 + 12], 1, '面积门: 25 格 < 31 → 不抠 (跟随多数)');
+    assert.strictEqual(large.data[12 * N32 + 12], 0, '面积门: 36 格 ≥ 31 → 抠掉 (保持原色)');
+  }
+
+  // ---- 4. 默认方向 (design §4 ④) ----
+  {
+    // (a) 对偶极性: 深底 + 大块浅色 → carve-light, 只有浅色大块被反色
+    const rows = [];
+    for (let y = 0; y < 16; y++) {
+      let r = '';
+      for (let x = 0; x < 16; x++) r += (y >= 4 && y < 12 && x >= 4 && x < 12) ? '1' : '0';
+      rows.push(r);
+    }
+    const darkWithLightBlock = mkGrid(rows);
+    assert.strictEqual(regionCoverage(darkWithLightBlock.cells), 64 / 256, '深底浅块: 浅色占比 0.25');
+    const c1 = regionCarve(darkWithLightBlock.cells, 16, 16, REGION_DEFAULTS);
+    assert.strictEqual(c1.polarity, 'carve-light', '浅色占少数 → carve-light 极性');
+    assert.strictEqual(regionCoverage(c1.data), 0.25,
+      '深底浅块: 覆盖率 = 被反色的格占比 = 仅浅色大块那 64 格');
+    assert.strictEqual(c1.data[8 * 16 + 8], 1, '块内 → 反色');
+    assert.strictEqual(c1.data[0], 0, '块外 → 保持原色');
+
+    // (b) 主场景: 浅底 + 大块非浅色 → carve-color, 只有大块被保留
+    const rows2 = [];
+    for (let y = 0; y < 16; y++) {
+      let r = '';
+      for (let x = 0; x < 16; x++) r += (y >= 5 && y < 11 && x >= 5 && x < 11) ? '0' : '1';
+      rows2.push(r);
+    }
+    const lightWithDarkBlock = mkGrid(rows2);
+    const c2 = regionCarve(lightWithDarkBlock.cells, 16, 16, REGION_DEFAULTS);
+    assert.strictEqual(c2.polarity, 'carve-color', '浅色占多数 → carve-color 极性');
+    assert.strictEqual(c2.data[8 * 16 + 8], 0, '浅底: 大块被抠掉 (保持原色)');
+    assert.strictEqual(c2.data[0], 1, '浅底: 大块之外被反色');
+    assert.strictEqual(regionCoverage(c2.data), 220 / 256, '抠掉 36 格 → 覆盖率 0.859');
+  }
+
+  // ---- 5. 两个实测 (design 要求的验证点; 两处曾暴露冲突, 2026-09-25 裁决后定型) ----
+  {
+    // (a) 白底黑字密集图: 5 条 1 格厚文字带。design 要求验证「不产生碎裂掩码」。
+    const rows = [];
+    for (let y = 0; y < 16; y++) {
+      const isTextRow = (y === 2 || y === 5 || y === 8 || y === 11 || y === 14);
+      let r = '';
+      for (let x = 0; x < 16; x++) r += (isTextRow && x >= 2 && x < 14) ? '0' : '1';
+      rows.push(r);
+    }
+    const textSlide = mkGrid(rows);
+    const carved = regionCarve(textSlide.cells, 16, 16, REGION_DEFAULTS);
+    let carvedAway = 0;
+    for (let y = 0; y < 16; y++) {
+      const isTextRow = (y === 2 || y === 5 || y === 8 || y === 11 || y === 14);
+      for (let x = 2; x < 14; x++) { if (isTextRow && carved.data[y * 16 + x] === 0) carvedAway++; }
+    }
+    const maskText = buildRegionMask({ gw: 16, gh: 16, cellLight: textSlide.cells, ratio: regionCoverage(textSlide.cells) });
+    console.log('[v6.0 阶段2 实测 A] 白底黑字图: 浅色占比=' + regionCoverage(textSlide.cells).toFixed(3)
+      + ' 极性=' + carved.polarity
+      + ' 文字带被抠格数=' + carvedAway + '/60'
+      + ' 反色覆盖率=' + regionCoverage(carved.data).toFixed(3)
+      + ' → source=' + maskText.source);
+    assert.strictEqual(carved.polarity, 'carve-color', '白底黑字 → carve-color 极性');
+    // 裁决后 (implement.md 偏离 5「先开后闭」): 厚度门在**开运算**上先执行, 1 格厚文字带被整条抹除,
+    //   于是「非浅色特征集」为空 → 抠不掉任何东西 → 覆盖率 1.0 → 门 2 判为整图反色。
+    //   这正是纯文字幻灯片想要的结局: 整图反色 (白底→深底, 黑字→白字), 文字仍可读。
+    //   反例留档: 先闭后开时实测 60/60 全被抠 (close 的 dilate 把行距 ≤2 的相邻文字带合并成实心带)。
+    assert.strictEqual(carvedAway, 0, '先开后闭: 1 格厚文字带被厚度门抹除 → 一格都不抠');
+    assert.strictEqual(regionCoverage(carved.data), 1, '抠除量为零 → 覆盖率 1.0');
+    assert.strictEqual(maskText.source, 'whole', '纯文字图走整图反色 (不产生碎裂掩码, 也不抠掉文字)');
+    assert.ok(validateRegionMask(maskText).ok, '整图结论的掩码自洽');
+
+    // 证伪留档: 同一张图若按「先闭后开」(原设计), 文字带会被整片抠掉 → 文字在反色后消失。
+    //   这条断言是**回归护栏**: 谁把形态学顺序改回去, 它会立刻炸。
+    const textFeature = new Uint8Array(256);
+    for (let i = 0; i < 256; i++) textFeature[i] = textSlide.cells[i] ? 0 : 1;
+    const merged = svi.regionClose(textFeature, 16, 16);
+    let mergedRows = 0;
+    for (let y = 0; y < 16; y++) { if (merged[y * 16 + 8]) mergedRows++; }
+    assert.ok(mergedRows > 5, '反例留档: 先闭后开会把 5 条文字带膨胀合并成 ' + mergedRows + ' 行实心带 (>5)');
+
+    // (b) 主场景: 浅底 + 5×5 嵌入块 (占 9.8%)。裁决后门 2 上界为 0.97 → 该抠的照样抠。
+    const rows2 = [];
+    for (let y = 0; y < 16; y++) {
+      let r = '';
+      for (let x = 0; x < 16; x++) r += (y >= 6 && y < 11 && x >= 6 && x < 11) ? '0' : '1';
+      rows2.push(r);
+    }
+    const g5 = mkGrid(rows2);
+    const carve5 = regionCarve(g5.cells, 16, 16, REGION_DEFAULTS);
+    const mask5 = buildRegionMask({ gw: 16, gh: 16, cellLight: g5.cells, ratio: regionCoverage(g5.cells) });
+    console.log('[v6.0 阶段2 实测 B] 5×5 嵌入块: 浅色占比=' + regionCoverage(g5.cells).toFixed(3)
+      + ' 抠后覆盖率=' + regionCoverage(carve5.data).toFixed(3) + ' → source=' + mask5.source);
+    assert.strictEqual(regionCoverage(carve5.data), 231 / 256, '前置: 抠掉 25 格 → 覆盖率 231/256');
+    // 2026-09-25 裁决+更正: 门 1 上界由 0.90 放宽到 0.97 (= 1 - 面积门) 后, 本例 (浅色占比 0.902)
+    //   不再被短路, 正常进入分割 → 抠掉嵌入块 → 覆盖率 0.902 < 0.97 → 产出区域掩码。
+    //   改动前的实测: 门 1 命中 → 整图反色, 嵌入块被一起反色 (即 PRD 背景点名要防的事)。
+    assert.strictEqual(mask5.source, 'region', '主场景: 嵌入块保持原色 (门 1 不再吞掉 9.8% 的嵌入内容)');
+    assert.strictEqual(mask5.polarity, 'carve-color', '主场景极性');
+    assert.ok(validateRegionMask(mask5).ok, '掩码自洽');
+    // 嵌入块那一格的语义: data = 0 → 不反色 (保持原色)
+    assert.strictEqual(mask5.data[8 * 16 + 8], 0, '嵌入块中心格不反色');
+    assert.strictEqual(mask5.data[0], 1, '块外浅底反色');
+  }
+
+  // ---- 6. 门 2 (分割后复核) 的两侧边界 ----
+  {
+    const grid = (g) => ({ gw: g.gw, gh: g.gh, cellLight: g.cells, ratio: regionCoverage(g.cells) });
+    // 浅底 + 6×6 非浅色块
+    const rows = [];
+    for (let y = 0; y < 16; y++) {
+      let r = '';
+      for (let x = 0; x < 16; x++) r += (y >= 5 && y < 11 && x >= 5 && x < 11) ? '0' : '1';
+      rows.push(r);
+    }
+    const m = buildRegionMask(grid(mkGrid(rows)));
+    assert.strictEqual(m.source, 'region', '两道门之间 → 产出真正的区域掩码');
+    assert.strictEqual(m.polarity, 'carve-color', '极性透传');
+    assert.ok(validateRegionMask(m).ok, 'region 掩码必须满足全部不变量 (含 I5)');
+    assert.ok(m.coverage > REGION_DEFAULTS.segmentRatioLow && m.coverage < REGION_DEFAULTS.segmentRatioHigh,
+      '门 2 保证 coverage 落在 (segmentRatioLow, segmentRatioHigh) 开区间');
+
+    // 门 1/门 2 共用同一对阈值, 且都由面积门派生 (1 - minAreaRatio / minAreaRatio)
+    assert.strictEqual(REGION_DEFAULTS.segmentRatioHigh, 1 - REGION_DEFAULTS.minAreaRatio, '门 2 上界 = 1 - 面积门');
+    assert.strictEqual(REGION_DEFAULTS.segmentRatioLow, REGION_DEFAULTS.minAreaRatio, '门 2 下界 = 面积门');
+    assert.strictEqual(REGION_DEFAULTS.wholeRatioHigh, 1 - REGION_DEFAULTS.minAreaRatio, '门 1 上界 = 门 2 上界 (同源)');
+    assert.strictEqual(REGION_DEFAULTS.wholeRatioLow, REGION_DEFAULTS.minAreaRatio, '门 1 下界 = 门 2 下界 (同源)');
+
+    // 0.97 不是随手取的数: 1 - 0.97 ≈ 面积门 0.03 —— 两者是**同一口径的两个说法**
+    //   (「抠掉的量不足最小特征块」⟺「抠掉的占比 < 面积门」)。改动其一时必须一起想清楚。
+    //   (用容差比: 1 - 0.97 在 IEEE754 下是 0.030000000000000027, 不等于字面量 0.03)
+    assert.ok(Math.abs((1 - REGION_DEFAULTS.segmentRatioHigh) - REGION_DEFAULTS.minAreaRatio) < 1e-9,
+      '门 2 上界与面积门同源: 1 - segmentRatioHigh ≈ minAreaRatio');
+
+    // 上界可达性 (实测结论): 16×16 下最小的可抠块是 3×3 = 9 格 (厚度门下限),
+    //   抠完覆盖率 = 247/256 = 0.9648 < 0.97 → **仍产出区域掩码**。
+    //   即: 上界分支只可能被「一格都没抠掉」(覆盖率 1.0) 触发 —— 那本就该走整图。
+    //   这条断言把「不能因为块小而误判回整图」钉死 (正是偏离 7 的教训)。
+    {
+      const rows3 = [];
+      for (let y = 0; y < 16; y++) {
+        let r = '';
+        for (let x = 0; x < 16; x++) r += (y >= 6 && y < 9 && x >= 6 && x < 9) ? '0' : '1';
+        rows3.push(r);
+      }
+      const g3 = mkGrid(rows3);
+      const m3 = buildRegionMask(grid(g3));
+      assert.strictEqual(regionCoverage(regionCarve(g3.cells, 16, 16, REGION_DEFAULTS).data), 247 / 256,
+        '最小可抠块 (3×3) 抠完后覆盖率 0.9648');
+      // 3×3 是最小可抠块 → 浅色占比 0.9648 < 门 1 的 0.97 → 进分割 → 覆盖率 0.9648 < 0.97 → 区域掩码。
+      //   这条把「不能因为块小而误判回整图」钉死 (偏离 7 的教训)。
+      assert.strictEqual(m3.source, 'region', '最小可抠块 (3×3) 也必须产出区域掩码');
+    }
+
+    // 下界可达性 (实测): 深底 + 1 格厚浅色文字 → 浅色特征全被厚度门抹掉 → 抠除量为零 → none (不反色)。
+    //   这是「深底页面上的细白字」的真实形态: 反色它会把字也黑掉, 正确行为是整页不反。
+    {
+      const rows4 = [];
+      for (let y = 0; y < 16; y++) {
+        const isTextRow = (y === 3 || y === 6 || y === 9 || y === 12);
+        let r = '';
+        for (let x = 0; x < 16; x++) r += (isTextRow && x >= 2 && x < 14) ? '1' : '0';
+        rows4.push(r);
+      }
+      const g4 = mkGrid(rows4);
+      assert.ok(regionCoverage(g4.cells) > REGION_DEFAULTS.wholeRatioLow
+        && regionCoverage(g4.cells) < REGION_DEFAULTS.wholeRatioHigh, '前置: 该图落在门 1 的中间带');
+      const m4 = buildRegionMask(grid(g4));
+      assert.strictEqual(m4.source, 'none', '细浅色特征被厚度门抹除 → 抠不到东西 → none (不反色)');
+      assert.ok(validateRegionMask(m4).ok, 'none 掩码自洽');
+    }
+
+    // 读不到像素 → 降级 (与门 2 无关, 但同属入口契约)
+    assert.strictEqual(buildRegionMask(null).source, 'degraded', 'null 网格 → degraded');
+  }
+
+  console.log('✓ v6.0 阶段 2 单测 passed: 形态学四算子(含边界复制回归) / 8 邻域连通域 / 面积门(N=32) / 默认方向双向 / 先开后闭的厚度门(白底黑字零抠除 + 先闭后开反例留档) / 门 2 两侧边界与可达性');
+})();
+
+// ============================================================
+// v6.0 阶段 3 单测 + bench (双性能门: 零分割调用 / 计数器 / 实测预算)
+// 契约来源: design.md §5 双性能门 · PRD R5
+// ============================================================
+(function () {
+  const { regionMaskTake, regionCacheClear, regionDiagnostics, regionCoverage, prefs } = svi;
+
+  const mkGrid = (n, kind) => {
+    const cells = new Uint8Array(n * n);
+    if (kind === 'light') cells.fill(1);
+    else if (kind === 'dark') cells.fill(0);
+    else if (kind === 'blocks') {
+      // 浅底 + 两个 4×4 非浅色块 (落中间带, 会被真正分割)
+      cells.fill(1);
+      for (let y = 2; y < 6; y++) for (let x = 2; x < 6; x++) cells[y * n + x] = 0;
+      for (let y = n - 6; y < n - 2; y++) for (let x = n - 6; x < n - 2; x++) cells[y * n + x] = 0;
+    } else {
+      // 伪随机 (确定性 LCG): 逼出连通域/矩形分解的最坏路径
+      let s = 12345;
+      for (let i = 0; i < cells.length; i++) { s = (s * 1103515245 + 12345) & 0x7fffffff; cells[i] = (s >> 16) & 1; }
+    }
+    return { gw: n, gh: n, cellLight: cells, ratio: regionCoverage(cells) };
+  };
+
+  // ---- 1. bench: 纯浅色 / 纯深色图**零分割调用** (R5 第一道门的核心承诺) ----
+  {
+    const wasStats = prefs.statsEnabled;
+    prefs.statsEnabled = true;
+    try {
+      regionCacheClear();
+      const before = regionDiagnostics();
+      const c0 = Object.assign({}, svi.stats.counters);
+      for (const kind of ['light', 'dark']) {
+        const m = regionMaskTake(mkGrid(32, kind), { key: 'bench|' + kind });
+        assert.strictEqual(m.source, kind === 'light' ? 'whole' : 'none', kind + ' 图 → 直接整图结论');
+      }
+      assert.strictEqual(regionDiagnostics().segmented - before.segmented, 0,
+        'bench: 纯浅色与纯深色图的分割函数调用次数为 0');
+      assert.strictEqual(svi.stats.counters.regionSegmented - c0.regionSegmented, 0,
+        'bench: regionSegmented 计数为 0 (零分割开销)');
+      assert.strictEqual(svi.stats.counters.regionWhole - c0.regionWhole, 1, '纯浅色 → regionWhole');
+      assert.strictEqual(svi.stats.counters.regionNone - c0.regionNone, 1, '纯深色 → regionNone');
+    } finally {
+      prefs.statsEnabled = wasStats;
+      regionCacheClear();
+    }
+  }
+
+  // ---- 2. bench: 单图掩码构建耗时 (门 1 放宽后会有更多图走到这里, 代价必须实测) ----
+  {
+    // 轮数刻意小: 本文件的同步执行时间会挤到别的"固定等待 120ms"的异步用例 (见 v3.0 quota 用例),
+    //   所以 bench 只取足够稳定的样本量, 不追求统计精度。
+    const runs = 25;
+    const measure = (n, kind) => {
+      const g = mkGrid(n, kind);
+      regionCacheClear();
+      const t0 = Date.now();
+      for (let i = 0; i < runs; i++) {
+        regionMaskTake(g, { key: 'bench|' + n + '|' + kind + '|' + i }); // 每轮换键 → 强制重算
+      }
+      return (Date.now() - t0) / runs;
+    };
+    const light = measure(16, 'light');     // 门 1 短路 (最廉价路径)
+    const blocks16 = measure(16, 'blocks'); // 真正走完分割 (典型路径)
+    const rnd16 = measure(16, 'random');    // 最坏路径 (连通域/矩形分解压力)
+    const blocks32 = measure(32, 'blocks');
+    regionCacheClear();
+
+    console.log('[v6.0 阶段3 bench] 单图掩码构建平均耗时 (ms, ' + runs + ' 轮): '
+      + 'N16 短路=' + light.toFixed(4) + ' 典型=' + blocks16.toFixed(4) + ' 随机=' + rnd16.toFixed(4)
+      + ' | N32 典型=' + blocks32.toFixed(4));
+
+    // 内部预算 16ms: 这里断言一个远宽于实测值的上界 (实测在 0.01~0.5ms 量级),
+    //   既能把「性能预算 <1ms 量级」这条约束钉住, 又不会因为 CI 机器抖动而假红。
+    assert.ok(rnd16 < 5, 'N=16 最坏路径平均耗时 < 5ms (实测 ' + rnd16.toFixed(4) + 'ms)');
+    assert.ok(blocks16 < 1, 'N=16 典型路径平均耗时 < 1ms (实测 ' + blocks16.toFixed(4) + 'ms)');
+  }
+
+  // ---- 3. 门 2 只对「真正抠掉了东西」的图有意义: 覆盖率落在开区间才产出 region ----
+  {
+    regionCacheClear();
+    const m = regionMaskTake(mkGrid(16, 'blocks'), { key: 'bench|gate2' });
+    assert.strictEqual(m.source, 'region', '中间带 + 有可抠块 → region');
+    assert.ok(m.coverage > 0 && m.coverage < 1, 'coverage 落在 (0,1) (I5)');
+    assert.ok(regionDiagnostics().segmented >= 1, '确实执行了分区判定');
+  }
+
+  console.log('✓ v6.0 阶段 3 单测 + bench passed: 纯浅/纯深图零分割调用(实测计数) / 单图构建耗时实测(N16·N32, 典型与最坏路径) / 门 2 区间语义');
+})();
+
+// ============================================================
+// v6.0 阶段 4 单测 (表达选择: 精确矩形分解 / 三种 kind / 集合等价 / 不变量 I8)
+// 契约来源: design.md §3.1 I7·I8 / §6 表达选择
+// ============================================================
+(function () {
+  const {
+    REGION_DEFAULTS, regionRectsExact, deriveRegionExpr,
+    makeRegionMask, validateRegionMask,
+  } = svi;
+
+  // 字符网格 → 集合 ('1' = 在集合内)
+  function mkSet(rows) {
+    const gh = rows.length;
+    const gw = rows[0].length;
+    const set = new Uint8Array(gw * gh);
+    for (let y = 0; y < gh; y++) {
+      for (let x = 0; x < gw; x++) set[y * gw + x] = rows[y][x] === '1' ? 1 : 0;
+    }
+    return { set: set, gw: gw, gh: gh };
+  }
+  const rectUnion = (rects, gw, gh) => {
+    const out = new Uint8Array(gw * gh);
+    for (let i = 0; i < rects.length; i++) {
+      const q = rects[i];
+      for (let y = q.y; y < q.y + q.h; y++) {
+        for (let x = q.x; x < q.x + q.w; x++) out[y * gw + x] = 1;
+      }
+    }
+    return out;
+  };
+  const disjoint = (rects) => {
+    for (let a = 0; a < rects.length; a++) {
+      for (let b = a + 1; b < rects.length; b++) {
+        const p = rects[a];
+        const q = rects[b];
+        if (p.x < q.x + q.w && q.x < p.x + p.w && p.y < q.y + q.h && q.y < p.y + p.h) return false;
+      }
+    }
+    return true;
+  };
+  const sameSet = (a, b) => {
+    for (let i = 0; i < a.length; i++) { if (!!a[i] !== !!b[i]) return false; }
+    return true;
+  };
+  // 从 expr 反推「反色格集合」—— 三种 kind 必须描述同一个集合 (像素级等价的前提)
+  function exprSet(expr, gw, gh) {
+    const out = new Uint8Array(gw * gh);
+    if (expr.kind === 'bitmap') {
+      for (let i = 0; i < out.length; i++) out[i] = expr.bytes[i] ? 1 : 0;
+      return out;
+    }
+    const rects = expr.kind === 'holes' ? expr.holes : expr.polys;
+    const cover = new Uint8Array(gw * gh);
+    for (let i = 0; i < rects.length; i++) {
+      const q = rects[i];
+      const x0 = Math.round(q.x * gw);
+      const y0 = Math.round(q.y * gh);
+      const x1 = x0 + Math.round(q.w * gw);
+      const y1 = y0 + Math.round(q.h * gh);
+      for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) cover[y * gw + x] = 1;
+    }
+    for (let i = 0; i < out.length; i++) out[i] = (expr.kind === 'holes') ? (cover[i] ? 0 : 1) : (cover[i] ? 1 : 0);
+    return out;
+  }
+  // I8 的可判定形式: 任一侧能否用 ≤K 个互不相交矩形精确铺满
+  const canVector = (data, gw, gh, k) => {
+    const comp = new Uint8Array(data.length);
+    for (let i = 0; i < data.length; i++) comp[i] = data[i] ? 0 : 1;
+    return regionRectsExact(comp, gw, gh, k) !== null || regionRectsExact(Uint8Array.from(data), gw, gh, k) !== null;
+  };
+
+  // ---- 1. 精确矩形分解 (regionRectsExact) ----
+  {
+    assert.strictEqual(REGION_DEFAULTS.kRects, 3, 'K 默认 3');
+    assert.deepStrictEqual(regionRectsExact(new Uint8Array(16), 4, 4, 3), [], '空集 → 零矩形');
+
+    const R = mkSet(['1111', '1111', '0000', '0000']);
+    const r1 = regionRectsExact(R.set, 4, 4, 3);
+    assert.strictEqual(r1.length, 1, '整块 → 1 个矩形');
+    assert.deepStrictEqual(r1[0], { x: 0, y: 0, w: 4, h: 2 }, '矩形坐标正确');
+
+    // L 形: 左上 2×2 + 下方 4×2 → 2 个矩形
+    const L = mkSet(['1100', '1100', '1111', '1111']);
+    const rL = regionRectsExact(L.set, 4, 4, 3);
+    assert.strictEqual(rL.length, 2, 'L 形 → 2 个矩形');
+    assert.ok(sameSet(rectUnion(rL, 4, 4), L.set), '并集 === 目标集 (精确)');
+    assert.ok(disjoint(rL), '矩形互不相交');
+    assert.strictEqual(regionRectsExact(L.set, 4, 4, 1), null, 'K 不足 → null');
+
+    // 十字 (5×5): 上柱 2 + 中行 1 + 下柱 2 → 恰好 3 个矩形; K=2 铺不出来
+    const P = mkSet(['00100', '00100', '11111', '00100', '00100']);
+    const rP = regionRectsExact(P.set, 5, 5, 3);
+    assert.strictEqual(rP.length, 3, '十字 → 3 个矩形 (K=3 恰好)');
+    assert.ok(sameSet(rectUnion(rP, 5, 5), P.set), '十字并集 === 目标集');
+    assert.ok(disjoint(rP), '十字矩形互不相交');
+    assert.strictEqual(regionRectsExact(P.set, 5, 5, 2), null, '十字在 K=2 下铺不出来 (互不相交的约束)');
+
+    // 8 个孤立格 (棋盘): 每个都得单占一个矩形 → 超过 K
+    const cb = mkSet(['1010', '0101', '1010', '0101']);
+    assert.strictEqual(regionRectsExact(cb.set, 4, 4, 3), null, '棋盘 → 超过 K → null');
+
+    // 满格 → 1 个矩形
+    const full = mkSet(['1111', '1111', '1111', '1111']);
+    assert.deepStrictEqual(regionRectsExact(full.set, 4, 4, 3), [{ x: 0, y: 0, w: 4, h: 4 }], '满格 → 1 个矩形');
+
+    // 全 1 网格上「铺满」不因边界复制而缩边 (与形态学同一约定)
+    const N32 = mkSet(Array.from({ length: 32 }, () => '1'.repeat(32)));
+    assert.deepStrictEqual(regionRectsExact(N32.set, 32, 32, 3), [{ x: 0, y: 0, w: 32, h: 32 }], '32×32 满格 → 1 个矩形');
+  }
+
+  // ---- 2. 三种 kind 的构造 ----
+  {
+    const mk = (rows) => mkSet(rows);
+
+    // 退化: 全反 / 全不反 → 零个矩形
+    const cov1 = new Uint8Array(16).fill(1);
+    assert.deepStrictEqual(deriveRegionExpr(cov1, 4, 4), { kind: 'holes', holes: [] }, 'cov=1 → 零洞');
+    assert.deepStrictEqual(deriveRegionExpr(new Uint8Array(16), 4, 4), { kind: 'islands', polys: [] }, 'cov=0 → 零孤岛');
+
+    // 主场景: 浅底挖一个矩形彩色块 → 洞式 (少数侧优先)
+    const holesData = mk(['1111', '1001', '1001', '1111']).set; // 1 多, 中间 2×2 是 0
+    const eh = deriveRegionExpr(holesData, 4, 4);
+    assert.strictEqual(eh.kind, 'holes', '主场景 → 洞式');
+    assert.deepStrictEqual(eh.holes, [{ x: 0.25, y: 0.25, w: 0.5, h: 0.5 }], '洞 = 归一化 0~1 矩形');
+    assert.ok(sameSet(exprSet(eh, 4, 4), holesData), '洞式反推的集合 === data');
+
+    // 对偶场景: 深底圈一个矩形浅色块 → 孤岛式
+    const islData = mk(['0000', '0110', '0110', '0000']).set;
+    const ei = deriveRegionExpr(islData, 4, 4);
+    assert.strictEqual(ei.kind, 'islands', '对偶场景 → 孤岛式');
+    assert.deepStrictEqual(ei.polys, [{ x: 0.25, y: 0.25, w: 0.5, h: 0.5 }], '孤岛 = 归一化 0~1 矩形');
+    assert.ok(sameSet(exprSet(ei, 4, 4), islData), '孤岛式反推的集合 === data');
+
+    // 不可矩形化 → 位图, 灰度 0/255
+    const cbData = mk(['1010', '0101', '1010', '0101']).set;
+    const eb = deriveRegionExpr(cbData, 4, 4);
+    assert.strictEqual(eb.kind, 'bitmap', '棋盘 → 位图');
+    assert.strictEqual(eb.bytes.length, 16, '位图长度 === gw*gh');
+    assert.deepStrictEqual(Array.from(eb.bytes), Array.from(cbData).map(v => (v ? 255 : 0)), '位图灰度 0/255');
+    assert.ok(sameSet(exprSet(eb, 4, 4), cbData), '位图反推的集合 === data');
+
+    // K=0: 只有退化情形能走矢量
+    assert.strictEqual(deriveRegionExpr(holesData, 4, 4, { kRects: 0 }).kind, 'bitmap', 'K=0 → 非退化一律位图');
+    assert.strictEqual(deriveRegionExpr(cov1, 4, 4, { kRects: 0 }).kind, 'holes', 'K=0 仍保留退化的零矩形表达');
+  }
+
+  // ---- 3. 集合等价: 同一 data 下三种表达描述同一区域 (像素级等价的前提) ----
+  {
+    const cases = [
+      { name: '浅底挖矩形块', rows: ['11111', '10001', '10001', '11111', '11111'] },
+      { name: '深底圈矩形块', rows: ['00000', '01110', '01110', '00000', '00000'] },
+      { name: 'L 形抠除', rows: ['11000', '11000', '11110', '11110', '11110'] },
+      { name: '棋盘(位图)', rows: ['1010', '0101', '1010', '0101'] },
+      { name: '十字抠除', rows: ['11011', '11011', '00000', '11011', '11011'] },
+    ];
+    for (let c = 0; c < cases.length; c++) {
+      const g = mkSet(cases[c].rows);
+      const auto = makeRegionMask({ gw: g.gw, gh: g.gh, source: 'region', data: g.set });
+      assert.ok(validateRegionMask(auto).ok, cases[c].name + ': 自动表达必须自洽');
+      assert.ok(sameSet(exprSet(auto.expr, g.gw, g.gh), g.set), cases[c].name + ': 自动表达描述的区域 === data');
+
+      // 强制位图表达 → 必须描述同一个集合
+      const bytes = new Uint8Array(g.set.length);
+      for (let i = 0; i < bytes.length; i++) bytes[i] = g.set[i] ? 255 : 0;
+      const forced = makeRegionMask({
+        gw: g.gw, gh: g.gh, source: 'region', data: g.set,
+        expr: { kind: 'bitmap', bytes: bytes },
+      });
+      assert.ok(validateRegionMask(forced).ok, cases[c].name + ': 位图表达自洽');
+      assert.ok(sameSet(exprSet(forced.expr, g.gw, g.gh), g.set), cases[c].name + ': 位图描述的区域 === data');
+
+      // I8: kind === 'bitmap' ⟺ 两侧都铺不出来
+      const k = REGION_DEFAULTS.kRects;
+      assert.strictEqual(auto.expr.kind === 'bitmap', !canVector(g.set, g.gw, g.gh, k),
+        cases[c].name + ': I8 双向成立 (bitmap ⟺ 无法用 ≤K 矩形精确表达)');
+    }
+  }
+
+  // ---- 4. 校验器把住新不变量 (I7 互译 / I8 一致) ----
+  {
+    const g = mkSet(['1111', '1001', '1001', '1111']);
+    const good = makeRegionMask({ gw: 4, gh: 4, source: 'region', data: g.set });
+    assert.strictEqual(good.expr.kind, 'holes', '基准: 洞式');
+
+    const offset = { ...good, expr: { kind: 'holes', holes: [{ x: 0.5, y: 0.25, w: 0.5, h: 0.5 }] } };
+    assert.ok(!validateRegionMask(offset).ok
+      && validateRegionMask(offset).errors.join('|').indexOf('I8') >= 0, 'I8: 矩形与 data 不一致被抓');
+
+    const overlap = { ...good, expr: { kind: 'holes', holes: [{ x: 0.25, y: 0.25, w: 0.5, h: 0.5 }, { x: 0.25, y: 0.25, w: 0.25, h: 0.25 }] } };
+    assert.ok(!validateRegionMask(overlap).ok
+      && validateRegionMask(overlap).errors.join('|').indexOf('重叠') >= 0, 'I7: 矩形重叠被抓');
+
+    const out = { ...good, expr: { kind: 'holes', holes: [{ x: 0.25, y: 0.25, w: 2, h: 0.5 }] } };
+    assert.ok(!validateRegionMask(out).ok
+      && validateRegionMask(out).errors.join('|').indexOf('越界') >= 0, 'I7: 矩形越界被抓');
+
+    const badBytes = { ...good, expr: { kind: 'bitmap', bytes: new Uint8Array(3) } };
+    assert.ok(!validateRegionMask(badBytes).ok
+      && validateRegionMask(badBytes).errors.join('|').indexOf('I7') >= 0, 'I7: 位图长度错被抓');
+
+    const badKind = { ...good, expr: { kind: 'wat' } };
+    assert.ok(!validateRegionMask(badKind).ok
+      && validateRegionMask(badKind).errors.join('|').indexOf('I7') >= 0, 'I7: 未知 kind 被抓');
+
+    const noRects = { ...good, expr: { kind: 'holes' } };
+    assert.ok(!validateRegionMask(noRects).ok
+      && validateRegionMask(noRects).errors.join('|').indexOf('I7') >= 0, 'I7: 缺矩形数组被抓');
+  }
+
+  console.log('✓ v6.0 阶段 4 单测 passed: 精确矩形分解(并集===集合·互不相交·K 边界) / 三种 kind 构造 / 三角色集合等价 / I8 双向 / 校验器把住互译一致');
+})();
+
+// ============================================================
+// v6.0 阶段 5 单测 (掩码缓存: 键稳定性 / 命中 / LRU 淘汰 / 无重复分割)
+// 契约来源: design.md §8 缓存 · PRD R8
+// ============================================================
+(function () {
+  const {
+    REGION_CACHE_MAX, regionMaskKey, regionMaskTake, regionCacheClear,
+    regionDiagnostics, regionCoverage, validateRegionMask,
+  } = svi;
+
+  // 16×16 网格: 浅底 + 一个 6×6 非浅色块 (抠后覆盖率 0.859, 稳落门 1 与门 2 之间)
+  function blockGrid(size, bs, off) {
+    const cells = new Uint8Array(size * size).fill(1);
+    for (let y = off; y < off + bs; y++) for (let x = off; x < off + bs; x++) cells[y * size + x] = 0;
+    return { gw: size, gh: size, cellLight: cells, ratio: regionCoverage(cells) };
+  }
+  const grid1 = blockGrid(16, 6, 5);
+
+  assert.strictEqual(REGION_CACHE_MAX, 200, 'LRU 上限 200 (对齐 ImageFxEngine.lruMax)');
+
+  // ---- 1. 键稳定性 ----
+  {
+    assert.strictEqual(regionMaskKey('h', 'img.a', 640, 480), regionMaskKey('h', 'img.a', 640, 480), '同输入同键');
+    assert.notStrictEqual(regionMaskKey('h1', 'img.a', 640, 480), regionMaskKey('h2', 'img.a', 640, 480), 'host 参与键');
+    assert.notStrictEqual(regionMaskKey('h', 'img.a', 640, 480), regionMaskKey('h', 'img.b', 640, 480), '元素词干参与键');
+    assert.notStrictEqual(regionMaskKey('h', 'img.a', 640, 480), regionMaskKey('h', 'img.a', 320, 240), '固有尺寸参与键');
+    assert.strictEqual(regionMaskKey('h', 'img.a', 640.4, 480.2), regionMaskKey('h', 'img.a', 640, 480), '尺寸取整: 子像素抖动不击穿缓存');
+    assert.strictEqual(regionMaskKey('h', 'img.a', 0, 0), 'h|img.a|0x0', '缺尺寸也能成型 (key 形状稳定)');
+  }
+
+  // ---- 2. 命中: 同一张图重复取用 → 同一个对象, 不产生第二次分割 ----
+  {
+    regionCacheClear();
+    const key = regionMaskKey('host', 'img.photo', 1024, 768);
+    const before = regionDiagnostics();
+    const m1 = regionMaskTake(grid1, { key: key });
+    const mid = regionDiagnostics();
+    assert.ok(validateRegionMask(m1).ok, '取到的掩码自洽');
+    assert.strictEqual(mid.segmented - before.segmented, 1, '首次取用执行了一次分区判定');
+
+    let last = m1;
+    for (let i = 0; i < 10; i++) last = regionMaskTake(grid1, { key: key });
+    const after = regionDiagnostics();
+    assert.strictEqual(last, m1, '命中返回同一个对象 (不是重建)');
+    assert.strictEqual(after.segmented - mid.segmented, 0, 'bench: 同图重复出现零分割调用');
+    assert.strictEqual(after.hits - mid.hits, 10, '命中计数逐次累加');
+    // 命中率按**增量**算: 会话计数是全局累积的 (前面的 bench 块灌了上千次未命中),
+    //   拿绝对值断言会被无关的测试顺序影响。
+    const hitDelta = (after.hits - mid.hits);
+    const missDelta = (after.misses - mid.misses);
+    assert.strictEqual(hitDelta / (hitDelta + missDelta), 1, '本段 10 次重复取用全部命中 (命中率 100%)');
+    assert.ok(after.cacheHitRate >= 0 && after.cacheHitRate <= 1, '会话命中率仍在 0~1');
+
+    // 不同键 → 各算一次 (缓存不串台)
+    const other = regionMaskTake(grid1, { key: regionMaskKey('host', 'img.other', 1024, 768) });
+    assert.notStrictEqual(other, m1, '不同键给不同对象');
+    assert.strictEqual(regionDiagnostics().segmented - mid.segmented, 1, '换键才重新分割一次');
+  }
+
+  // ---- 3. LRU 淘汰 ----
+  {
+    regionCacheClear();
+    const before = regionDiagnostics();
+    for (let i = 0; i < REGION_CACHE_MAX; i++) {
+      regionMaskTake(grid1, { key: regionMaskKey('host', 'img.k' + i, 100, 100) });
+    }
+    assert.strictEqual(regionDiagnostics().cacheSize, REGION_CACHE_MAX, '装到上限不淘汰');
+    assert.strictEqual(regionDiagnostics().evictions - before.evictions, 0, '未超限 → 零淘汰');
+
+    regionMaskTake(grid1, { key: regionMaskKey('host', 'img.overflow', 100, 100) });
+    const d = regionDiagnostics();
+    assert.strictEqual(d.cacheSize, REGION_CACHE_MAX, '超限后容量仍被钳在上限');
+    assert.strictEqual(d.evictions - before.evictions, 1, '淘汰一次');
+    // 最旧的 img.k0 已被淘汰 → 再取用必然重算
+    const beforeK0 = regionDiagnostics();
+    regionMaskTake(grid1, { key: regionMaskKey('host', 'img.k0', 100, 100) });
+    assert.strictEqual(regionDiagnostics().segmented - beforeK0.segmented, 1, 'LRU: 最旧的被挤出 → 重算');
+    // 刚插入的 overflow 仍在 → 命中
+    const beforeOf = regionDiagnostics();
+    regionMaskTake(grid1, { key: regionMaskKey('host', 'img.overflow', 100, 100) });
+    assert.strictEqual(regionDiagnostics().segmented - beforeOf.segmented, 0, 'LRU: 最新的仍在缓存');
+  }
+
+  // ---- 4. 无键取用: 不进缓存, 但仍产出可用掩码 (长页面堆不堆积) ----
+  {
+    regionCacheClear();
+    const m = regionMaskTake(grid1, {});
+    assert.ok(validateRegionMask(m).ok, '无键也产出自洽掩码');
+    assert.strictEqual(regionDiagnostics().cacheSize, 0, '无键不写缓存');
+    const m2 = regionMaskTake(grid1, {});
+    assert.notStrictEqual(m2, m, '无键不共享对象');
+  }
+
+  // ---- 5. 清空 (参数变更的失效路径) ----
+  {
+    regionCacheClear();
+    regionMaskTake(grid1, { key: regionMaskKey('host', 'img.x', 10, 10) });
+    assert.strictEqual(regionDiagnostics().cacheSize, 1, '先装入一条');
+    regionCacheClear();
+    assert.strictEqual(regionDiagnostics().cacheSize, 0, 'clearCacheAndRescan 的失效路径: 清空');
+    const before = regionDiagnostics();
+    regionMaskTake(grid1, { key: regionMaskKey('host', 'img.x', 10, 10) });
+    assert.strictEqual(regionDiagnostics().segmented - before.segmented, 1, '清空后重算');
+  }
+
+  console.log('✓ v6.0 阶段 5 单测 passed: 键稳定性(host/词干/固有尺寸/取整) / 命中同对象 / bench 重复零分割 / LRU 淘汰与钳位 / 无键不缓存 / 参数变更失效路径');
+})();
+
+// ============================================================
+// v6.0 阶段 6 单测 (与 Action Registry 的接缝: reason 'region' 的落库 / 仲裁 / 撤销栈 / 开关门)
+// 契约来源: design.md §9 与 Action Registry 的接缝 · PRD R9
+// ============================================================
+(function () {
+  const {
+    isAutoReason, pushUndo, undoStack, arbitrate, regionReasonFor, regionMaskKeyFor,
+    regionMaskTake, regionCacheClear, regionCoverage, prefs,
+  } = svi;
+
+  function mkEl(opts) {
+    const o = opts || {};
+    const attrs = Object.assign({}, o.attrs);
+    return {
+      tagName: o.tagName || 'IMG',
+      id: o.id || '',
+      className: o.className || '',
+      getAttribute(k) { return Object.prototype.hasOwnProperty.call(attrs, k) ? attrs[k] : null; },
+      setAttribute(k, v) { attrs[k] = String(v); },
+      removeAttribute(k) { delete attrs[k]; },
+      matches(sel) {
+        const wanted = String(sel).split(',').map((s) => s.trim());
+        return (o.matchSelectors || []).some((s) => wanted.indexOf(s) >= 0);
+      },
+      _attrs: attrs,
+    };
+  }
+
+  // ---- 1. 'region' 是**自动来源** (进撤销栈), 与 manual / element-rule 区分 ----
+  {
+    assert.strictEqual(isAutoReason('region'), true, "'region' 必须被判为自动来源 (否则自动反色不进撤销栈)");
+    assert.strictEqual(isAutoReason('manual'), false, 'manual 仍不是自动来源');
+    assert.strictEqual(isAutoReason('element-rule'), false, 'element-rule 仍不是自动来源');
+  }
+
+  // ---- 2. reason 'region' 的反色结论进撤销栈, 来源标签原样保留 ----
+  {
+    undoStack.items.length = 0;
+    pushUndo({ el: mkEl({}), src: 'r1', actionId: 'invert', reason: 'region', at: 1 });
+    assert.strictEqual(undoStack.items.length, 1, "reason 'region' 的反色结论必须入栈");
+    assert.strictEqual(undoStack.items[0].reason, 'region', '来源标签原样保留 (撤销列表可显示「区域分割判定」)');
+    undoStack.items.length = 0;
+  }
+
+  // ---- 3. 仲裁: 手动结论幂等占优, 区域结论不享有特权 ----
+  {
+    const aA = arbitrate(mkEl({ attrs: { 'data-svi-manual': 'restore' } }), { verdict: 'invert', reason: 'region' });
+    assert.strictEqual(aA.verdict, 'keep', '手动 restore 压过 region 的反色结论');
+    assert.strictEqual(aA.reason, 'manual', '被压过后 reason 改写为 manual');
+
+    const aB = arbitrate(mkEl({}), { verdict: 'invert', reason: 'region', source: 'pixel' });
+    assert.strictEqual(aB.verdict, 'invert', '无手动结论时 region 结论原样通过');
+    assert.strictEqual(aB.reason, 'region', 'reason 不被改写');
+    assert.strictEqual(aB.source, 'pixel', "source 仍是 'pixel' (SOURCES 表形状不变)");
+  }
+
+  // ---- 4. 开关门 + 查表不构建 ----
+  {
+    const el = mkEl({ className: 'photo' });
+    el.naturalWidth = 800;
+    el.naturalHeight = 600;
+    const key = regionMaskKeyFor(el);
+    assert.ok(key.indexOf('img.photo|800x600') >= 0, '键 = host|词干|固有尺寸');
+
+    // 16×16: 浅底 + 6×6 非浅色块 → 稳落双门之间
+    const cells = new Uint8Array(256).fill(1);
+    for (let y = 5; y < 11; y++) for (let x = 5; x < 11; x++) cells[y * 16 + x] = 0;
+    const grid = { gw: 16, gh: 16, cellLight: cells, ratio: regionCoverage(cells) };
+
+    regionCacheClear();
+    const wasRegion = prefs.regionSegment;
+    try {
+      // (a) 关闭: 无论缓存里有没有掩码都不进入区域分支
+      prefs.regionSegment = false;
+      assert.strictEqual(regionReasonFor(el, null), 'pixel', '关闭时恒为 pixel (零区域分支)');
+      assert.strictEqual(regionReasonFor(el, grid), 'pixel', '关闭时连构建都不做');
+      assert.strictEqual(svi.regionDiagnostics().cacheSize, 0, '关闭时零缓存写入 → 零分割调用');
+      // 关闭时连元素都不碰: 传 null 也不得抛 (证明这一支是**纯短路**, 不走任何元素/布局查询)
+      assert.strictEqual(regionReasonFor(null, null), 'pixel', '关闭时传 null 元素也不抛 (零副作用短路)');
+      assert.strictEqual(regionReasonFor(undefined, undefined), 'pixel', '关闭时传 undefined 同样安全');
+
+      // (b) 开启但表里没有 → 只查表不构建 (缓存路径不许为了来源标签重算分割)
+      prefs.regionSegment = true;
+      assert.strictEqual(regionReasonFor(el, null), 'pixel', '表里没有 → pixel, 不构建');
+      assert.strictEqual(svi.regionDiagnostics().cacheSize, 0, '查表不写缓存');
+
+      // (c) 开启且表里有有效区域掩码 → 'region'
+      const mask = regionMaskTake(grid, { key: key });
+      assert.strictEqual(mask.source, 'region', '前置: 该图确实产出区域掩码');
+      assert.strictEqual(regionReasonFor(el, null), 'region', '缓存命中 → 来源标签为 region');
+      assert.strictEqual(regionReasonFor(el, grid), 'region', '带网格入口 → 同样 region');
+
+      // (d) 表里是退化掩码 (双门退回整图) → 仍是 pixel
+      regionCacheClear();   // 同键已有条目会被当成命中, 先清掉才能把同键覆写为 whole
+      const wholeCells = new Uint8Array(256).fill(1);
+      const wholeGrid = { gw: 16, gh: 16, cellLight: wholeCells, ratio: 1 };
+      assert.strictEqual(regionMaskTake(wholeGrid, { key: key }).source, 'whole', '前置: 同键覆写为整图结论');
+      assert.strictEqual(regionReasonFor(el, null), 'pixel', '双门退回整图时不冒充 region 来源');
+    } finally {
+      prefs.regionSegment = wasRegion;   // 还原开关, 不把状态泄漏给后续测试块
+      regionCacheClear();
+    }
+  }
+
+  console.log("✓ v6.0 阶段 6 单测 passed: 'region' 判为自动来源 / 入撤销栈且标签保留 / 仲裁无特权(手动压过 / 原样通过) / 开关门零分支 / 缓存路径只查不构建 / 退化掩码不冒充来源");
+})();
+
+// ============================================================
+// v6.0 阶段 7 单测 (开关齐全 / 五条降级路径 / 诊断可观测)
+// 契约来源: design.md §10 降级与失败放行 · PRD R9 · implement.md 阶段 7
+// ============================================================
+(function () {
+  const {
+    REGION_DEFAULTS, regionMaskTake, regionCacheClear, regionDiagnostics,
+    validateRegionMask, regionCoverage, loadState, Store, prefs, stats,
+  } = svi;
+
+  // 16×16: 浅底 + 6×6 非浅色块 → 稳落双门之间
+  const cells = new Uint8Array(256).fill(1);
+  for (let y = 5; y < 11; y++) for (let x = 5; x < 11; x++) cells[y * 16 + x] = 0;
+  const grid = { gw: 16, gh: 16, cellLight: cells, ratio: regionCoverage(cells) };
+
+  // ---- 1. regionKRects 可读写, 且真的作用到内核 ----
+  {
+    const origStorePrefs = Store.get('prefs', null);
+    const withPrefs = (obj) => { Store.set('prefs', obj || {}); return loadState(); };
+    assert.strictEqual(withPrefs({}).regionKRects, REGION_DEFAULTS.kRects, 'K 默认值三处一致 (DEFAULT_PREFS/loadState/REGION_DEFAULTS)');
+    assert.strictEqual(withPrefs({ regionKRects: 99 }).regionKRects, 8, 'K 钳到上限 8');
+    assert.strictEqual(withPrefs({ regionKRects: -3 }).regionKRects, 0, 'K 钳到下限 0');
+    if (origStorePrefs) Store.set('prefs', origStorePrefs); else Store.remove('prefs');
+    loadState(); // 还原 (不把测试用的偏好留给后续块)
+
+    // 生效验证: 同一个掩码在 K=3 下走矢量, 在 K=1 下退位图
+    //   12×12, 两个 3×3 洞 (相距 3 列) → 抠出来是**两个互不相连的块** → 需要恰好 2 个矩形。
+    //   细节约束 (都踩过):
+    //   ① 洞必须 ≥3×3 —— 3×3 结构元的开运算会抹掉任何厚度 < 3 格的特征 (厚度门, 见阶段 2 结论),
+    //      拿 1~2 格厚的东西做例会得到「抠不掉任何东西」, 那是形态学在起作用, 测不到 K;
+    //   ② 两洞的**膨胀后**外接框必须不邻接 (间距 ≥3 列), 否则闭运算会把它们连成一块 → 只剩 1 个矩形;
+    //   ③ 离左边界留 1 列以上, 避开腐蚀的边界复制把块撑大 (那会把洞撑到贴边, 结论仍然对但不好读)。
+    const N = 12;
+    const L = new Uint8Array(N * N).fill(1);
+    for (let y = 3; y <= 5; y++) {
+      for (let x = 1; x <= 3; x++) L[y * N + x] = 0;
+      for (let x = 7; x <= 9; x++) L[y * N + x] = 0;
+    }
+    const grid8 = { gw: N, gh: N, cellLight: L, ratio: regionCoverage(L) };
+    const key = 'k-effect';
+    const wasK = prefs.regionKRects;
+    try {
+      prefs.regionKRects = 3;
+      regionCacheClear();
+      const m3 = regionMaskTake(grid8, { key: key });
+      assert.strictEqual(m3.source, 'region', '前置: 该图产出区域掩码');
+      assert.strictEqual(m3.expr.kind, 'holes', 'K=3: 两个 3×3 洞可精确矩形化 → 矢量');
+      assert.strictEqual(m3.expr.holes.length, 2, 'K=3: 用了 2 个矩形');
+
+      prefs.regionKRects = 1;
+      regionCacheClear();
+      const m1 = regionMaskTake(grid8, { key: key });
+      assert.strictEqual(m1.expr.kind, 'bitmap', 'K=1: 同一掩码退位图 → 证明 K 真的作用到内核');
+      assert.strictEqual(m1.coverage, m3.coverage, 'K 只影响表达, 不影响区域本身 (data 不变)');
+    } finally {
+      prefs.regionKRects = wasK;
+      regionCacheClear();
+    }
+  }
+
+  // ---- 2. 五条降级路径: 每条都退化为整图判定 + 原因非空 + 不写缓存 ----
+  {
+    const reasons = ['taint', 'decode', 'cross-origin', 'no-pixels', 'budget'];
+    for (let i = 0; i < reasons.length; i++) {
+      const why = reasons[i];
+      regionCacheClear();
+      const m = regionMaskTake(null, { key: 'dp|' + why, degradeReason: why });
+      assert.strictEqual(m.source, 'degraded', why + ': 读不到像素 → degraded (退化为整图判定)');
+      assert.strictEqual(m.degrade && m.degrade.reason, why, why + ': 原因原样透传');
+      assert.ok(validateRegionMask(m).ok, why + ': I4 自洽 (degraded 必带 degrade)');
+      assert.strictEqual(m.coverage, 0, why + ': 零掩码覆盖 —— 拿不到像素就放行, 绝不乱挂掩码');
+      assert.strictEqual(regionDiagnostics().cacheSize, 0, why + ': degraded 不写缓存 (失败是暂时的)');
+    }
+    // 缺省原因 → no-pixels (与阶段 0 的既有行为一致)
+    assert.strictEqual(regionMaskTake(null, {}).degrade.reason, 'no-pixels', '缺省原因 = no-pixels');
+
+    const dg = regionDiagnostics().degrade;
+    for (let i = 0; i < reasons.length; i++) {
+      assert.ok(dg[reasons[i]] >= 1, '诊断按原因分别计数: ' + reasons[i]);
+    }
+  }
+
+  // ---- 3. 预算门 (内部安全阀): 超时 → 退化为整图判定; 预算充足 → 正常区域掩码 ----
+  {
+    regionCacheClear();
+    // 负预算确定性地复现「超时」(比等真实耗时更可靠: performance.now 的分辨率不可依赖)
+    const over = regionMaskTake(grid, { key: 'bg-over', buildBudgetMs: -1 });
+    assert.strictEqual(over.source, 'degraded', '超预算 → 退化为整图判定');
+    assert.strictEqual(over.degrade.reason, 'budget', '原因 = budget');
+    assert.ok(validateRegionMask(over).ok, '超预算掩码自洽 (I4)');
+
+    const within = regionMaskTake(grid, { key: 'bg-within', buildBudgetMs: 1e9 });
+    assert.strictEqual(within.source, 'region', '预算充足 → 正常区域掩码');
+    assert.ok(regionDiagnostics().avgMs >= 0, '平均耗时可观测');
+  }
+
+  // ---- 4. StatsManager 计数 (R9 的面板诊断行数据源) ----
+  {
+    const wasStats = prefs.statsEnabled;
+    prefs.statsEnabled = true;
+    try {
+      const c0 = Object.assign({}, stats.counters);
+      regionCacheClear();
+      regionMaskTake(grid, { key: 's1' });                                      // 过门 1 → 分割
+      regionMaskTake({ gw: 16, gh: 16, cellLight: new Uint8Array(256).fill(1), ratio: 1 }, { key: 's2' });  // 门 1 → whole
+      regionMaskTake({ gw: 16, gh: 16, cellLight: new Uint8Array(256), ratio: 0 }, { key: 's3' });          // 门 1 → none
+      const c1 = Object.assign({}, stats.counters);
+      assert.strictEqual(c1.regionSegmented - c0.regionSegmented, 1, 'regionSegmented: 分割次数');
+      assert.strictEqual(c1.regionWhole - c0.regionWhole, 1, 'regionWhole: 退回整图反色');
+      assert.strictEqual(c1.regionNone - c0.regionNone, 1, 'regionNone: 退回不反色');
+      assert.ok(c1.regionCacheMisses - c0.regionCacheMisses >= 3, 'regionCacheMisses: 未命中');
+
+      regionMaskTake(grid, { key: 's1' });
+      assert.strictEqual(stats.counters.regionCacheHits - c1.regionCacheHits, 1, 'regionCacheHits: 命中');
+
+      // freshCounters 的闭合键集: 五条降级链 + 淘汰都必须有键位 (防止 clear 后新键丢失)
+      const need = ['regionDegradeTaint', 'regionDegradeDecode', 'regionDegradeCrossOrigin',
+        'regionDegradeNoPixels', 'regionDegradeBudget', 'regionDegradeUnknown',
+        'regionCacheEvictions'];
+      for (let i = 0; i < need.length; i++) {
+        assert.strictEqual(typeof stats.counters[need[i]], 'number', '计数器键存在: ' + need[i]);
+      }
+    } finally {
+      prefs.statsEnabled = wasStats;
+    }
+  }
+
+  // ---- 5. 诊断快照形状 (面板只读诊断行会直接渲染这些字段) ----
+  {
+    const d = regionDiagnostics();
+    assert.strictEqual(typeof d.segmented, 'number', '诊断: segmented');
+    assert.strictEqual(typeof d.avgMs, 'number', '诊断: avgMs');
+    assert.strictEqual(typeof d.cacheHitRate, 'number', '诊断: cacheHitRate');
+    assert.ok(d.cacheHitRate >= 0 && d.cacheHitRate <= 1, '诊断: 命中率落在 0~1');
+    assert.strictEqual(typeof d.cacheSize, 'number', '诊断: cacheSize');
+    assert.ok(d.degrade && typeof d.degrade === 'object', '诊断: 降级分原因');
+    assert.ok(Object.keys(d).indexOf('evictions') >= 0, '诊断: 淘汰数');
+  }
+
+  console.log('✓ v6.0 阶段 7 单测 passed: regionKRects 可读写且作用到内核 / 五条降级路径(taint·decode·cross-origin·no-pixels·budget)各退化为整图且原因非空 / 预算安全阀 / StatsManager 计数健全 / 诊断快照字段齐全');
+})();
+
+
+
+
+
 
