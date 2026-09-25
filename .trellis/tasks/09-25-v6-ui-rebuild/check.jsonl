@@ -1,0 +1,2 @@
+{"file": ".trellis/tasks/09-25-v6-ui-rebuild/prd.md", "reason": "逐条核对 R1-R7(注意不得为通过而放宽 bench 断言)"}
+{"file": ".trellis/spec/frontend/ui-design-tokens.md", "reason": "核查 token 三处逐字节一致与控件单一定义点"}
