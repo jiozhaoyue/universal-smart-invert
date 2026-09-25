@@ -392,3 +392,43 @@ Session summary was not supplied.
 ### Next Steps
 
 - 无活动任务；如需继续压榨弱网首屏剩余延迟，需另开新任务（方向性取舍，收益递减）
+
+
+## Session 13: v5 页面媒体治理层结案: Action Registry + 5 子任务全部完成并归档
+<!-- trellis-session: v=2 fp=d966a34a967bd8ab -->
+
+**Date**: 2026-09-25
+**Task**: v5 页面媒体治理层结案: Action Registry + 5 子任务全部完成并归档
+**Branch**: `main`
+
+### Summary
+
+把插件扩为通用页面媒体治理层: 动作统一 / 复查撤销 / 数据闭环 / 提前判定 / 加载前遮罩。7 个提交本地未推送; 29 场景 100%; 父+5 子任务归档。
+
+### Main Changes
+
+- Action Registry 收口 + 4 个新动作 + 开关矩阵; 撤销栈与已处理列表; hits 分级与阈值校准; 视频帧序列两门与动图全帧谱; flashGuard 三档与元素 pending 遮罩
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a167856` | refactor(v5.0): Action Registry — 元素动作解析与写点仲裁收口 (零行为变化) |
+| `f56a048` | refactor(v5.0): A13 — BgImageEngine 窄链并入 SOURCES (bgInvert 动作 + manualElement 来源) |
+| `48c16e5` | feat(v5.0): v5-1 完成 — 四个新元素动作 (hide/mask/dim/peek) + 开关矩阵 + 规格文档 |
+| `0604e5c` | feat(v5.0): v5-2 完成 — 复查与撤销 (Alt+Z / 本页已处理列表 / 一键固化 / 误反哨兵) |
+| `518ceed` | feat(v5.0): v5-3 完成 — 数据闭环 (hits 分级 / 负反馈降级 / 阈值校准 / 形状先验 / 反哺 CI) |
+| `d0c61fc` | feat(v5.0): v5-4 完成 — 提前判定 (视频帧序列两个门 + 动图全帧谱) |
+| `db98f8f` | feat(v5.0): v5-5 完成 — 加载前保护三档 + 元素 pending 遮罩 (v5 全部子任务结案) |
+
+### Testing
+
+- [OK] node --check 0 / node test.js 0 (✓ 17→23) / node test-browser.js 29 场景 100% / check-panel-overflow PASS / build+pack 0
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- 7 个提交尚未推送; 发版按 release.yml 打 v5.0.0 tag

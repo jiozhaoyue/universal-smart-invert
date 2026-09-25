@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 12
-- **Last Active**: 2026-09-24
+- **Total Sessions**: 13
+- **Last Active**: 2026-09-25
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~394 | Active |
+| `journal-1.md` | ~434 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 13 | 2026-09-25 | v5 页面媒体治理层结案: Action Registry + 5 子任务全部完成并归档 | `a167856`, `f56a048`, `48c16e5`, `0604e5c`, `518ceed`, `d0c61fc`, `db98f8f` | `main` |
 | 12 | 2026-09-24 | v4.6.1 结案: 四绿复跑 + 提交推送 + 500ms AC 裁决 + 归档残留清理 | `149bbc2`, `5346b3a` | `main` |
 | 11 | 2026-09-24 | v4.6.1 收尾与启动时序修复 (弱网审计 / 测试等待缺陷 / 规则固化) | `149bbc2` | `main` |
 | 10 | 2026-09-24 | v4.6.0 四分支并行集成: 本地优先判定/Alt+点击/悬停开关/暗色遮罩/子代理规则 | `9308ece` | `main` |
