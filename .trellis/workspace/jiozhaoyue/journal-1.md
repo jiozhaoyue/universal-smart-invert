@@ -432,3 +432,28 @@ Session summary was not supplied.
 ### Next Steps
 
 - 7 个提交尚未推送; 发版按 release.yml 打 v5.0.0 tag
+
+
+## Session 14: v6-1 完成: 自动区域分割内核 (掩码契约冻结) + 阶段 3~8 落地
+<!-- trellis-session: v=2 fp=6e720c77d000e84d -->
+
+**Date**: 2026-09-25
+**Task**: v6-1 完成: 自动区域分割内核 (掩码契约冻结) + 阶段 3~8 落地
+**Branch**: `main`
+
+### Summary
+
+把图片判定单位从整图下沉到连通区域: N×N 网格复用既有浅色谓词 + 形态学/面积门 + 双性能门 + 位图-矢量双表达 + LRU 缓存。两处用户裁决(先开后闭 / 双门阈值 0.97·0.03), 契约冻结进 spec。四绿, 29 场景零回归, 默认关闭。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f12f769` | chore(rules): 编排策略改为「全部主代理执行」并移除子代理派发说明 |
+| `41118f1` | chore(task): v6 批次规划落盘 — 父任务 + 4 个子任务 PRD + 两个技术路线 probe |
+| `8bbc3bc` | feat(v6.0): v6-1 完成 — 自动区域分割内核 (掩码契约冻结 + 双门 + 形态学 + 精确矩形分解 + LRU 缓存) |
+| `5ad3beb` | test(v3.0): 修掉 Store 配额降级用例的定时竞态 (固定 120ms 等待 → 有界轮询) |
+
+### Status
+
+[OK] **Completed**
