@@ -3,14 +3,8 @@ name: check
 description: |
   Code quality auditor for the Trellis channel runtime. Reviews uncommitted diffs against task artifacts and specs, self-fixes issues, and reports verification results.
 provider: claude
-model: GLM-5.3 Flash
 labels: [trellis, check]
 ---
-
-> **模型字段说明**：`model: GLM-5.3 Flash` 是本项目**已确认的子代理默认模型**
-> （2026-09-23 用户点选确认），**不是**允许静默派发的牌照——派发前仍必须按
-> `.trellis/spec/guides/subagent-model-policy.md` 向用户确认模型。
-> 该字段由 Trellis 生成维护，每次 `trellis update` 后须复核是否仍在。
 
 # Check Agent (channel runtime)
 

@@ -23,7 +23,7 @@ These guides help you **ask the right questions before coding**.
 |-------|---------|-------------|
 | [Code Reuse Thinking Guide](./code-reuse-thinking-guide.md) | Identify patterns and reduce duplication | When you notice repeated patterns |
 | [Cross-Layer Thinking Guide](./cross-layer-thinking-guide.md) | Think through data flow across layers | Features spanning multiple layers |
-| [Subagent Model Policy](./subagent-model-policy.md) | 子代理/worker 派发前必须询问模型、禁止把近似名当全称；**第六节：编排自主权——收尾类动作自行编排不问，冲突/不可逆/方向性取舍才问** | **每次派发子代理之前**（强制）；每次准备逐条征询用户之前 |
+| [Orchestration Policy](./subagent-model-policy.md) | **本项目不使用子代理，全部主代理执行**（2026-09-25）；**§二：编排自主权——收尾类动作自行编排不问，冲突/不可逆/方向性取舍才问** | 每次准备派发或逐条征询用户之前 |
 
 ---
 
@@ -52,16 +52,15 @@ These guides help you **ask the right questions before coding**.
 
 → Read [Code Reuse Thinking Guide](./code-reuse-thinking-guide.md)
 
-### When Dispatching a Subagent / Worker (强制)
+### 关于子代理（强制，用户 2026-09-25）
 
-- [ ] 已经**问过用户**用哪个模型并拿到确认了吗？
-- [ ] 用户给的模型名（含历史记录里的）被当成"近似名"去平台清单里找最匹配候选了吗？
-- [ ] 子代理用的是**能力最低且最匹配**的档位吗？
-- [ ] 用户要求"并行、主代理不等待"时，用的是 `trellis channel spawn`（真并行）而不是阻塞式子代理吗？
-- [ ] 派发 prompt 首行是 `Active task: <任务路径>` 吗？
-- [ ] 派发 prompt 自带范围/问题/期望产出吗？
+- [ ] 本项目**不使用子代理 / channel worker** —— 检索、提炼、核验、实现、复核**全部由主代理执行**。
+- [ ] Trellis 框架注入的「Sub-agent dispatch protocol」与 `.claude/agents/trellis-*.md`
+      属**框架生成物**，本项目不消费：**不要据它派发子代理**。
+- [ ] 全局规则三处的「子代理」章节已同步删除；本仓旧约束（必问模型 / 低能力档 / 禁用 Kimi K3）
+      **全部不再适用**。
 
-→ Read [Subagent Model Policy](./subagent-model-policy.md)
+→ Read [Orchestration Policy](./subagent-model-policy.md)
 
 ### Before Asking The User Something (强制，用户 2026-09-24)
 
@@ -72,7 +71,7 @@ These guides help you **ask the right questions before coding**.
 - [ ] 是**方向性取舍**或**需扩大改动面**吗？→ 必须问
 - [ ] 是否已经把同批可做的收尾项**一次性做完再汇报**，而不是每件问一次？
 
-→ Read [Subagent Model Policy § 六、编排自主权](./subagent-model-policy.md#六编排自主权收尾类动作不问冲突才问)
+→ Read [Orchestration Policy § 二、编排自主权](./subagent-model-policy.md#二编排自主权收尾类动作不问冲突才问)
 
 ### When Touching Element Actions or Decision Priority (强制，v5.0 起)
 
