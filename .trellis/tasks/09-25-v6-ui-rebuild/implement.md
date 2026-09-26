@@ -53,15 +53,40 @@
 
 ---
 
-# 第二轮：重建层（未开工）
+# 第二轮：重建层（进行中）
+
+> **勘察结论（本轮开工前实测）**：面板区块构建代码约 2500 行（`buildSettingsModal` @12550 起，
+> 共 13 个 `buildXxxSection()`）；行工厂**已全部走 `SviControls`**（第一轮收口完成），
+> 但 `ui` 垫片只转发 **11 项**，`navButton` / `resetButton` / `collapsible` / `messageBar` /
+> `checkRow` / `colorPicker` / `shortcutRow` / `multiSwitch` / `group` **不在转发表内** ——
+> 重建层要用的控件必须直接调 `SviControls.*`（本轮已定此风格）。
+> 据 `DEFAULT_PREFS`（105 键）逐区块抽取「区块 → 偏好键」映射后实测：**12 个 `region*` 键
+> 在面板区间内零引用**，即 v6 全套开关此前无 UI（详见偏离 4）。
+
+## 阶段 R-0 — 区域反色设置区块（勘察新增，v6 全套开关此前无 UI）✅ 完成
+
+- [x] 新增 `buildRegionSection()`（`svi-sec-region`，紧邻「图片反色」之后进全局页签）
+- [x] 12 个 `region*` 键全部落 UI：5 个开关（`regionSegment` / `regionRender` /
+      `regionStaticOnly` / `regionCorrect` / `regionCalibrate`）+ 7 个滑块
+      （`regionGridN` / `regionMinAreaRatio` / `regionKRects` / `regionHeartbeatMs` /
+      `regionOverlayMax` / `regionCalibrateMinSamples` / `regionCalibrateStep`）
+- [x] 补齐 v6-3 PRD 明确要求的面板项：只读诊断（累积样本数 / 最近一次参数变化）+
+      「清空纠正数据」入口 + 「回滚面积门到默认值」入口 + 「进入区域纠正模式」入口
+- [x] 面积类参数以**百分比呈现**（0.5%~20% / 0.1%~5%），存储仍是原量纲小数 —— **键名与语义不动**
+- [x] 纠正入口自动挑「已挂上区域层且可见」的最大一张图（v6-3 D1：部分反色全自动，无划选入口）
+
+**验证**（定向实测，脚本在系统临时目录，不入库）：区块渲染出 5 开关 + 7 滑块 + 3 按钮 +
+诊断行；开关联动写入 `prefs.regionSegment` 且**落盘**到 `svi:prefs`；
+`regionCorrect` 关时点入口按钮正确提示「先打开「区域纠正模式」开关」；
+回滚按钮把 0.123 复位到 0.03；**零页面异常**。
 
 ## 阶段 R0 — popup 三 tab ⬜
-- [ ] `Filter` / `Site list` / `More` 三 tab；复用 `SviControls` 与 token
+- [ ] `Filter` / `Site list` / `More` 三 tab；复用 `SviControls` 与 token（直调 `SviControls.*`）
 - [ ] 保持既有三条消息协议（`svi-get-snapshot` / `svi-site-power` / `svi-set-pref`）不破
 
 ## 阶段 R1 — 独立 options 页内容 ⬜
-- [ ] 承载面板 12 个区块的全部设置项；与内嵌面板共用控件库与偏好键
-- [ ] 清单单测：逐项核对无缺失
+- [ ] 承载面板全部设置项；与内嵌面板共用控件库与偏好键
+- [ ] 清单单测：逐项核对无缺失（口径见偏离 5）
 
 ## 阶段 R2 — 内嵌面板 12 区块重建 ⬜
 - [ ] 用 `SviControls` 重建 12 区块；胶囊 / toast / 模态 / 区域框选层一并纳入 token
@@ -71,11 +96,11 @@
 ## 阶段 R3 — emoji 清零 ⬜
 - [ ] 三处路径（用户脚本 / `extension/` / `scripts/extension-src/`）emoji 码位计数为 0
 - [ ] 图标一律内联 SVG + `fill: currentColor`
-- [ ] 单测扫描 emoji 码位区间（本次实测: 27 种字符、317 个实例，含注释里的箭头；
+- [ ] 单测扫描 emoji 码位区间（第一轮实测: 27 种字符、317 个实例，含注释里的箭头；
       白名单与码位区间在实现时按 PRD R6 明确写下）
 
 ## 阶段 R4 — 文档与门禁 ⬜
-- [ ] README / README_EN 更新为新 UI 结构说明；四绿
+- [ ] README / README_EN 更新为新 UI 结构说明（含新增的「区域反色」区块）；四绿
 
 ---
 
@@ -109,3 +134,36 @@ PRD 要求 token 有三处消费点（内嵌面板 / popup / options），而 op
 把既有 11 个工厂整体搬进 `SviControls` 时**刻意不改其产出的 DOM**（只搬家 + 收口），
 新控件的视觉细化也留到重建层。理由：本轮的验收是"单一定义点 + 三处同源"，
 一旦顺手改结构，就会把 bench 的面板断言一起拖进这一轮，违背切片初衷。
+
+**偏离 4（第二轮）— 计划外新增「区域反色」区块：v6 全套开关此前根本没有 UI。**
+
+原计划：第二轮只重建既有 12 个区块（PRD R5 的清单）＋ popup ＋ options ＋ emoji。
+
+实际：开工前的勘察（按 `DEFAULT_PREFS` 逐区块静态抽取「区块 → 偏好键」映射）实测发现
+**12 个 `region*` 键在整个面板构建区间内零引用**，即 v6-1/2/3 三片交付的内核、渲染层、
+纠正与自校准**在 UI 上完全不可达**（用户只能改控制台偏好）。而 v6-3 的 PRD 第 71~72 行
+明确要求过：「『区域纠正模式』开关 / 『用纠正数据自校准』开关 / 『清空纠正数据』入口」
+与「面板只读诊断：累积样本数 / 最近一次校准时间与参数变化 / 回滚按钮」—— **均未交付**。
+
+判定：这不是"新增功能"，而是**补齐已验收任务的欠项**，且属于 PRD R4「承载**全部**设置项」
+的直接前提（否则 options 页无从承载）。故本轮先补该区块（阶段 R-0，已交付并定向验证）。
+父 PRD 的 Notes 也早已预告这一点：「本片依赖批1 的最终设置项形状（部分反色会新增一批设置项，
+UI 重建必须在它们定型之后做）」—— 只是没料到那批设置项连面板入口都还没有。
+
+**偏离 5（第二轮）— 清单单测改走「静态抽取 + 显式例外表」，不做运行时注册。**
+
+原计划（PRD R4/R5）：用「清单单测」逐项核对设置项无缺失。
+
+实际：`SviControls` 的行工厂签名是 `(label, hint, getVal, onSet, …)` —— **不接收偏好键**
+（键被 getter/setter 闭包捕获）。因此运行时无法据此建立「控件 → 偏好键」注册表，
+除非改动全部调用点。改为：
+
+1. 从 `DEFAULT_PREFS` 抽出全部键（当前 105 个）；
+2. 按面板区块静态抽取 `state.<key>` 引用，得到「区块 → 键」映射；
+3. 断言：**每个键要么被某个区块引用、要么在显式例外表里**（例外表逐条写清为什么不该有 UI，
+   例如 `settingsOpen` / `advancedOpen` / `pos` / `settingsLayout` / `storeBackend` 等纯 UI 态
+   与运行时态）。
+
+代价如实说明：静态抽取只能证明「被引用」，不能严格证明「有一个控件绑着它」。
+它的价值在于**任何新增偏好键若忘了上 UI，测试立刻变红** —— 那正是本条验收要防的事。
+更严的口径（真·绑定性断言）需要先给行工厂加键参数，属后续可做的加固，不在本轮范围。

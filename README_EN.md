@@ -123,9 +123,16 @@ consume it and never re-implement it):
   repeated image is never segmented twice.
 
 The `regionSegment` switch is **off by default**; with it off, behaviour matches v5.0.0 exactly
-(29 browser end-to-end scenarios, zero regressions). The read-only diagnostics row in the panel
-(segmentation count / average cost / degrade counts by reason / cache hit rate) ships with the
-v6.0 UI rebuild.
+(29 browser end-to-end scenarios, zero regressions).
+
+**UI entry point (added in v6.6)**: settings panel → "Global" tab → **"区域反色（部分反色）" section** —
+all 12 `region*` switches/sliders live there, plus a read-only diagnostics row (segmentation count /
+average cost / degrade counts by reason / cache hit rate / overlay usage) and three entry points:
+"clear correction data", "roll back area threshold", "enter region-correction mode".
+
+> That section did not exist before: v6-1/2/3 shipped the kernel, the render layer and the data loop,
+> but none of the switches ever reached the panel — users could only edit preferences from the
+> console. The v6.6 UI rebuild adds the panel items v6-3's PRD had already specified.
 
 ---
 

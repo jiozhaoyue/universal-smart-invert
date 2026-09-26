@@ -12656,9 +12656,10 @@
       sitePanel.appendChild(this.buildSiteSection());
       sitePanel.appendChild(this.buildMediaSection());
 
-      // 全局页签: 外观 / 图片 / 视频 / 元素动作 / 可读性 / 动态主题 / 站点名单 / 定时 / 颜色保护 / 数据与备份 / 技巧
+      // 全局页签: 外观 / 图片 / 区域反色 / 视频 / 元素动作 / 可读性 / 动态主题 / 站点名单 / 定时 / 颜色保护 / 数据与备份 / 技巧
       globalPanel.appendChild(this.buildAppearanceSection());
       globalPanel.appendChild(this.buildImageSection());
+      globalPanel.appendChild(this.buildRegionSection()); // v6.6: 区域反色 (自动部分反色内核 v6-1/2/3)
       globalPanel.appendChild(this.buildVideoSection());
       globalPanel.appendChild(this.buildActionsSection()); // v5.0: 🧩 元素动作
       globalPanel.appendChild(this.buildReadabilitySection());
@@ -13030,6 +13031,230 @@
       this.rowSyncs.push(() => animCapRow.sync());
 
       return sec.el;
+    }
+
+    // ==========================================
+    // v6.6 模态区块: 区域反色 (自动部分反色 —— 内核 v6-1 / 渲染层 v6-2 / 纠正与自校准 v6-3)
+    //
+    // 为什么在这里补: v6 的三片把内核、渲染层与数据回路都做完了, 但**整套开关从未落到面板上**
+    //   (静态核查实证: 12 个 `region*` 键在整个面板构建区间里零引用) —— 用户此前根本打不开
+    //   这个功能, 只能靠控制台改偏好。本区块补齐 v6-3 PRD 明确要求的面板项:
+    //   模式开关 / 自校准开关 / 清空纠正数据入口 / 只读诊断 / 一键回滚。
+    //
+    // 与设计的一致: v6-1/2/3 的开关语义、键名、默认值**一律不动**, 本区块只做呈现与入口;
+    //   「区域纠正」不是绘制工具 (v6-3 D1 已裁决), 故入口是按钮而非任何手势。
+    // ==========================================
+    buildRegionSection() {
+      const sec = SviControls.section('区域反色（部分反色）', '按连通区域自动判定哪块该反色；默认全关，关闭时与 v5.0.0 行为完全一致', 'svi-sec-region');
+
+      sec.add(SviControls.infoLine('一张图里既有该反色的浅底、又有不该动的彩色内容时，整图反色两边都错。本区块是「按区域自动判定」的全部开关。'));
+
+      // —— 内核 (v6-1): 开与不开是两条管线 ——
+      const segmentRow = SviControls.toggleRow('区域分割（内核）', '按连通区域自动判定，而不是整图一刀切；关闭时零分割调用、零属性写入',
+        () => state.regionSegment === true,
+        (v) => {
+          state.regionSegment = v;
+          savePrefs();
+          if (window.__svi_image_engine) window.__svi_image_engine.clearCacheAndRescan();
+        });
+      sec.add(segmentRow);
+      this.rowSyncs.push(() => segmentRow.sync());
+
+      const gridRow = SviControls.sliderRow('分割网格', '降采样网格 N×N：越大越细，耗时越高', () => state.regionGridN,
+        (n) => {
+          state.regionGridN = Math.round(n);
+          savePrefs();
+          if (window.__svi_image_engine) window.__svi_image_engine.clearCacheAndRescan();
+        }, 8, 32, 1, '格');
+      sec.add(gridRow);
+      this.rowSyncs.push(() => gridRow.sync());
+
+      // 面积门以「百分比」呈现, 但**存储语义不变**(仍是占全图比例的小数, 键名与量纲不动)
+      const minAreaRow = SviControls.sliderRow('最小连通域面积', '小于该占比的碎块不单独处理（保守大块策略）',
+        () => Math.round(Number(state.regionMinAreaRatio) * 1000) / 10,
+        (pct) => {
+          state.regionMinAreaRatio = Math.round(Number(pct) * 10) / 1000;
+          savePrefs();
+          if (window.__svi_image_engine) window.__svi_image_engine.clearCacheAndRescan();
+        }, 0.5, 20, 0.5, '%');
+      sec.add(minAreaRow);
+      this.rowSyncs.push(() => minAreaRow.sync());
+
+      const kRowsRow = SviControls.sliderRow('矢量矩形上限', '矢量快路径的矩形数上限；0 表示只保留退化的零矩形表达',
+        () => state.regionKRects,
+        (n) => {
+          state.regionKRects = Math.round(n);
+          savePrefs();
+          if (window.__svi_image_engine) window.__svi_image_engine.clearCacheAndRescan();
+        }, 0, 8, 1, '个');
+      sec.add(kRowsRow);
+      this.rowSyncs.push(() => kRowsRow.sync());
+
+      // —— 渲染层 (v6-2): 只在内核开着时才有意义 ——
+      const renderRow = SviControls.toggleRow('部分反色渲染层', '用覆盖层呈现「部分反色」；关闭时零覆盖层、零新增节点',
+        () => state.regionRender === true,
+        (v) => {
+          state.regionRender = v;
+          savePrefs();
+          if (state.regionRender !== true) {
+            try { RegionRenderEngine.unmountAll('switch-off'); } catch (e) { /* ignore */ }
+          }
+          if (window.__svi_image_engine) window.__svi_image_engine.clearCacheAndRescan();
+        });
+      sec.add(renderRow);
+      this.rowSyncs.push(() => renderRow.sync());
+
+      const staticOnlyRow = SviControls.toggleRow('仅静态图', '视频 / GIF 不挂覆盖层，规避场景渐变时的掩码滞后',
+        () => state.regionStaticOnly === true,
+        (v) => {
+          state.regionStaticOnly = v;
+          savePrefs();
+          if (window.__svi_image_engine) window.__svi_image_engine.clearCacheAndRescan();
+        });
+      sec.add(staticOnlyRow);
+      this.rowSyncs.push(() => staticOnlyRow.sync());
+
+      const heartbeatRow = SviControls.sliderRow('掩码心跳', '视频 / GIF 的掩码重算间隔', () => state.regionHeartbeatMs,
+        (n) => { state.regionHeartbeatMs = Math.round(n); savePrefs(); }, 200, 5000, 100, 'ms');
+      sec.add(heartbeatRow);
+      this.rowSyncs.push(() => heartbeatRow.sync());
+
+      const overlayMaxRow = SviControls.sliderRow('覆盖层上限', '同时存在的覆盖层数量上限', () => state.regionOverlayMax,
+        (n) => { state.regionOverlayMax = Math.round(n); savePrefs(); }, 1, 50, 1, '个');
+      sec.add(overlayMaxRow);
+      this.rowSyncs.push(() => overlayMaxRow.sync());
+
+      // —— 纠正与自校准 (v6-3): 数据回路, 不是绘制入口 ——
+      const correctRow = SviControls.toggleRow('区域纠正模式', '在已挂上区域层的图上点一下，翻转那一块的判定（Esc 退出）',
+        () => state.regionCorrect === true,
+        (v) => {
+          state.regionCorrect = v;
+          savePrefs();
+          if (state.regionCorrect !== true) {
+            try { RegionCorrection.exit(); } catch (e) { /* ignore */ }
+          }
+        });
+      sec.add(correctRow);
+      this.rowSyncs.push(() => correctRow.sync());
+
+      const enterRow = SviControls.navButton('进入区域纠正模式', '自动挑选当前页最大的一张「已挂上区域层」的图进入纠正', () => {
+        const r = this.regionCorrectionEntry();
+        if (r.ok) showToast('已进入区域纠正模式：点一下切换该区域判定，Esc 退出');
+        else if (r.reason === 'switch-off') showToast('先打开「区域纠正模式」开关');
+        else if (r.reason === 'no-layer') showToast('当前页还没有挂上区域层的图（先开内核与渲染层）');
+        else showToast('进入区域纠正模式失败，请重试');
+      });
+      sec.add(enterRow);
+
+      const calibrateRow = SviControls.toggleRow('用纠正数据自校准', '累积到足够的纠正样本后，只自动微调「最小连通域面积」这一个参数',
+        () => state.regionCalibrate === true,
+        (v) => { state.regionCalibrate = v; savePrefs(); });
+      sec.add(calibrateRow);
+      this.rowSyncs.push(() => calibrateRow.sync());
+
+      const samplesRow = SviControls.sliderRow('累积门（样本数）', '纠正样本达到该数量才评估一次校准', () => state.regionCalibrateMinSamples,
+        (n) => { state.regionCalibrateMinSamples = Math.round(n); savePrefs(); }, 1, 50, 1, '个');
+      sec.add(samplesRow);
+      this.rowSyncs.push(() => samplesRow.sync());
+
+      const stepRow = SviControls.sliderRow('单次调整幅度上限', '每次校准允许的最大步长（面积门占比）',
+        () => Math.round(Number(state.regionCalibrateStep) * 1000) / 10,
+        (pct) => { state.regionCalibrateStep = Math.round(Number(pct) * 10) / 1000; savePrefs(); }, 0.1, 5, 0.1, '%');
+      sec.add(stepRow);
+      this.rowSyncs.push(() => stepRow.sync());
+
+      // 只读诊断 (v6-3 PRD: 累积样本数 / 最近一次校准时间与参数变化;
+      //          v6-1 PRD/README: 分割次数 / 平均耗时 / 降级次数分原因 / 缓存命中率;
+      //          v6-2: 覆盖层占用)
+      const diagEl = SviControls.h('div', { class: 'svi-modal-row' },
+        SviControls.h('div', { class: 'svi-hint-line' }),
+        SviControls.h('div', { class: 'svi-hint-line' }));
+      sec.add(diagEl);
+      const syncDiag = () => {
+        const lines = ['', ''];
+        try {
+          const d = RegionCorrection.diagnostics();
+          const last = d.calibration && d.calibration.last;
+          const parts = ['累积纠正样本：' + d.samples + ' 条'];
+          if (d.active) parts.push('纠正模式：进行中（Esc 退出）');
+          if (last) {
+            const when = new Date(last.at).toLocaleString();
+            parts.push('最近一次参数变化：' + when + ' · ' +
+              (last.direction === 'rollback' ? '回滚' : '校准') + ' · ' +
+              Number(last.from).toFixed(4) + ' → ' + Number(last.to).toFixed(4) +
+              '（' + (last.samples || 0) + ' 个样本）');
+          } else {
+            parts.push('最近一次参数变化：无');
+          }
+          lines[0] = parts.join('　·　');
+        } catch (e) {
+          lines[0] = '纠正诊断读取失败';
+        }
+        try {
+          const md = regionDiagnostics();
+          const degradeParts = Object.keys(md.degrade)
+            .filter((k) => md.degrade[k] > 0)
+            .map((k) => k + '×' + md.degrade[k]);
+          const rd = RegionRenderEngine.diagnostics();
+          lines[1] = [
+            '分割：' + md.segmented + ' 次 / 平均 ' + md.avgMs.toFixed(2) + 'ms',
+            '缓存命中率：' + (md.cacheHitRate * 100).toFixed(0) + '%（' + md.hits + '/' + (md.hits + md.misses) + '，表内 ' + md.cacheSize + '）',
+            '降级：' + (degradeParts.length ? degradeParts.join(' ') : '无'),
+            '覆盖层：' + rd.overlays + '/' + rd.max + (rd.suspended ? '（挂起 ' + rd.suspended + '）' : ''),
+          ].join('　·　');
+        } catch (e) {
+          lines[1] = '分割诊断读取失败';
+        }
+        const nodes = diagEl.children;
+        for (let i = 0; i < nodes.length && i < lines.length; i++) {
+          if (nodes[i]) nodes[i].textContent = lines[i];
+        }
+      };
+      syncDiag();
+      this.rowSyncs.push(syncDiag);
+
+      const clearRow = SviControls.resetButton('清空纠正数据', '清空已累积的纠正样本（当前渲染结果不受影响）', () => {
+        try { RegionCorrection.clearSamples(); } catch (e) { /* ignore */ }
+        syncDiag();
+        showToast('已清空区域纠正数据');
+      });
+      sec.add(clearRow);
+
+      const rollbackRow = SviControls.resetButton('回滚面积门到默认值', '把「最小连通域面积」还原为默认值（单次校准的逆操作）', () => {
+        try { regionCalibrateRollback(); } catch (e) { /* ignore */ }
+        syncDiag();
+        if (window.__svi_image_engine) window.__svi_image_engine.clearCacheAndRescan();
+        try { if (this.modalControls && this.modalControls.syncAll) this.modalControls.syncAll(); } catch (e) { /* ignore */ }
+        showToast('已回滚面积门到默认值');
+      });
+      sec.add(rollbackRow);
+
+      return sec.el;
+    }
+
+    // v6.6: 区域纠正模式的可用入口 —— 自动挑一张「已挂上区域层且可见」的图进入纠正。
+    //   为什么自动挑: v6-3 D1 已裁决部分反色是**全自动**、不存在用户手动划选入口; 纠正模式
+    //   本身也不是绘制工具, 它只是「点一下翻转该连通域判定」的数据采集通道, 因此不需要
+    //   先让用户指认是哪张图 —— 让用户从一堆图里挑反而更绕。
+    regionCorrectionEntry() {
+      try {
+        if (!RegionCorrection.enabled()) return { ok: false, reason: 'switch-off' };
+        let best = null;
+        let bestArea = 0;
+        RegionRenderEngine.mounts.forEach((rec, el) => {
+          try {
+            if (!rec || !rec.built) return;
+            if (!el || !el.isConnected) return;
+            const r = el.getBoundingClientRect();
+            const area = r.width * r.height;
+            if (area > bestArea) { bestArea = area; best = el; }
+          } catch (e) { /* ignore */ }
+        });
+        if (!best) return { ok: false, reason: 'no-layer' };
+        return { ok: RegionCorrection.enter(best) !== false, reason: 'ok' };
+      } catch (e) {
+        return { ok: false, reason: 'error' };
+      }
     }
 
     // ==========================================
