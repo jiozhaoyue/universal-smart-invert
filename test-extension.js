@@ -182,7 +182,9 @@ function startServer() {
   let chrome = null;
   let ws = null;
   let popupWs = null;
+  let optionsWs = null;
   const cleanup = () => {
+    try { if (optionsWs) optionsWs.close(); } catch (e) { /* ignore */ }
     try { if (popupWs) popupWs.close(); } catch (e) { /* ignore */ }
     try { if (ws) ws.close(); } catch (e) { /* ignore */ }
     try { if (chrome) chrome.kill(); } catch (e) { /* ignore */ }
@@ -309,10 +311,20 @@ function startServer() {
         await sleep(250);
       }
     };
-    // 挑选「真的含 window.__svi」的那个世界 —— 不靠世界名猜，自证式挑选
+    // 挑选「真的含 window.__svi」的那个世界 —— 不靠世界名猜，自证式挑选。
+    //  两个加固（都来自实测）：
+    //   1) **倒序**试：新文档的上下文排在数组后面，先试它；
+    //   2) 每次探测**有界**（2.5s）：导航后数组里可能残留已销毁的上下文 —— 对已销毁的
+    //      contextId 求值不一定报错，而是**永不到来**，没有上限就会把整轮拖到 20s 超时。
+    //      （超时被丢弃的探测挂在后台，故必须带 catch，避免未处理的 rejection 把进程打掉。）
+    const probeWorld = (c) => {
+      const p = P.ev('typeof window.__svi', c.id);
+      p.catch(() => { /* 后台超时/失效：忽略 */ });
+      return Promise.race([p, new Promise((res) => setTimeout(() => res('__timeout__'), 2500))]);
+    };
     const pickExtWorld = () => waitFor(async () => {
-      for (const c of P.ctxs) {
-        try { if ((await P.ev('typeof window.__svi', c.id)) === 'object') return c; } catch (e) { /* 上下文已失效 */ }
+      for (const c of P.ctxs.slice().reverse()) {
+        try { if ((await probeWorld(c)) === 'object') return c; } catch (e) { /* 上下文已失效 */ }
       }
       return null;
     }, BOOT_TIMEOUT_MS, '含 window.__svi 的隔离世界出现');
@@ -661,6 +673,215 @@ function startServer() {
     const snapAfter = await relay({ type: 'svi-get-snapshot' });
     assert.strictEqual(snapAfter.overriddenSites, 0, '清除后快照的覆盖站点数应归零');
     console.log('    svi-site-reset → 本站覆盖已清空 ✓');
+
+    // ---------- 场景 7：扩展设置页（options）端到端（v6.4 R1b） ----------
+    //  为什么必须放在真浏览器里：html 的 token/面板 CSS 由构建注入、控件由抽出的 SviControls 搭、
+    //  写入走 chrome.storage 的 svi:prefs 协议 —— 这三件事在 Node 桩里都证明不了。
+    //  断言口径：① 与**真源 schema** 逐键比对渲染结果（不漏项 / 不多项 / 每类都是真控件）
+    //           ② 页面上改一项 → 真的落到 svi:prefs（等 300ms 防抖）
+    //           ③ 内容脚本重载后读到该值；④ 反向：内容脚本改 → options 重载后也读到（双向同步）
+    console.log('[Ext] Scenario 7: 扩展设置页 (options) 端到端 ...');
+    const schemaSrc = fs.readFileSync(path.join(ROOT, 'universal-smart-invert.user.js'), 'utf8');
+    const schemaBlock = /\/\* v6\.4-SETTINGS-SCHEMA-START \*\/([\s\S]*?)\/\* v6\.4-SETTINGS-SCHEMA-END \*\//.exec(schemaSrc);
+    assert.ok(schemaBlock, 'options 场景: 必须能从用户脚本抽出设置清单真源');
+    const SCHEMA = new Function(schemaBlock[1] + '\nreturn SVI_SETTINGS_SCHEMA;')();
+    const DEF = new Function('return (' + /const DEFAULT_PREFS = (\{[\s\S]*?\n  \});/.exec(schemaSrc)[1] + ')')();
+    const wantKeys = SCHEMA.reduce((a, g) => a.concat(g.items.map((it) => it.key)), []);
+    const kindCount = (k) => SCHEMA.reduce((n, g) => n + g.items.filter((it) => it.kind === k).length, 0);
+
+    const OPTIONS_URL = `chrome-extension://${extId}/options.html`;
+    const createdOpt = await B.send('Target.createTarget', { url: OPTIONS_URL });
+    const optTargetId = createdOpt.result && createdOpt.result.targetId;
+    assert.ok(optTargetId, 'Target.createTarget(options.html) 必须返回 targetId: ' + JSON.stringify(createdOpt.error || createdOpt));
+    let optInfo = null;
+    for (let i = 0; i < 40 && !optInfo; i++) {
+      const list = await getJson('/json/list');
+      optInfo = list.find((t) => t.id === optTargetId && t.webSocketDebuggerUrl);
+      if (!optInfo) await sleep(250);
+    }
+    assert.ok(optInfo, '必须能附到新建的 options target');
+    const O = await connect(optInfo.webSocketDebuggerUrl);
+    optionsWs = O.sock;
+    await O.send('Runtime.enable');
+    await O.send('Page.enable');
+
+    // 测试侧的最小「分片感知」读取（与内容脚本 Store.readRaw 同规则）：
+    // 断言 raw 存储而不是页面内存对象 —— 那样才是真的证明了「落盘」。
+    const readPrefsRaw = () => O.ev(`(async () => {
+      const g = (k) => new Promise((res) => chrome.storage.sync.get(k, (r) => res(r[k] === undefined ? null : r[k])));
+      const metaRaw = await g('svi:prefs.meta');
+      if (metaRaw) {
+        const meta = JSON.parse(metaRaw);
+        let s = '';
+        for (let i = 0; i < (meta.chunks || 0); i++) { const p = await g('svi:prefs#' + i); if (p == null) return null; s += p; }
+        return s;
+      }
+      return g('svi:prefs');
+    })()`, undefined, true);
+
+    const optCount = await waitFor(async () => {
+      const v = await O.ev('window.__sviOptions ? window.__sviOptions.itemCount : 0');
+      return v > 0 ? v : null;
+    }, BOOT_TIMEOUT_MS, 'options 页渲染完成');
+
+    // 7a. 渲染结果与真源逐键比对
+    const rendered = await O.ev(`(() => {
+      const cards = [...document.querySelectorAll('main > .svi-collapsible')];
+      return {
+        keys: [...document.querySelectorAll('[data-svi-key]')].map((e) => e.dataset.sviKey),
+        groups: cards.map((e) => ({
+          title: (e.querySelector('.svi-sec-title span') || {}).textContent || '',
+          items: e.querySelectorAll('[data-svi-key]').length,
+        })),
+        heads: document.querySelectorAll('.svi-collapsible-head').length,
+        checkboxes: document.querySelectorAll('input[type=checkbox]').length,
+        ranges: document.querySelectorAll('input[type=range]').length,
+        numbers: document.querySelectorAll('input[type=number]').length,
+        selects: document.querySelectorAll('select').length,
+        textareas: document.querySelectorAll('textarea').length,
+        colors: document.querySelectorAll('input[type=color]').length,
+        chips: document.querySelectorAll('.svi-color-chip').length,
+        errs: [...document.querySelectorAll('.svi-msg-error')].map((e) => e.textContent),
+        area: window.__sviOptions.storageArea(),
+        declaredGroups: window.__sviOptions.schemaGroups,
+      };
+    })()`);
+    assert.strictEqual(optCount, wantKeys.length, 'options 页声明的项数必须等于真源项数');
+    assert.strictEqual(rendered.declaredGroups, SCHEMA.length, 'options 页声明的分组数必须等于真源分组数');
+    assert.deepStrictEqual(rendered.keys.slice().sort(), wantKeys.slice().sort(),
+      'options 页渲染出的控件键必须与真源**逐键一致**（漏一项 / 多一项都算失败）');
+    assert.deepStrictEqual(rendered.groups.map((g) => g.title), SCHEMA.map((g) => g.title),
+      '分组标题必须与真源一致（顺序也一致）');
+    assert.deepStrictEqual(rendered.groups.map((g) => g.items), SCHEMA.map((g) => g.items.length),
+      '每个分组的项数必须与真源一致');
+    assert.strictEqual(rendered.heads, SCHEMA.length, '每个分组都要有可折叠的标题行');
+    assert.deepStrictEqual(rendered.errs, [], 'options 页不得出现「未实现的控件类型」告警: ' + JSON.stringify(rendered.errs));
+    assert.strictEqual(rendered.area, 'sync', '扩展形态下 options 页应把偏好写在 chrome.storage.sync 上');
+    assert.strictEqual(rendered.checkboxes, kindCount('toggle'), '开关控件数必须等于 schema 里 toggle 的项数');
+    assert.strictEqual(rendered.ranges, kindCount('slider'), '滑块数必须等于 schema 里 slider 的项数');
+    assert.strictEqual(rendered.numbers, kindCount('slider'), '每个滑块都要配一个数值输入框');
+    assert.strictEqual(rendered.selects, kindCount('select') + kindCount('hour'), '下拉数必须等于 select + hour 的项数');
+    assert.strictEqual(rendered.textareas, kindCount('text'), '多行文本框数必须等于 text 的项数');
+    assert.strictEqual(rendered.colors, kindCount('color'), '取色器数必须等于 color 的项数');
+    assert.strictEqual(rendered.chips, 4, '色卡多选应渲染出 4 张浅色色卡');
+    console.log('    渲染: ' + rendered.groups.length + ' 组 / ' + rendered.keys.length + ' 项'
+      + ' | 开关 ' + rendered.checkboxes + ' 滑块 ' + rendered.ranges + ' 下拉 ' + rendered.selects
+      + ' 文本框 ' + rendered.textareas + ' 取色器 ' + rendered.colors + ' 色卡 ' + rendered.chips
+      + ' | 存储后端 ' + rendered.area);
+
+    // 7b. 渲染出来的值必须来自已存偏好（否则只是画了个壳）
+    const shown = await O.ev(`(() => {
+      const row = document.querySelector('[data-svi-key="maskBlur"]');
+      const num = row && row.querySelector('input[type=number]');
+      const togg = document.querySelector('[data-svi-key="hoverRestore"] input[type=checkbox]');
+      const preset = document.querySelector('[data-svi-key="presetId"] select');
+      return { num: num ? num.value : null, toggle: togg ? togg.checked : null, preset: preset ? preset.value : null };
+    })()`);
+    const raw0 = await readPrefsRaw();
+    const stored0 = raw0 ? JSON.parse(raw0) : {};
+    assert.strictEqual(shown.num, String(stored0.maskBlur), '滑块应显示已存偏好值');
+    assert.strictEqual(shown.toggle, stored0.hoverRestore, '开关应显示已存偏好值');
+    assert.strictEqual(shown.preset, stored0.presetId, '下拉应显示已存偏好值');
+    console.log('    已存偏好回填: maskBlur=' + shown.num + ' hoverRestore=' + shown.toggle + ' presetId=' + shown.preset);
+
+    // 7c. **先让 fixture 页腾位置**（这一步是本场景的实测教训，不是绕路）：
+    //   内容脚本在 pagehide / visibilitychange(hidden) 时会 `flushEverything()` —— 把自己
+    //   **内存里那份**偏好整份回写。所以「另一个界面刚写完」的窗口里若有旧页卸载，写入会被
+    //   覆盖回旧值（实测：options 写 13 → 导航 P 时旧页整份回写 8 → 新页读到的是 8）。
+    //   跨界面同步的真实口径因此是：**写入必须发生在旧页回写之后**（新开/刷新页面即见，
+    //   但已打开且持有旧镜像的页面会把它按回去）。这里先把旧页导航走、等回写落盘，再写。
+    await P.send('Page.navigate', { url: 'about:blank' });
+    await sleep(1200);   // 卸载回写 = flushPrefsNow（防抖 300ms）+ Store.flush（400ms）+ 余量
+    const parked = await readPrefsRaw();
+    assert.ok(parked, 'fixture 页腾位置后, svi:prefs 必须仍然读得到（不许把偏好写丢）');
+    console.log('    旧页已腾位置（卸载回写落盘: maskBlur=' + JSON.parse(parked).maskBlur + '）');
+
+    // 7d. 在设置页上改一项 → 落到 svi:prefs（走真实的控件事件 + 300ms 防抖）
+    const NEW_BLUR = 13;
+    assert.notStrictEqual(NEW_BLUR, Number(JSON.parse(parked).maskBlur), 'fixture 前提: 新值必须不同于已存值, 否则断言是空真');
+    const drove = await O.ev(`(() => {
+      const num = document.querySelector('[data-svi-key="maskBlur"] input[type=number]');
+      num.value = '${NEW_BLUR}';
+      num.dispatchEvent(new Event('input', { bubbles: true }));   // 与用户输入同一条事件路径
+      return num.value;
+    })()`);
+    assert.strictEqual(drove, String(NEW_BLUR), '数值框必须接受新值');
+    const flushed = await waitFor(async () => {
+      const raw = await readPrefsRaw();
+      if (!raw) return null;
+      let obj = null; try { obj = JSON.parse(raw); } catch (e) { return null; }
+      return Number(obj.maskBlur) === NEW_BLUR ? obj : null;
+    }, 8000, 'maskBlur=' + NEW_BLUR + ' 落到 svi:prefs');
+    assert.strictEqual(Number(flushed.maskBlur), NEW_BLUR, 'options 页的改动必须真的落到存储里');
+    const statusText = await O.ev('(document.getElementById("status") || {}).textContent || ""');
+    assert.ok(/已保存/.test(statusText), '落盘后状态行应报告已保存, 实测: ' + JSON.stringify(statusText));
+    console.log('    改 maskBlur=' + NEW_BLUR + ' → svi:prefs 已更新 (状态行: ' + statusText + ') ✓');
+
+    // 7e. 内容脚本（新装的页面）读到该值 = 「刷新页面即见」
+    P.resetCtxs();
+    await P.send('Page.navigate', { url: PAGE_URL });
+    await P.send('Page.bringToFront');   // 隐藏标签页里 rAF/idle 会停摆（踩过），把被测页拉回前台
+    // 每轮重新挑世界 + 兜住导航瞬间的求值失败：上下文换代时旧 id 可能不再应答（踩过）
+    let seenByPage = null;
+    const readByPage = await waitFor(async () => {
+      try {
+        const c = await pickExtWorld();
+        if (!c) return null;
+        const v = await P.ev(`(() => {
+          const S = window.__svi;
+          return S && S.prefs ? { blur: S.prefs.maskBlur, backend: S.Store && S.Store.backend } : null;
+        })()`, c.id);
+        seenByPage = v;
+        return v && Number(v.blur) === NEW_BLUR ? v.blur : null;
+      } catch (e) { return null; }
+    }, BOOT_TIMEOUT_MS, '内容脚本装载到 options 写入的 maskBlur').catch(() => null);
+    if (readByPage === null) {
+      const rawNow = await readPrefsRaw();
+      console.log('    [dbg] 重载后内容脚本读到 ' + JSON.stringify(seenByPage)
+        + ' | 存储里的 svi:prefs.maskBlur=' + (rawNow ? JSON.parse(rawNow).maskBlur : '(读不到)'));
+    }
+    assert.strictEqual(Number(readByPage), NEW_BLUR, '重载后的内容脚本必须读到 options 页写入的值');
+    const ctxPage = await pickExtWorld();
+    console.log('    内容脚本重载后 prefs.maskBlur = ' + readByPage + ' ✓');
+
+    // 7e. 反向：内容脚本改一项 → options 页重载后读到（双向同步的另一半）
+    const NEW_OPACITY = 0.35;
+    assert.notStrictEqual(NEW_OPACITY, Number(DEF.maskHoverOpacity), 'fixture 前提: 反向用例的新值也必须不同于默认值');
+    await P.ev(`(async () => {
+      window.__svi.prefs.maskHoverOpacity = ${NEW_OPACITY};
+      window.__svi.savePrefs();
+      await new Promise((r) => setTimeout(r, 900));   // 防抖 300ms + 落盘余量
+      return true;
+    })()`, ctxPage.id, true);
+    await O.send('Page.reload');
+    const backRead = await waitFor(async () => {
+      try {
+        const v = await O.ev(`(() => {
+          if (!window.__sviOptions) return null;
+          const num = document.querySelector('[data-svi-key="maskHoverOpacity"] input[type=number]');
+          return num ? num.value : null;
+        })()`);
+        return v === String(NEW_OPACITY) ? v : null;
+      } catch (e) { return null; }   // 重载瞬间默认上下文尚未就绪 → 下一轮再试
+    }, BOOT_TIMEOUT_MS, 'options 页重载后读到内容脚本写入的 maskHoverOpacity');
+    assert.strictEqual(backRead, String(NEW_OPACITY), 'options 页重载后必须读到内容脚本写入的值');
+    console.log('    内容脚本写入 maskHoverOpacity=' + NEW_OPACITY + ' → options 重载后已读到 ✓');
+
+    // 收尾: 把这轮改过的两项还原成默认值, 免得影响后续场景（用内容脚本自己的写点, 与产品同一路径）
+    await P.ev(`(async () => {
+      window.__svi.prefs.maskBlur = ${Number(DEF.maskBlur)};
+      window.__svi.prefs.maskHoverOpacity = ${Number(DEF.maskHoverOpacity)};
+      window.__svi.savePrefs();
+      await new Promise((r) => setTimeout(r, 900));
+      return true;
+    })()`, ctxPage.id, true);
+    const restoredRaw = await readPrefsRaw();
+    const restoredObj = restoredRaw ? JSON.parse(restoredRaw) : {};
+    assert.strictEqual(Number(restoredObj.maskBlur), Number(DEF.maskBlur), '收尾必须把 maskBlur 还原成默认值');
+    assert.strictEqual(Number(restoredObj.maskHoverOpacity), Number(DEF.maskHoverOpacity), '收尾必须把 maskHoverOpacity 还原成默认值');
+    console.log('    收尾还原: maskBlur=' + restoredObj.maskBlur + ' maskHoverOpacity=' + restoredObj.maskHoverOpacity + ' ✓');
+
+    await B.send('Target.closeTarget', { targetId: optTargetId });   // 关掉之后不再断言（超时坑，见文件头）
 
     await U.send('Page.removeScriptToEvaluateOnNewDocument', { identifier: stubbed.result.identifier });
     await B.send('Target.closeTarget', { targetId: popupTargetId });

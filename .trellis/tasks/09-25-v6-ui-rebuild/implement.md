@@ -102,9 +102,77 @@
 > **跨阶段待闭环**：PRD R3 的 AC 还包含「popup 内每一项在 options 页有对应项且双向同步」——
 > 这一条依赖 R1（options 承载全量设置项），在**评审门 G2** 一并判。本轮只闭环 popup 侧。
 
-## 阶段 R1 — 独立 options 页内容 ⬜
-- [ ] 承载面板全部设置项；与内嵌面板共用控件库与偏好键
-- [ ] 清单单测：逐项核对无缺失（口径见偏离 5）
+## 阶段 R1 — 独立 options 页内容 ✅ 完成
+
+> 本阶段切成两半：**R1a 机制**（真源 / 构建 / 产物）与 **R1b 页面**（渲染 / 单测 / E2E），两半均已交付。
+
+### R1a — 设置项单一真源 + 控件库抽块（✅ 已完成）
+
+- [x] **schema 单一真源**落在用户脚本 `/* v6.4-SETTINGS-SCHEMA-START/END */` 块内：
+      `SVI_SETTINGS_SCHEMA` = 10 组 / **91 项**，每项 `{key, kind, label, hint, min/max/step/unit | options | rows}`
+      （R1a 交付时为 89 项；R1b 修完抽取缺陷并补上两个「面板有开关但没行定义」的总开关后为 91，见偏离 11）
+- [x] 标签文案**不是另写一份**：由生成器从面板自身的行工厂调用里**机械抽取**（label/hint/range/options 全取原值），
+      见偏离 8；R2 面板重建后两处同源
+- [x] **控件库抽块**：给 `SviControls` 加 `/* v6.4-CONTROLS-START/END */` 标记（355 行、**块内零外部依赖**、
+      20 个词汇），构建期原样抽给扩展页 —— 这是 options 能真复用控件库（而非像 popup 那样手写）的关键
+- [x] `scripts/build-extension.js` 新增两条抽块：产出 `extension/ui-controls.js`（IIFE + `window.SviControls`）
+      与 `extension/settings-schema.js`（schema + `SVI_DEFAULTS` + `window.*` 导出）；
+      **缺标记即构建失败**（与 token 块同纪律）
+- [x] `SVI_DEFAULTS` 由 `DEFAULT_PREFS` 字面量在构建期求值注入（105 键）——
+      构建期先核对块内无外部标识符，求值失败即构建失败（它必须保持纯字面量）
+
+**验证**：构建日志 `已抽出 ui-controls.js (355 行控件库) + settings-schema.js (118 行 schema, 105 个默认值)`；
+`node --check universal-smart-invert.user.js` 通过；`node test.js` 全绿；
+用最小沙箱（只给 window/document 桩）求值 `extension/ui-controls.js` → `window.SviControls` 导出 **20 个词汇**，
+证明产物**自包含可用**；bench 33 场景零回归（本轮改动为纯数据常量 + 构建产物）。
+
+### R1b — options 页渲染（✅ 已完成）
+
+- [x] `scripts/extension-src/options.html`：在既有 token 占位之外，按顺序引入
+      `settings-schema.js` → `ui-controls.js` → `options.js`（三者都是扩展页自有脚本，无需进 manifest）
+- [x] **整份面板 CSS** 也在构建期注入（新占位 `/* SVI_PANEL_CSS_INJECT */`）——
+      控件样式只能有一个实现点；**缺占位即构建失败**（见偏离 10）
+- [x] `options.js`：按 schema 渲染 **10 组**（`SviControls.collapsible` 折叠卡，默认展开），每项用对应工厂：
+      `toggle`→`toggleRow` · `slider`→`sliderRow` · `select`→`selectRow` · `text`→`textRow`
+      · `color`→`pickerRow` · `chipsOf`→`chipRow`（候选项来自构建期抽出的 `SVI_IMG_COLOR_PRESETS`）
+      · `hour`→ 运行时构造 0~23 的 `selectRow`；**未知 kind 显式渲染错误条**（不静默跳过）
+- [x] 读写：从 `chrome.storage` 读（`svi:prefs`，**同一份协议**：整值 / `.meta`+`#i` 分片 / sync→local 回退——
+      与内容脚本 Store 后端链一致），写入走**去抖 300ms**；**键路径支持点号**
+      （如 `videoTune.brightness`、`actions.hide.enabled`），缺失值用 `SVI_DEFAULTS` 兜底
+- [x] **清单单测**（本阶段的 AC）：`test.js` 新增「v6.4 R1b」块 —— ① 每个 schema 键必须能在 `DEFAULT_PREFS`
+      里按点号路径取到值；② `DEFAULT_PREFS` 的每个**叶子键**要么被 schema 覆盖（自身或祖先）、
+      要么在**例外表**里逐条写明理由（27 条，且表本身受断言约束：已上页面 / 已不存在的键留在表里即变红）；
+      ③ schema 键面 ⟷ 面板键面（`UIController` 类体内的 `state.<路径>`，归一到 DEFAULT_PREFS 里存在的最深前缀）
+      双向核对；另加 ④ schema 的每个 `kind` 必须在 options.js 的 `KINDS` 里有实现且指向真实工厂；
+      ⑤ **存储协议同构**：前缀 / 逻辑键 / 分片预算 / 防抖时长逐值等于内容脚本，`chunkRaw` 与
+      `Store.chunkRaw` 在 8 组刁钻样本（含中文、代理对、边界长度）上**逐片一致**
+- [x] E2E（`test-extension.js` 场景 7）：把 `options.html` 当真标签页打开 → 与**真源 schema 逐键比对**
+      渲染结果（10 组 / 91 项、每类控件数量、无「未实现 kind」告警）→ 断言页面值来自已存偏好 →
+      用真实控件事件改一项 → 等防抖 → 断言**落到 `svi:prefs`** → 内容脚本重装后读到新值 →
+      **反向**（内容脚本写 → options 重载后读到）→ 收尾还原两项
+- [x] 评审门 **G2**：options 页设置项清单逐项无缺失 —— **通过（带例外，见下）**
+
+**验证（五绿 + 负向对照）**：
+- `node --check universal-smart-invert.user.js` ✓
+- `node test.js` ✓（4/4 连续绿；新增块输出 `10 组 / 91 项 三向核对无缺失 + 例外表 27 条 + 存储协议同构`）
+- `node test-browser.js` ✓ 33 场景（面板 CSS 新增 6 组词汇的样式，bench 面板断言零回归）
+- `node test-extension.js` ✓ 8 场景（0~7）；场景 7 实测输出：
+  `渲染: 10 组 / 91 项 | 开关 28 滑块 45 下拉 13 文本框 2 取色器 2 色卡 4 | 存储后端 sync` ·
+  `改 maskBlur=13 → svi:prefs 已更新 (状态行: 已保存)` · `内容脚本重载后 prefs.maskBlur = 13` ·
+  `内容脚本写入 maskHoverOpacity=0.35 → options 重载后已读到` · `收尾还原 ✓`
+- `node scripts/build-extension.js && node scripts/pack.js` ✓（zip 12 entries，含两个新产物）
+- **负向对照**（证明断言咬得住）：把副本的 `settings-schema.js` 删掉一项 → 场景 7 立刻变红退出 1
+  （`options 页声明的项数必须等于真源项数: 90 !== 91`）
+
+**G2 判据说明（逐项对账）**：schema 91 项 ⟷ DEFAULT_PREFS 121 个叶子键 —— 88 项直接覆盖 + `imgPresets`
+一项覆盖 4 个叶子；余下 **27 个叶子键在例外表里逐条写明理由**（分类：死键 1 · 面板自身形态与开合态 6 ·
+数据容器 3 · 引擎阈值/预算 9 · 派生值 1 · **面板有 UI 但为自建 DOM 需新控件 3** · 存储后端 1 · 统计开关 1 ·
+背景替换全局默认 1 ……合计 27）。
+**未达成项如实标注**：面板的**原色屏蔽色卡列表** / **元素规则列表编辑器** / **背景排除选择器** 三项
+面板有 UI 而 options 尚无（前者需要新的控件类型：色卡增删与结构化列表增删），登记为 R2 同一批工作。
+
+> **R1 之后**：R2（内嵌面板 12 区块重建，撞 bench 面板断言，**不得放宽**）、R3（emoji 清零，当前实测
+> 27 种字符 / 317 实例；R1 新增文案里出现的 ⚠ 也计入）、R4（README/README_EN + 四绿）。见评审门 G3。
 
 ## 阶段 R2 — 内嵌面板 12 区块重建 ⬜
 - [ ] 用 `SviControls` 重建 12 区块；胶囊 / toast / 模态 / 区域框选层一并纳入 token
@@ -127,7 +195,7 @@
 | 门 | 时机 | 判据 |
 | :--- | :--- | :--- |
 | **G1（第一轮）** | M3 后 | token 三处逐字节一致 + 零字面量残留 + 控件单一定义点 —— **已通过** |
-| G2（第二轮） | R1 后 | options 页设置项清单逐项无缺失 |
+| G2（第二轮） | R1 后 | options 页设置项清单逐项无缺失 —— **已通过（带例外）**：91 项全部落页面并与真源逐键核对；27 个未上页面的默认值键在例外表里逐条写明理由；其中 3 项（色卡列表 / 元素规则列表 / 背景排除选择器）**面板有 UI 而 options 尚无**，如实登记为 R2 工作 |
 | G3（第二轮） | R4 | 四绿 + emoji 计数为 0 + 面板断言全部按新结构通过（无放宽） |
 
 ## 与计划的偏离记录
@@ -209,3 +277,96 @@ PRD R3 要求 popup「复用 `SviControls` 与 token」。实际有两处做不�
 2. **残留进程占端口**：上一轮被掐断时，node 子进程与它启的临时配置 Chrome 仍活着，占住 http 端口
    8791，下一轮直接 `EADDRINUSE` 起不来。清理时**只按 PID 精确杀自己启的那两个**（node + 它的
    `--user-data-dir=<临时目录>` Chrome），不碰用户自己的浏览器。
+
+**偏离 8（第二轮 · 阶段 R1a）— schema 不手抄，改为「从面板行定义机械抽取」（含判定规则与已知噪声）。**
+
+原计划（隐含）：为 options 页另写一份设置项清单（键 + 标签 + 范围）。
+实际：另写一份必然与面板**漂移**（面板改标签/改范围，options 不知道），而 PRD 的 AC 恰恰要求「逐项无缺失」。
+故改为：写一个一次性生成器，从面板的行工厂调用里机械抽取，把结果**固化**为 `SVI_SETTINGS_SCHEMA` 块
+（真源在用户脚本内）。抽取规则与实测结果：
+
+| 项 | 规则 / 结果 |
+| :--- | :--- |
+| 键 | 取该行回调里引用的 `state.<k>`；复合键保留点号路径（如 `videoTune.brightness`），取**最深**的一条 |
+| 合法性 | 根段必须在 `DEFAULT_PREFS` 内，否则丢弃并报告 —— 实测**丢弃 0 项** |
+| 去重 | 同一键只留一条（同一键在面板里可能有多行，如 `hoverRestore` 在两个区块各出现一次） |
+| 标签/提示 | 取行工厂的第 1/2 个字符串实参（原值，不重写） |
+| 滑块范围 | 取第 5/6/7/8 实参（min/max/step/unit）—— 实测 **0 项缺范围** |
+| 下拉选项 | 取第 3 实参；若那是常量标识符（如 `IMG_FX_MODES`）则回源码解析该常量 —— 实测修正后 **0 项缺选项** |
+| 抽样结果 | 89 项 / 13 组（外观 7 · 图片 18 · 区域 12 · 视频 16 · 本站 2 · 站点名单 3 · 动态主题 8 · 可读性 3 · 定时 3 · 元素动作 18） |
+
+**已知噪声（写进交接，别被误读）**：
+1. 静态抽取 `state.<k>` 时会把 `xxx.state.className` / `xxx.state.textContent` 误当偏好键 —— 实测命中
+   `className` / `textContent` 两条，已被「根段必须在 DEFAULT_PREFS」这条挡掉；
+2. 面板确未引用的 15 个键（`enabled` / `settingsOpen` / `advancedOpen` / `manualOverrides` / `statsEnabled` /
+   `bgReplace` / `storeBackend` / `eagerScanBudget` / `localFirstDecide` / `calibrateMinSamples` /
+   `falseInvertRate` / `flashWindowRatio` / `animDecodeBudgetMs` / `animRecheckMs` / `maskSettleTimeoutMs`）——
+   其中既有**数据/运行时态**（前 5 个与 `manualOverrides` / `storeBackend`），也有**经辅助函数而非区块内联**
+   承载的用户项（其余）。R1b 的例外表要**逐条**给出归类，不许笼统写「纯 UI 态」；
+3. 四个特殊项走了人工修正表：`presetId`（chip → 二选下拉）、`imgPresets`（动态色卡 → `chipsOf`）、
+   `scheduleStart` / `scheduleEnd`（面板用运行时构造的 0~23 小时数组 → `hour` 类型）。
+
+**偏离 9（第二轮 · 阶段 R1a）— 插块位置踩坑：token 块在 CSS 模板字符串内部。**
+
+`v6.4-TOKENS-START/END` 位于面板 CSS 的模板字符串里（token 真源就是那段 CSS 变量）。
+第一版我把 schema 块顺手插在 token 块之后 → 等于把 JS 塞进 CSS 字符串，`node --check` 立刻报
+`Unexpected identifier 'kind'`。改为插在 `v6.4-CONTROLS-START` 之前的真实 JS 作用域。
+**教训**：往用户脚本里插新块前，先确认锚点**在字符串里还是在代码里**。
+
+**偏离 10（第二轮 · 阶段 R1b）— 控件样式改为「整份面板 CSS 构建期注入」，而不是在扩展页手写第二套。**
+
+原计划（隐含）：options.html 自带一段页面 CSS（第一轮的壳就是这么写的），控件样式同理。
+实际：options 页整页都由 `SviControls` 搭出来（`.svi-modal-*` / `.svi-chip` / `.svi-msg` …），
+若在扩展页手写这些 class 的样式，就等于**第二套控件样式**——正是本项目硬规则禁止的漂移源。
+改为：构建期抽出用户脚本里的**整份面板 CSS**，注入 options.html 的新占位 `/* SVI_PANEL_CSS_INJECT */`
+（token 块本身仍走原占位，避免同页定义两次）。安全性是核对过的：
+
+| 检查 | 结果 |
+| :--- | :--- |
+| 面板 CSS 里 token 块之外的颜色字面量 | 0 个 `#hex` / 0 个 `rgba(…)`（全部走 `var(--svi-*)`）—— 满足 test.js 对 HTML 的零字面量断言 |
+| 会不会污染设置页 | 全部规则以 `.svi-*` 开头，其余要么 `:root`（就是要的变量），要么 `html.svi-*` / `[data-svi-*]` 门控（设置页不可能命中） |
+
+代价如实说明：options.html 因此多了约 1.5k 行 CSS（含站点页专用的滤镜/遮罩规则，在设置页恒不命中）。
+换来的是**控件样式只有一个实现点**，R2 重建面板时两处自动同源。
+
+**偏离 11（第二轮 · 阶段 R1b）— schema 的 4 处实测缺陷（R1a 抽取的后果），以及两个漏项。**
+
+R1b 一上手就发现 schema 里有几处**用户可见的错误**，全部修正（机械抽取的一次性产物，现在由单测守）：
+
+1. **两处 hint 是源码片段**：`flashGuardLevel` 与 `maskPending` 的 hint 取自「跨行字符串拼接」的第 1 段，
+   直接把 `'` + 换行 + `+ '` 抄了进来（页面上会显示成 `。'\n        + '⚠ …`）。改为按拼接后的**真值**写入。
+2. **站点名单两项没有标签**：面板用的是 `textRow(null, null, …)`（只有 placeholder），抽取器回落到键名
+   （label 显示成 `siteBlacklist`）。改为取面板自己的 placeholder 原文作标签/提示。
+3. **三个动作开关的键面错了**：`actions.hide` / `actions.mask` / `actions.dim` 的默认值是**对象**
+   （`{enabled, scope}`），面板读写的是 `.enabled`。键面改成真实叶子路径 `actions.hide.enabled` 等 ——
+   这样 options 侧的读写**不需要任何特例**，且与面板键面**逐条精确对应**（单测③因此能做到精确匹配）。
+4. **两个面积滑块缺 `scale`**：面板把 `regionMinAreaRatio` / `regionCalibrateStep` 以百分数呈现
+   （`Math.round(v*1000)/10`），存储仍是小数原量纲。schema 记的是**呈现量纲**，故补 `scale: 100`，
+   由 options 侧换算 —— 否则滑块会在 0.03 上被 min=0.5 钳到 0.5（静默把用户设置改错）。
+5. **发现两个漏项并补录**：`imageInvert`（图片反色总开关）与 `autoDetect`（视频智能自动反色检测）
+   在面板里由**头部胶囊快捷按钮**承载（`图片:开/关` / `智能:开/关`），没有行定义，故 R1a 的抽取器看不到。
+   两项都是全局布尔，补为 `toggle`（标签取自 `DEFAULT_PREFS` 对该字段的注释，未自造语义）→ 89 项变 **91 项**。
+6. 顺带回填了 10 个 `select` 的 `describe`（面板选中后显示的说明文字），schema 的 options 元组支持
+   `[值, 短名, 说明]`。
+
+**教训（给 R2）**：静态抽取只能覆盖「走行工厂」的设置项。面板里任何**自建 DOM** 的区块
+（原色屏蔽色卡、元素规则列表、背景排除选择器）都会静默漏掉 —— R2 重建时必须把这些一并换成
+`SviControls` 工厂，否则「清单无缺失」永远只能靠人工对账。
+
+**偏离 12（第二轮 · 阶段 R1b）— 跨界面同步的真实机制，与 E2E 踩到的两个坑（都是实测）。**
+
+1. **`Store.onRemoteLoaded` 不是 storage 变更监听**（R1b 计划里写的「storage 变更即重指派 state」不准确）：
+   它只在内容脚本自己 `Store.init()` 装载完远端命名空间时触发**一次**。内容脚本没有
+   `chrome.storage.onChanged` 订阅。因此口径只能是：**options 侧写入后，页面刷新 / 新开标签页即见**。
+2. **已打开的页面会把外部写入按回去**（E2E 实测，非推测）：内容脚本在 `pagehide` 与
+   `visibilitychange → hidden` 时会 `flushEverything()`——把自己**内存里那份**偏好整份回写。
+   实测序列：options 写 `maskBlur=13`（落盘已确认）→ 导航 fixture 页 → 旧页 `pagehide` 整份回写 8
+   → 新页读到 8。故 E2E 的正确顺序是**先让旧页卸载并等回写落盘，再写**（场景 7 里已按此排序并写明原因）。
+   这是产品行为（不是测试假象）：真实使用中「开着 A 页 → 在设置页改 → 回 A 页刷新」是安全的
+   （刷新时旧实例的回写在写入之前），但「改完之后另一个开着的老页面被隐藏/关闭」会把它按回去。
+   已登记为 v6-4 的待办观察（要做真正的即时同步，需要给内容脚本加 `storage.onChanged` 订阅 +
+   版本/时间戳仲裁，属机制层改动，不在 R1b 范围）。
+3. **CDP 上「挑隔离世界」的坑**：导航后 `Runtime.executionContextCreated` 可能混入已销毁的上下文，
+   对已销毁的 contextId 求值**不一定报错而是永不到达**（整轮拖到 20s 超时）。加固：倒序试（新的在后）+
+   每次探测 2.5s 有界 + 丢弃的探测挂 `catch`（否则未处理的 rejection 会把 Node 进程打掉）。
+   同一场景里对**刚 reload 的页面**求值也要兜住「默认上下文尚未就绪」的抛错，下一轮再试。

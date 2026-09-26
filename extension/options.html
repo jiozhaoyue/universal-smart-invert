@@ -60,33 +60,1561 @@
         --svi-gap: .75rem;
         --svi-tr-fast: 125ms;
         --svi-tr-slow: 250ms;
+    /* 控件样式（.svi-modal-* / .svi-chip / .svi-msg / .svi-collapsible-* …）整份来自用户脚本
+       的面板 CSS，同样在构建时注入 —— 这里不许手写第二套控件样式（build + test.js 有断言把关）。 */
+    
+      :root {
+        --svi-img-filter: invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.90);
+        --svi-img-transition: none;
+        --svi-video-tune: none;
+
+        /* 设计 token 由上方 SVI_TOKEN_INJECT 占位注入，此处不再重复定义 */
+      }
+      /* v3.2: 独立视频画面调节 (非反色视频经样式表生效; 反色活动视频由内联滤镜组合链覆盖) */
+      html.svi-video-tune video {
+        filter: var(--svi-video-tune, none) !important;
+        transition: filter 0.2s ease;
+      }
+      .svi-capsule-root {
+        position: fixed;
+        z-index: 2147483647;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
+        user-select: none;
+        box-sizing: border-box;
+      }
+      .svi-capsule-root * {
+        box-sizing: border-box;
+      }
+      /* 贴边微型触发小圆点/药丸 */
+      .svi-trigger-pill {
+        width: 14px;
+        height: 38px;
+        border-radius: 8px 0 0 8px;
+        background: rgba(var(--svi-bg-rgb), 0.75);
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
+        border: 1px solid rgba(var(--svi-white-rgb), 0.15);
+        border-right: none;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: width 0.15s ease, background 0.15s ease, opacity 0.15s ease;
+        box-shadow: 0 4px 14px rgba(var(--svi-black-rgb), 0.25);
+        opacity: 0.55;
+      }
+      .svi-trigger-pill.left-edge {
+        border-radius: 0 8px 8px 0;
+        border-right: 1px solid rgba(var(--svi-white-rgb), 0.15);
+        border-left: none;
+      }
+      .svi-trigger-pill:hover {
+        width: 20px;
+        opacity: 1;
+        background: rgba(var(--svi-bg-rgb), 0.95);
+      }
+      /* 状态指示点 */
+      .svi-status-dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--svi-text-dim);
+        transition: background 0.2s ease;
+      }
+      .svi-status-dot.active-auto {
+        background: var(--svi-success-bright);
+        box-shadow: 0 0 6px var(--svi-success-bright);
+      }
+      .svi-status-dot.active-manual {
+        background: var(--svi-fg);
+        box-shadow: 0 0 6px var(--svi-fg);
+      }
+      .svi-status-dot.cors-warn {
+        background: var(--svi-title);
+      }
+
+      /* 展开式微型控制面板 */
+      .svi-panel-card {
+        display: none;
+        position: absolute;
+        top: -60px;
+        right: 22px;
+        width: 250px;
+        background: rgba(var(--svi-bg-rgb), 0.95);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border: 1px solid rgba(var(--svi-white-rgb), 0.12);
+        box-shadow: 0 12px 36px rgba(var(--svi-black-rgb), 0.45);
+        border-radius: 12px;
+        padding: 12px;
+        color: var(--svi-text-strong);
+        font-size: 13px;
+        flex-direction: column;
+        gap: 10px;
+        z-index: 2147483647;
+      }
+      .svi-capsule-root.left-edge .svi-panel-card {
+        right: auto;
+        left: 22px;
+      }
+      .svi-panel-card.show {
+        display: flex;
+      }
+      .svi-card-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        font-weight: 600;
+        font-size: 13px;
+        padding-bottom: 6px;
+        border-bottom: 1px solid rgba(var(--svi-white-rgb), 0.08);
+      }
+      .svi-card-status-badge {
+        font-size: 11px;
+        font-weight: 500;
+        padding: 2px 6px;
+        border-radius: 6px;
+        background: rgba(var(--svi-white-rgb), 0.08);
+        color: var(--svi-text-dim);
+      }
+      .svi-card-status-badge.green {
+        background: rgba(var(--svi-success-rgb), 0.15);
+        color: var(--svi-success-bright);
+      }
+      .svi-card-status-badge.blue {
+        background: rgba(var(--svi-fg-rgb), 0.15);
+        color: var(--svi-fg);
+      }
+      .svi-card-status-badge.yellow {
+        background: rgba(var(--svi-warn-rgb), 0.15);
+        color: var(--svi-title);
+      }
+
+      .svi-btn-row {
+        display: flex;
+        gap: 6px;
+      }
+      .svi-action-btn {
+        flex: 1;
+        padding: 6px 4px;
+        border: 1px solid rgba(var(--svi-white-rgb), 0.12);
+        background: rgba(var(--svi-white-rgb), 0.06);
+        color: var(--svi-text-strong);
+        border-radius: 8px;
+        cursor: pointer;
+        font-size: 11px;
+        font-weight: 500;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: all 0.15s ease;
+        white-space: nowrap;
+      }
+      .svi-action-btn:hover {
+        background: rgba(var(--svi-white-rgb), 0.12);
+        border-color: rgba(var(--svi-white-rgb), 0.2);
+      }
+      .svi-action-btn.active {
+        background: var(--svi-fg);
+        border-color: var(--svi-fg);
+        color: var(--svi-text-strong);
+        font-weight: 600;
+      }
+      .svi-btn-row-4 .svi-action-btn {
+        font-size: 10px;
+        padding: 6px 2px;
+      }
+
+      .svi-preset-row {
+        display: flex;
+        gap: 6px;
+      }
+      .svi-preset-btn {
+        flex: 1;
+        padding: 4px 6px;
+        border: 1px solid rgba(var(--svi-white-rgb), 0.08);
+        background: rgba(var(--svi-white-rgb), 0.04);
+        color: var(--svi-text-dim);
+        border-radius: 6px;
+        font-size: 11px;
+        cursor: pointer;
+        text-align: center;
+        transition: all 0.15s ease;
+      }
+      .svi-preset-btn.selected {
+        border-color: var(--svi-fg);
+        background: rgba(var(--svi-fg-rgb), 0.15);
+        color: var(--svi-text-strong);
+        font-weight: 600;
+      }
+
+      .svi-open-modal-btn {
+        width: 100%;
+        padding: 6px 8px;
+        border: 1px solid rgba(var(--svi-fg-rgb), 0.3);
+        background: rgba(var(--svi-fg-rgb), 0.12);
+        color: var(--svi-text-strong);
+        border-radius: 8px;
+        font-size: 11px;
+        font-weight: 500;
+        cursor: pointer;
+        text-align: center;
+        transition: all 0.15s ease;
+      }
+      .svi-open-modal-btn:hover {
+        background: rgba(var(--svi-fg-rgb), 0.25);
+        border-color: var(--svi-fg);
+      }
+
+      .svi-card-footer {
+        font-size: 11px;
+        color: var(--svi-text-dim);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding-top: 4px;
+        border-top: 1px solid rgba(var(--svi-white-rgb), 0.06);
+      }
+      .svi-hidden-fullscreen {
+        opacity: 0 !important;
+        pointer-events: none !important;
+      }
+
+      /* 网页图片与矢量图智能反色规则 (v3.0 扩展: canvas / SVG image / input[type=image];
+         v3.1: video[data-svi-inverted] 供当前页媒体面板手动反色使用) */
+      html.svi-img-invert-on img[data-svi-inverted="true"],
+      html.svi-img-invert-on svg[data-svi-inverted="true"],
+      html.svi-img-invert-on canvas[data-svi-inverted="true"],
+      html.svi-img-invert-on image[data-svi-inverted="true"],
+      html.svi-img-invert-on input[type="image" i][data-svi-inverted="true"],
+      html.svi-img-invert-on video[data-svi-inverted="true"],
+      body.svi-img-invert-on img[data-svi-inverted="true"],
+      body.svi-img-invert-on svg[data-svi-inverted="true"],
+      body.svi-img-invert-on canvas[data-svi-inverted="true"],
+      body.svi-img-invert-on image[data-svi-inverted="true"],
+      body.svi-img-invert-on input[type="image" i][data-svi-inverted="true"],
+      body.svi-img-invert-on video[data-svi-inverted="true"] {
+        filter: var(--svi-img-filter, invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.90)) !important;
+        transition: var(--svi-img-transition, none) !important;
+      }
+      /* v3.1 R5: 悬停还原规则统一门控在 html.svi-hover-restore 之下 (默认开启;
+         关闭悬停显示原图后规则不命中, 悬停保持反色视图) */
+      html.svi-hover-restore img[data-svi-inverted="true"]:hover,
+      html.svi-hover-restore svg[data-svi-inverted="true"]:hover,
+      html.svi-hover-restore canvas[data-svi-inverted="true"]:hover,
+      html.svi-hover-restore image[data-svi-inverted="true"]:hover,
+      html.svi-hover-restore input[type="image" i][data-svi-inverted="true"]:hover,
+      html.svi-hover-restore video[data-svi-inverted="true"]:hover {
+        filter: none !important;
+      }
+
+      /* 背景图反色 (B站评论缩略图等 background-image 元素) */
+      html.svi-img-invert-on [data-svi-bginv="true"],
+      body.svi-img-invert-on [data-svi-bginv="true"] {
+        filter: var(--svi-img-filter, invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.90)) !important;
+        transition: var(--svi-img-transition, none) !important;
+      }
+      html.svi-hover-restore [data-svi-bginv="true"]:hover {
+        filter: none !important;
+      }
+
+      /* v2.0 模态新增区块 (站点规则 / 原色屏蔽 / 数据统计) */
+      .svi-modal-select {
+        background: rgba(var(--svi-bg-rgb), 0.9);
+        color: var(--svi-text-strong);
+        border: 1px solid rgba(var(--svi-white-rgb), 0.15);
+        border-radius: 6px;
+        font-size: 12px;
+        padding: 4px 6px;
+        outline: none;
+        cursor: pointer;
+        max-width: 100%;
+        min-width: 0;
+      }
+      .svi-modal-textarea {
+        width: 100%;
+        min-height: 52px;
+        background: rgba(var(--svi-bg-rgb), 0.8);
+        color: var(--svi-text-strong);
+        border: 1px solid rgba(var(--svi-white-rgb), 0.12);
+        border-radius: 6px;
+        font-size: 11px;
+        font-family: monospace;
+        padding: 6px 8px;
+        resize: vertical;
+        outline: none;
+        box-sizing: border-box;
+      }
+      .svi-modal-textarea:focus {
+        border-color: var(--svi-fg);
+      }
+      .svi-site-check-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 4px 0;
+        border-bottom: 1px solid rgba(var(--svi-white-rgb), 0.05);
+      }
+      .svi-check {
+        width: 15px;
+        height: 15px;
+        accent-color: var(--svi-fg);
+        cursor: pointer;
+        flex-shrink: 0;
+      }
+      .svi-hint-line {
+        font-size: 10px;
+        color: var(--svi-text-dim);
+        line-height: 1.6;
+      }
+      /* 本地统计: 表格化网格, 每项独立成格 (元素隔离, 严禁行内拼接) */
+      .svi-stats-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(88px, 1fr));
+        gap: 6px;
+      }
+      .svi-stats-cell {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        padding: 6px 8px;
+        background: rgba(var(--svi-bg-rgb), 0.55);
+        border: 1px solid rgba(var(--svi-white-rgb), 0.08);
+        border-radius: 8px;
+        min-width: 0;
+      }
+      .svi-stats-label {
+        font-size: 10px;
+        color: var(--svi-text-dim);
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .svi-stats-value {
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--svi-fg);
+        font-family: monospace;
+      }
+      .svi-mini-btn {
+        padding: 5px 10px;
+        background: rgba(var(--svi-fg-rgb), 0.12);
+        border: 1px solid rgba(var(--svi-fg-rgb), 0.3);
+        color: var(--svi-text-strong);
+        border-radius: 6px;
+        font-size: 11px;
+        cursor: pointer;
+        transition: all 0.15s ease;
+      }
+      .svi-mini-btn:hover {
+        background: rgba(var(--svi-fg-rgb), 0.25);
+      }
+      .svi-mini-btn.danger {
+        background: rgba(var(--svi-error-rgb), 0.10);
+        border-color: rgba(var(--svi-error-rgb), 0.3);
+        color: var(--svi-error-bright);
+      }
+      .svi-mini-btn.danger:hover {
+        background: rgba(var(--svi-error-rgb), 0.22);
+      }
+      .svi-shield-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 8px;
+        background: rgba(var(--svi-white-rgb), 0.05);
+        border: 1px solid rgba(var(--svi-white-rgb), 0.12);
+        border-radius: 12px;
+        font-size: 11px;
+        color: var(--svi-text-strong);
+        font-family: monospace;
+      }
+      .svi-shield-chip .svi-shield-x {
+        cursor: pointer;
+        color: var(--svi-error-bright);
+        font-weight: 700;
+        padding: 0 2px;
+      }
+      .svi-btn-row-actions {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+      }
+
+      /* ==========================================
+         v6.4 控件库新增词汇的样式 (DR 词汇表补齐项)
+         产出方: SviControls 的 v6.4 新工厂 —— multiSwitch(.svi-chip*) / collapsible(.svi-collapsible*) /
+         messageBar(.svi-msg-*) / 按钮基类(.svi-btn + .svi-btn-nav) / 快捷键输入(.svi-input.svi-shortcut)。
+         位置有意放在 .svi-btn-reset / .svi-btn-done 之前: 那两个是后写的特化规则, 同权重靠顺序取胜。
+         为什么留在面板 CSS: 控件样式只能有一个实现点 —— 这里就是那个点; 扩展设置页由构建期抽块注入
+         同一份 (scripts/build-extension.js 的 SVI_PANEL_CSS_INJECT), 禁止在扩展页另写一套。
+         ========================================== */
+      .svi-btn {
+        padding: 6px 12px;
+        border-radius: 8px;
+        border: 1px solid var(--svi-ctl-hover);
+        background: var(--svi-ctl-bg);
+        color: var(--svi-text-strong);
+        font-family: inherit;
+        font-size: 12px;
+        cursor: pointer;
+        transition: all 0.15s ease;
+      }
+      .svi-btn:hover {
+        border-color: var(--svi-fg);
+        color: var(--svi-fg);
+      }
+      .svi-btn-nav {
+        border-color: var(--svi-fg);
+        color: var(--svi-fg);
+      }
+      .svi-btn-nav:hover {
+        background: rgba(var(--svi-fg-rgb), 0.14);
+      }
+      .svi-chip-wrap {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+      .svi-chip {
+        padding: 5px 11px;
+        border-radius: 999px;
+        border: 1px solid var(--svi-ctl-hover);
+        background: var(--svi-ctl-bg);
+        color: var(--svi-text-dim);
+        font-family: inherit;
+        font-size: 12px;
+        cursor: pointer;
+        transition: all 0.15s ease;
+      }
+      .svi-chip:hover {
+        border-color: var(--svi-fg);
+        color: var(--svi-text-strong);
+      }
+      .svi-chip.active {
+        border-color: var(--svi-fg);
+        background: rgba(var(--svi-fg-rgb), 0.14);
+        color: var(--svi-fg);
+        font-weight: 600;
+      }
+      .svi-collapsible-head {
+        cursor: pointer;
+        user-select: none;
+        gap: 8px;
+      }
+      .svi-collapsible-head::after {
+        content: '';
+        flex: none;
+        width: 0;
+        height: 0;
+        border-left: 5px solid var(--svi-text-dim);
+        border-top: 4px solid transparent;
+        border-bottom: 4px solid transparent;
+        transition: transform 0.15s ease;
+      }
+      .svi-collapsible-head.open::after {
+        transform: rotate(90deg);
+      }
+      .svi-collapsible-hint {
+        font-size: 10px;
+        font-weight: 400;
+        color: var(--svi-text-dim);
+      }
+      .svi-collapsible-body {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        padding-top: 10px;
+      }
+      .svi-msg {
+        padding: 8px 10px;
+        border-radius: 8px;
+        border: 1px solid transparent;
+        font-size: 12px;
+        line-height: 1.5;
+      }
+      .svi-msg-info {
+        background: rgba(var(--svi-fg-rgb), 0.10);
+        border-color: rgba(var(--svi-fg-rgb), 0.35);
+        color: var(--svi-text-strong);
+      }
+      .svi-msg-ok {
+        background: rgba(var(--svi-success-rgb), 0.12);
+        border-color: rgba(var(--svi-success-rgb), 0.45);
+        color: var(--svi-success-bright);
+      }
+      .svi-msg-warn {
+        background: rgba(var(--svi-warn-rgb), 0.12);
+        border-color: rgba(var(--svi-warn-rgb), 0.45);
+        color: var(--svi-title);
+      }
+      .svi-msg-error {
+        background: rgba(var(--svi-error-rgb), 0.12);
+        border-color: rgba(var(--svi-error-rgb), 0.45);
+        color: var(--svi-error-bright);
+      }
+      .svi-input {
+        padding: 5px 8px;
+        border-radius: 6px;
+        border: 1px solid rgba(var(--svi-white-rgb), 0.15);
+        background: rgba(var(--svi-bg-rgb), 0.8);
+        color: var(--svi-fg);
+        font-family: inherit;
+        font-size: 12px;
+        min-width: 110px;
+      }
+      .svi-input:focus {
+        outline: 1px solid var(--svi-outline);
+        border-color: var(--svi-fg);
+      }
+      .svi-shortcut {
+        font-family: monospace;
+        letter-spacing: 0.5px;
+        text-align: center;
+        cursor: pointer;
+      }
+
+      /* ==========================================
+         高级参数精细设置模态窗口 (Modal Settings Page)
+         ========================================== */
+      .svi-modal-mask {
+        display: none;
+        position: fixed;
+        inset: 0;
+        background: rgba(var(--svi-black-rgb), 0.65);
+        backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
+        z-index: 2147483647;
+        align-items: center;
+        justify-content: center;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
+      }
+      .svi-modal-mask.show {
+        display: flex;
+      }
+      /* v3.3 停靠形态: 无遮罩不拦截页面交互, 仅侧边抽屉本身可交互 */
+      .svi-modal-mask.docked {
+        background: transparent;
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
+        pointer-events: none;
+        align-items: stretch;
+        justify-content: flex-end;
+      }
+      .svi-modal-mask.docked .svi-modal-window {
+        pointer-events: auto;
+        background: var(--svi-bg-deep); /* 停靠形态无遮罩模糊, 用实底防页面内容透底 */
+      }
+      .svi-modal-window {
+        width: min(600px, 94vw);
+        max-width: 94vw;
+        max-height: 86vh;
+        background: rgba(var(--svi-bg-rgb), 0.98);
+        border: 1px solid rgba(var(--svi-white-rgb), 0.14);
+        box-shadow: 0 24px 64px rgba(var(--svi-black-rgb), 0.65);
+        border-radius: 16px;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        color: var(--svi-text-strong);
+        animation: sviFadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+      }
+      /* v3.3 停靠形态: 全高侧边抽屉, 宽度可拖拽并记忆 */
+      .svi-modal-window.layout-left,
+      .svi-modal-window.layout-right {
+        position: fixed;
+        top: 0;
+        bottom: 0;
+        height: 100vh;
+        max-height: 100vh;
+        width: var(--svi-settings-w, 420px);
+        max-width: 92vw;
+        border-radius: 0;
+        animation: sviSlideIn 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+      }
+      .svi-modal-window.layout-left {
+        left: 0;
+        right: auto;
+        --svi-slide-from: -32px;
+        border-right: 1px solid rgba(var(--svi-white-rgb), 0.14);
+      }
+      .svi-modal-window.layout-right {
+        right: 0;
+        left: auto;
+        --svi-slide-from: 32px;
+        border-left: 1px solid rgba(var(--svi-white-rgb), 0.14);
+      }
+      @keyframes sviSlideIn {
+        from { opacity: 0; transform: translateX(var(--svi-slide-from, 24px)); }
+        to { opacity: 1; transform: none; }
+      }
+      /* ===== v4.5 响应式 / 移动端: 窄屏全宽面板 + 触控大目标 + 粗指针禁用拖拽把手 ===== */
+      @media (max-width: 520px) {
+        .svi-modal-window,
+        .svi-modal-window.layout-left,
+        .svi-modal-window.layout-right {
+          width: 100vw !important;
+          max-width: 100vw !important;
+          max-height: 100vh;
+          max-height: 100dvh;
+          border-radius: 0;
+          border-left: none;
+          border-right: none;
+        }
+        .svi-modal-body { padding: 12px 12px 20px; gap: 12px; }
+        .svi-modal-row, .svi-site-check-row { min-height: 40px; }
+        /* iOS: 聚焦字号 <16px 的输入框会触发页面缩放, 16px 起步
+           (提升特异性: 基础规则在样式表更后处, 同特异性会被覆盖) */
+        .svi-modal-body .svi-modal-select,
+        .svi-modal-body .svi-modal-num-input { min-height: 40px; font-size: 16px; }
+        .svi-check { width: 20px; height: 20px; }
+        .svi4-tab { padding: 11px 12px; }
+        .svi-drag-handle { display: none; }
+        .svi-panel-card { right: 8px; width: min(250px, 88vw); }
+      }
+      @media (pointer: coarse) {
+        .svi-drag-handle { display: none; }
+        .svi-modal-slider { min-height: 32px; }
+        .svi-action-btn, .svi-mini-btn { min-height: 40px; }
+      }
+      @media (max-height: 460px) {
+        .svi-modal-window { max-height: 96vh; max-height: 96dvh; }
+      }
+      .svi-drag-handle {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        width: 7px;
+        cursor: col-resize;
+        z-index: 3;
+        transition: background 0.15s ease;
+      }
+      .svi-drag-handle.left-edge { left: 0; }
+      .svi-drag-handle.right-edge { right: 0; }
+      .svi-drag-handle:hover { background: rgba(var(--svi-fg-rgb), 0.28); }
+      .svi-layout-switch {
+        display: flex;
+        gap: 2px;
+        background: rgba(var(--svi-white-rgb), 0.06);
+        border: 1px solid rgba(var(--svi-white-rgb), 0.1);
+        border-radius: 8px;
+        padding: 2px;
+      }
+      .svi-layout-btn {
+        border: none;
+        background: transparent;
+        color: var(--svi-text-dim);
+        font-size: 11px;
+        padding: 3px 9px;
+        border-radius: 6px;
+        cursor: pointer;
+        transition: all 0.15s ease;
+        white-space: nowrap;
+      }
+      .svi-layout-btn:hover { color: var(--svi-text-strong); }
+      .svi-layout-btn.active {
+        background: var(--svi-fg);
+        color: var(--svi-text-strong);
+        font-weight: 600;
+      }
+      @keyframes sviFadeIn {
+        from { opacity: 0; transform: scale(0.96); }
+        to { opacity: 1; transform: scale(1); }
+      }
+      .svi-modal-header {
+        padding: 14px 18px;
+        border-bottom: 1px solid rgba(var(--svi-white-rgb), 0.08);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        flex-wrap: wrap;
+        row-gap: 6px;
+        min-width: 0;
+      }
+      .svi-modal-title {
+        font-size: 15px;
+        font-weight: 600;
+        color: var(--svi-text-strong);
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      /* v4.6 版本自检徽标 (R-H4): 面板头显著显示运行版本, 供与发布页比对 */
+      .svi-modal-ver {
+        font-size: 11px;
+        font-weight: 500;
+        color: var(--svi-text-dim);
+        background: rgba(var(--svi-dim-rgb), 0.12);
+        border: 1px solid rgba(var(--svi-dim-rgb), 0.25);
+        border-radius: 8px;
+        padding: 1px 7px;
+        margin-left: 4px;
+        letter-spacing: 0.2px;
+      }
+      .svi-modal-close {
+        background: none;
+        border: none;
+        color: var(--svi-text-dim);
+        font-size: 18px;
+        cursor: pointer;
+        padding: 2px 6px;
+        border-radius: 6px;
+        transition: color 0.15s ease, background 0.15s ease;
+      }
+      .svi-modal-close:hover {
+        color: var(--svi-text-strong);
+        background: rgba(var(--svi-white-rgb), 0.1);
+      }
+      .svi-modal-body {
+        padding: 16px 18px;
+        overflow-y: auto;
+        overflow-x: hidden;
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+        scrollbar-width: thin;
+        scrollbar-color: rgba(var(--svi-dim-rgb), 0.35) transparent;
+      }
+      .svi-modal-body::-webkit-scrollbar {
+        width: 8px;
+      }
+      .svi-modal-body::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      .svi-modal-body::-webkit-scrollbar-thumb {
+        background: rgba(var(--svi-dim-rgb), 0.35);
+        border-radius: 4px;
+      }
+      .svi-modal-body::-webkit-scrollbar-thumb:hover {
+        background: rgba(var(--svi-dim-rgb), 0.55);
+      }
+      .svi-modal-section {
+        background: rgba(var(--svi-white-rgb), 0.03);
+        border: 1px solid rgba(var(--svi-white-rgb), 0.06);
+        border-radius: 10px;
+        padding: 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        min-width: 0;
+      }
+      .svi-sec-title {
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--svi-fg);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+      /* v3.3: 行布局纵向堆叠 —— 标题说明在上, 控件在下, 任何窗宽不出界 */
+      .svi-modal-row {
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 6px;
+        min-width: 0;
+      }
+      .svi-modal-label-box {
+        width: auto;
+        flex-shrink: 1;
+        min-width: 0;
+      }
+      .svi-modal-label {
+        font-size: 12px;
+        color: var(--svi-text-strong);
+      }
+      .svi-modal-hint {
+        font-size: 10px;
+        color: var(--svi-text-dim);
+        line-height: 1.5;
+      }
+      .svi-modal-controls {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+        flex-wrap: wrap;
+      }
+      /* v3.3: 选中项的动态说明行 */
+      .svi-row-describe {
+        font-size: 10px;
+        color: var(--svi-text-strong);
+        line-height: 1.5;
+        background: rgba(var(--svi-fg-rgb), 0.07);
+        border-left: 2px solid rgba(var(--svi-fg-rgb), 0.4);
+        padding: 3px 8px;
+        border-radius: 0 6px 6px 0;
+      }
+      /* v3.3: 区块内子分组标题 (元素级规则 / 学习规则) */
+      .svi-sub-title {
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--svi-text-dim);
+        letter-spacing: 0.4px;
+        padding-top: 8px;
+        border-top: 1px dashed rgba(var(--svi-white-rgb), 0.1);
+      }
+      /* v3.3: 元素规则添加表单 */
+      .svi-er-form {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        align-items: center;
+      }
+      .svi-er-form .svi-modal-select {
+        flex: 0 0 auto;
+      }
+      .svi-modal-text {
+        flex: 1;
+        min-width: 140px;
+        background: rgba(var(--svi-bg-rgb), 0.8);
+        border: 1px solid rgba(var(--svi-white-rgb), 0.15);
+        border-radius: 6px;
+        color: var(--svi-text-strong);
+        font-size: 11px;
+        padding: 5px 8px;
+        outline: none;
+      }
+      .svi-modal-text:focus {
+        border-color: var(--svi-fg);
+      }
+      /* v3.3: 操作技巧行 */
+      .svi-tip-line {
+        font-size: 11px;
+        color: var(--svi-text-dim);
+        line-height: 1.7;
+        display: flex;
+        gap: 8px;
+      }
+      .svi-tip-line b {
+        color: var(--svi-text-strong);
+        flex-shrink: 0;
+      }
+      .svi-modal-slider {
+        flex: 1;
+        height: 4px;
+        accent-color: var(--svi-fg);
+        cursor: pointer;
+        background: rgba(var(--svi-white-rgb), 0.15);
+        border-radius: 2px;
+      }
+      .svi-modal-num-input {
+        width: 60px;
+        padding: 4px 6px;
+        background: rgba(var(--svi-bg-rgb), 0.8);
+        border: 1px solid rgba(var(--svi-white-rgb), 0.15);
+        border-radius: 6px;
+        color: var(--svi-fg);
+        font-size: 12px;
+        font-family: monospace;
+        text-align: right;
+        outline: none;
+      }
+      .svi-modal-num-input:focus {
+        border-color: var(--svi-fg);
+        box-shadow: 0 0 0 1px var(--svi-fg);
+      }
+      .svi-modal-unit {
+        font-size: 11px;
+        color: var(--svi-text-dim);
+        width: 24px;
+        flex-shrink: 0;
+      }
+      .svi-modal-footer {
+        padding: 12px 18px;
+        border-top: 1px solid rgba(var(--svi-white-rgb), 0.08);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        flex-wrap: wrap;
+        row-gap: 6px;
+        background: rgba(var(--svi-bg-rgb), 0.4);
+      }
+      .svi-modal-perf {
+        font-size: 11px;
+        color: var(--svi-success-bright);
+        font-family: monospace;
+      }
+      .svi-footer-actions {
+        display: flex;
+        gap: 8px;
+      }
+      .svi-btn-reset {
+        padding: 6px 12px;
+        background: rgba(var(--svi-error-rgb), 0.12);
+        border: 1px solid rgba(var(--svi-error-rgb), 0.3);
+        color: var(--svi-error-bright);
+        border-radius: 8px;
+        font-size: 12px;
+        cursor: pointer;
+        transition: all 0.15s ease;
+      }
+      .svi-btn-reset:hover {
+        background: rgba(var(--svi-error-rgb), 0.25);
+      }
+      .svi-btn-done {
+        padding: 6px 14px;
+        background: var(--svi-fg);
+        border: 1px solid var(--svi-fg);
+        color: var(--svi-text-strong);
+        border-radius: 8px;
+        font-size: 12px;
+        cursor: pointer;
+        font-weight: 500;
+        transition: all 0.15s ease;
+      }
+      .svi-btn-done:hover {
+        background: var(--svi-fg);
+      }
+
+      /* 浅色色卡网格与色图选择器 */
+      .svi-color-chips-grid {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 8px;
+        margin-top: 4px;
+      }
+      .svi-color-chip {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 10px;
+        background: rgba(var(--svi-white-rgb), 0.04);
+        border: 1px solid rgba(var(--svi-white-rgb), 0.1);
+        border-radius: 8px;
+        cursor: pointer;
+        transition: all 0.15s ease;
+        user-select: none;
+        color: var(--svi-text-dim);
+        font-size: 12px;
+      }
+      .svi-color-chip:hover {
+        background: rgba(var(--svi-white-rgb), 0.08);
+        color: var(--svi-text-strong);
+      }
+      .svi-color-chip.active {
+        background: rgba(var(--svi-fg-rgb), 0.14);
+        border-color: var(--svi-fg);
+        color: var(--svi-fg);
+        font-weight: 500;
+        box-shadow: 0 0 12px rgba(var(--svi-fg-rgb), 0.15);
+      }
+      .svi-color-chip-swatch {
+        width: 16px;
+        height: 16px;
+        border-radius: 50%;
+        border: 1px solid rgba(var(--svi-black-rgb), 0.25);
+        box-shadow: 0 1px 3px rgba(var(--svi-black-rgb), 0.4);
+        flex-shrink: 0;
+      }
+      .svi-color-chip-check {
+        margin-left: auto;
+        font-size: 11px;
+        opacity: 0;
+        transition: opacity 0.15s ease;
+      }
+      .svi-color-chip.active .svi-color-chip-check {
+        opacity: 1;
+      }
+      .svi-color-picker-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 8px 10px;
+        background: rgba(var(--svi-white-rgb), 0.04);
+        border: 1px solid rgba(var(--svi-white-rgb), 0.1);
+        border-radius: 8px;
+        margin-top: 6px;
+      }
+      .svi-color-picker-label {
+        font-size: 12px;
+        color: var(--svi-text-strong);
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .svi-color-picker-controls {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .svi-color-input-wrap {
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+        cursor: pointer;
+      }
+      .svi-color-input-native {
+        opacity: 0;
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        cursor: pointer;
+      }
+      .svi-color-preview-box {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 3px 8px;
+        background: rgba(var(--svi-bg-rgb), 0.8);
+        border: 1px solid rgba(var(--svi-white-rgb), 0.15);
+        border-radius: 6px;
+        font-size: 11px;
+        font-family: monospace;
+        color: var(--svi-fg);
+      }
+      .svi-color-preview-circle {
+        width: 14px;
+        height: 14px;
+        border-radius: 50%;
+        border: 1px solid rgba(var(--svi-black-rgb), 0.3);
+      }
+
+      /* ==========================================
+         v3.0 新增样式: 特效覆盖层 / 部分反色投递 / 画中画 / 新区块
+         ========================================== */
+
+      /* 图片部分反色投递: content:url 替换渲染 (不改 src, 不破坏懒加载);
+         悬停还原 (:hover + JS 类双通道, v3.1 门控于 html.svi-hover-restore), Alt+点击数据开关 */
+      img[data-svi-fx] {
+        cursor: crosshair;
+      }
+      img[data-svi-fx][data-svi-fx-off] {
+        content: normal !important;
+      }
+      html.svi-hover-restore img[data-svi-fx]:hover,
+      html.svi-hover-restore img[data-svi-fx].svi-fx-hover {
+        content: unset !important;
+      }
+
+      /* 视频特效覆盖层 (仅当视频已有 positioned/transformed 祖先时创建) */
+      .svi-fx-overlay {
+        position: absolute;
+        pointer-events: none !important;
+        border-radius: inherit;
+        overflow: hidden;
+      }
+
+      /* v6.2 区域反色覆盖层 (部分反色)。载体是**独立 DOM 层**, 不碰站点元素的 ::after ——
+         几何对齐与伪元素冲突两条理由见 design D1。滤镜串走同一个 CSS 变量,
+         故与整图路径**逐字符一致**由构造保证 (PRD R1 的 AC)。
+         z-index 取最小可用值 1; 不设 transform/opacity, 避免自己创造 stacking context。
+         pointer-events: none 是硬要求 (绝不挡媒体控件)。 */
+      .svi-region-overlay {
+        position: absolute;
+        pointer-events: none !important;
+        border-radius: inherit;
+        z-index: 1;
+        backdrop-filter: var(--svi-img-filter, invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.90));
+        -webkit-backdrop-filter: var(--svi-img-filter, invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.90));
+      }
+
+      /* 视频海报反色 (播放后由 play 事件移除滤镜) */
+      html.svi-img-invert-on video[data-svi-poster="light"]:not(.svi-playing),
+      body.svi-img-invert-on video[data-svi-poster="light"]:not(.svi-playing) {
+        filter: var(--svi-img-filter, invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.90)) !important;
+      }
+
+      /* ==========================================
+         v5.0 新增样式: 元素动作 (hide / mask / dim / peek)
+         遮罩预设值来自 JS 侧 MASK_PRESETS, 经 :root 变量注入 (单一真源, 无 inline style)
+         ========================================== */
+
+      /* --- hide: 元素屏蔽 (display:none, 不占位; 因此不提供悬停窥视 —— 不可悬停) --- */
+      [data-svi-hidden] {
+        display: none !important;
+      }
+
+      /* --- mask: 遮罩。伪元素优先 (零 DOM 节点, 随元素天然跟随, 无 z-index 问题);
+             元素已占用 ::after 时由 JS 降级为独立层 [data-svi-mask-layer] --- */
+      [data-svi-masked] {
+        position: relative;
+      }
+      [data-svi-masked]::after,
+      [data-svi-mask-layer]::after {
+        content: '';
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        background: var(--svi-mask-dim-color, var(--svi-bg));
+        opacity: var(--svi-mask-dim-opacity, 0.75);
+        transition: opacity 140ms ease;
+      }
+      [data-svi-masked="solid"]::after {
+        background: var(--svi-mask-solid-color, var(--svi-bg));
+        opacity: var(--svi-mask-solid-opacity, 1);
+      }
+      [data-svi-masked="frost"]::after {
+        background: var(--svi-mask-frost-color, var(--svi-bg));
+        opacity: var(--svi-mask-frost-opacity, 0.35);
+        backdrop-filter: blur(var(--svi-mask-blur-user, 8px));
+      }
+      /* 降级路径: 独立层 (元素 ::after 已被站点占用时) */
+      [data-svi-mask-layer] {
+        position: absolute;
+        pointer-events: none;
+        z-index: 1;
+        background: var(--svi-mask-dim-color, var(--svi-bg));
+        opacity: var(--svi-mask-dim-opacity, 0.75);
+        transition: opacity 140ms ease;
+      }
+      [data-svi-mask-layer="solid"] {
+        background: var(--svi-mask-solid-color, var(--svi-bg));
+        opacity: var(--svi-mask-solid-opacity, 1);
+      }
+      [data-svi-mask-layer="frost"] {
+        background: var(--svi-mask-frost-color, var(--svi-bg));
+        opacity: var(--svi-mask-frost-opacity, 0.35);
+        backdrop-filter: blur(var(--svi-mask-blur-user, 8px));
+      }
+
+      /* --- peek: 悬停复原通用门 (html.svi-peek-on)。
+             遮罩: 悬停即降到 --svi-mask-hover, 移出恢复 —— 「可移动鼠标解除」。
+             反色家族 (img/svg/canvas/video/背景图) 的悬停复原仍由既有
+             html.svi-hover-restore 规则承载 (同一 hoverRestore 偏好, 不重复实现)。 --- */
+      html.svi-peek-on [data-svi-masked]:hover::after,
+      html.svi-peek-on [data-svi-mask-layer]:hover {
+        opacity: var(--svi-mask-hover, 0.15);
+      }
+      /* Shift+悬停 = 永久解除: 由 JS 监听 mouseover(shiftKey) 摘除遮罩, 不靠 CSS */
+
+      /* --- 区域遮罩 (Alt+拖拽) 独立层: 几何只能逐层写 style (自有节点, 非站点元素) --- */
+      .svi-mask-region {
+        position: fixed;
+        pointer-events: none;
+        z-index: 2147483644;
+        background: var(--svi-mask-dim-color, var(--svi-bg));
+        opacity: var(--svi-mask-dim-opacity, 0.75);
+        transition: opacity 140ms ease;
+      }
+      html.svi-peek-on .svi-mask-region.svi-mask-hoverable:hover {
+        opacity: var(--svi-mask-hover, 0.15);
+      }
+
+      /* --- dim: 全页温和压暗 (比反色温和; 不拦点击; z-index 低于胶囊/面板/弹窗) --- */
+      .svi-page-dim {
+        position: fixed;
+        inset: 0;
+        pointer-events: none !important;
+        z-index: 2147483640;
+        background: var(--svi-black-rgb);
+        opacity: var(--svi-mask-dim-rest, 0.35);
+        transition: opacity 160ms ease;
+      }
+      html.svi-peek-on .svi-page-dim:hover {
+        opacity: var(--svi-mask-hover, 0.15);
+      }
+
+      /* --- v5.5 加载前 pending 遮罩 (media 档): **纯 CSS 属性门**, 不用 inline style。
+             判定完成 (data-svi-settled 写入) 即自动失效 —— 摘罩不需要删样式。
+             用 visibility 而非 opacity: 不留可点击的透明元素, 也不产生过渡中间态。 --- */
+      html[data-svi-masking] [data-svi-pending]:not([data-svi-settled]) {
+        visibility: hidden !important;
+      }
+
+      /* --- 区域选取框 (与 rect 反色框共用视觉, 独立类避免影响既有选择器) --- */      .svi-mask-select {
+        position: fixed;
+        border: 1px dashed var(--svi-fg);
+        background: rgba(var(--svi-fg-rgb), 0.15);
+        pointer-events: none;
+        z-index: 2147483646;
+      }
+
+      /* 区域反色 (Alt+Shift+拖拽) 选择框 */
+      .svi-rect-select {
+        position: fixed;
+        border: 1px dashed var(--svi-fg);
+        background: rgba(var(--svi-fg-rgb), 0.15);
+        pointer-events: none;
+        z-index: 2147483646;
+      }
+
+      /* 面板画中画按钮 (与 svi-action-btn 同视觉; 独立类避免破坏既有按钮计数) */
+      .svi-pip-btn {
+        flex: 1;
+        padding: 6px 4px;
+        border: 1px solid rgba(var(--svi-white-rgb), 0.12);
+        background: rgba(var(--svi-white-rgb), 0.06);
+        color: var(--svi-text-strong);
+        border-radius: 8px;
+        cursor: pointer;
+        font-size: 11px;
+        font-weight: 500;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: all 0.15s ease;
+        white-space: nowrap;
+      }
+      .svi-pip-btn:hover {
+        background: rgba(var(--svi-white-rgb), 0.12);
+        border-color: rgba(var(--svi-white-rgb), 0.2);
+      }
+
+      /* 存储管理键列表 */
+      .svi-store-key-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 6px;
+        padding: 4px 0;
+        border-bottom: 1px solid rgba(var(--svi-white-rgb), 0.05);
+        font-family: monospace;
+        font-size: 10px;
+        color: var(--svi-text-dim);
+      }
+      .svi-store-key-name {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: var(--svi-text-strong);
+      }
+      .svi-store-key-size {
+        flex-shrink: 0;
+        color: var(--svi-text-dim);
+      }
+
+      /* 自学习规则列表 */
+      .svi-learned-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 6px;
+        padding: 4px 0;
+        border-bottom: 1px solid rgba(var(--svi-white-rgb), 0.05);
+        font-size: 11px;
+        color: var(--svi-text-strong);
+      }
+      .svi-learned-stem {
+        flex: 1;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-family: monospace;
+      }
+      .svi-learned-action {
+        flex-shrink: 0;
+        font-size: 10px;
+        padding: 1px 6px;
+        border-radius: 6px;
+        background: rgba(var(--svi-success-rgb), 0.15);
+        color: var(--svi-success-bright);
+      }
+      .svi-learned-action.protect {
+        background: rgba(var(--svi-warn-rgb), 0.15);
+        color: var(--svi-title);
+      }
+      .svi-learned-hits {
+        flex-shrink: 0;
+        font-size: 10px;
+        color: var(--svi-text-dim);
+      }
+
+      /* 后端徽章 */
+      .svi-backend-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 2px 8px;
+        border-radius: 10px;
+        font-size: 10px;
+        font-family: monospace;
+        background: rgba(var(--svi-fg-rgb), 0.12);
+        color: var(--svi-fg);
+        border: 1px solid rgba(var(--svi-fg-rgb), 0.3);
+      }
+
+      /* ==========================================
+         v3.1 新增样式: 当前页媒体面板 / 定位高亮闪烁
+         ========================================== */
+      .svi-media-row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 0;
+        border-bottom: 1px solid rgba(var(--svi-white-rgb), 0.05);
+        font-size: 11px;
+        color: var(--svi-text-strong);
+      }
+      .svi-media-type {
+        flex-shrink: 0;
+        width: 46px;
+        color: var(--svi-text-strong);
+        font-family: monospace;
+        font-size: 10px;
+      }
+      .svi-media-meta {
+        flex: 1;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-family: monospace;
+        font-size: 10px;
+        opacity: 0.85;
+      }
+      .svi-media-state {
+        flex-shrink: 0;
+        font-size: 10px;
+        padding: 1px 6px;
+        border-radius: 6px;
+        background: rgba(var(--svi-white-rgb), 0.07);
+        color: var(--svi-text-dim);
+        white-space: nowrap;
+      }
+      .svi-media-state.inverted {
+        background: rgba(var(--svi-success-rgb), 0.15);
+        color: var(--svi-success-bright);
+      }
+      .svi-media-state.skipped {
+        background: rgba(var(--svi-warn-rgb), 0.12);
+        color: var(--svi-title);
+      }
+      .svi-media-actions {
+        flex-shrink: 0;
+        display: flex;
+        gap: 4px;
+      }
+      .svi-media-actions .svi-mini-btn {
+        font-size: 10px;
+        padding: 2px 7px;
+      }
+      /* 定位高亮: scrollIntoView 后 1.2s 描边闪烁 (仅 outline/box-shadow, 绝不改布局) */
+      .svi-locate-flash {
+        outline: 3px solid var(--svi-fg) !important;
+        outline-offset: 1px !important;
+        box-shadow: 0 0 0 4px rgba(var(--svi-fg-rgb), 0.35) !important;
+      }
+
+      /* ==========================================
+         v4.0 设置页组件: 电源横幅 / 页签 / 能力卡片 / 停用态胶囊
+         (视觉语言与 v3.3 零相似; 并列数据一律网格, 禁止行内拼接)
+         ========================================== */
+      .svi4-power {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        flex-wrap: wrap;
+        padding: 12px 14px;
+        background: linear-gradient(135deg, rgba(var(--svi-fg-rgb), 0.10), rgba(var(--svi-success-rgb), 0.06));
+        border: 1px solid rgba(var(--svi-fg-rgb), 0.25);
+        border-radius: 14px;
+      }
+      .svi4-power-info {
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+        min-width: 0;
+        flex: 1;
+      }
+      .svi4-host {
+        font-size: 14px;
+        font-weight: 700;
+        color: var(--svi-text-strong);
+        font-family: monospace;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .svi4-power-status {
+        font-size: 11px;
+        color: var(--svi-text-strong);
+      }
+      .svi4-switch {
+        position: relative;
+        width: 52px;
+        height: 28px;
+        border-radius: 999px;
+        border: 1px solid rgba(var(--svi-white-rgb), 0.22);
+        background: rgba(var(--svi-dim-rgb), 0.9);
+        cursor: pointer;
+        flex-shrink: 0;
+        transition: background 0.18s ease, border-color 0.18s ease;
+      }
+      .svi4-switch::after {
+        content: '';
+        position: absolute;
+        top: 2px;
+        left: 2px;
+        width: 22px;
+        height: 22px;
+        border-radius: 50%;
+        background: var(--svi-text-strong);
+        transition: transform 0.18s ease, background 0.18s ease;
+      }
+      .svi4-switch.on {
+        background: var(--svi-success);
+        border-color: var(--svi-success-bright);
+      }
+      .svi4-switch.on::after {
+        transform: translateX(24px);
+        background: var(--svi-input-active);
+      }
+      .svi4-tabs {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 4px;
+        background: rgba(var(--svi-bg-rgb), 0.75);
+        border: 1px solid rgba(var(--svi-white-rgb), 0.08);
+        border-radius: 12px;
+        padding: 4px;
+      }
+      .svi4-tab {
+        border: none;
+        background: transparent;
+        color: var(--svi-text-dim);
+        font-size: 13px;
+        font-weight: 600;
+        padding: 8px 0;
+        border-radius: 9px;
+        cursor: pointer;
+        transition: all 0.15s ease;
+      }
+      .svi4-tab:hover { color: var(--svi-text-strong); }
+      .svi4-tab.active {
+        background: var(--svi-fg);
+        color: var(--svi-text-strong);
+      }
+      .svi4-cards {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 8px;
+      }
+      .svi4-card {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 4px;
+        padding: 12px 6px 10px;
+        background: rgba(var(--svi-bg-rgb), 0.55);
+        border: 1px solid rgba(var(--svi-white-rgb), 0.10);
+        border-radius: 12px;
+        cursor: pointer;
+        transition: all 0.15s ease;
+        min-width: 0;
+      }
+      .svi4-card:hover {
+        border-color: rgba(var(--svi-fg-rgb), 0.5);
+      }
+      .svi4-card-icon {
+        font-size: 20px;
+        line-height: 1;
+      }
+      .svi4-card-name {
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--svi-text-strong);
+      }
+      .svi4-card-state {
+        font-size: 10px;
+        color: var(--svi-text-dim);
+        text-align: center;
+      }
+      .svi4-card.st-on {
+        border-color: rgba(var(--svi-success-rgb), 0.55);
+        background: rgba(var(--svi-success-rgb), 0.10);
+      }
+      .svi4-card.st-on .svi4-card-state { color: var(--svi-success-bright); }
+      .svi4-card.st-off {
+        border-color: rgba(var(--svi-warn-rgb), 0.55);
+        background: rgba(var(--svi-warn-rgb), 0.08);
+      }
+      .svi4-card.st-off .svi4-card-state { color: var(--svi-title); }
+      /* 停用态: 胶囊折叠为单枚电源徽标 */
+      .svi-off-badge {
+        display: none;
+        align-items: center;
+        gap: 5px;
+        padding: 5px 11px;
+        border-radius: 999px;
+        border: 1px solid rgba(var(--svi-warn-rgb), 0.55);
+        background: rgba(var(--svi-warn-rgb), 0.15);
+        color: var(--svi-title);
+        font-size: 11px;
+        cursor: pointer;
+        box-shadow: 0 6px 18px rgba(var(--svi-black-rgb), 0.45);
+      }
+      .svi-capsule-root.svi-site-off .svi-trigger-pill,
+      .svi-capsule-root.svi-site-off .svi-panel-card {
+        display: none !important;
+      }
+      .svi-capsule-root.svi-site-off .svi-off-badge {
+        display: inline-flex;
+      }
+
+      /* ==========================================
+         v4.1 字体覆盖与文字描边 (CSS 变量由 updateFontCss 注入;
+         白名单选择器避开 svg 与代码块, 不使用 filter)
+         ========================================== */
+      html.svi-font-on :is(body, button, input, select, label, h1, h2, h3, h4, h5, h6, p, span, a, li, td, th, dd, dt, figcaption, blockquote, section, article, header, footer, nav, aside):not(svg):not(svg *):not(code):not(pre):not(kbd):not(samp):not(code *):not(pre *):not(kbd *):not(samp *):not(monospace *):not(tt *) {
+        font-family: var(--svi-font-family) !important;
+      }
+      html.svi-stroke-on :is(h1, h2, h3, h4, h5, h6, p, span, a, li, td, th, dd, dt, figcaption, blockquote, label, button):not(svg):not(svg *):not(code):not(pre):not(kbd):not(samp):not(code *):not(pre *):not(kbd *):not(samp *) {
+        -webkit-text-stroke: var(--svi-text-stroke, 0px);
+      }
+    
     :root { color-scheme: dark; }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
-      background: var(--svi-bg);
+      background: var(--svi-bg-deep);
       color: var(--svi-text-strong);
       font: var(--svi-fs-lg)/var(--svi-lh) system-ui, "Segoe UI", "Microsoft YaHei", sans-serif;
-      padding: var(--svi-gap) calc(var(--svi-gap) * 2);
     }
-    header { display: flex; align-items: baseline; gap: var(--svi-gap-sm); padding: var(--svi-gap) 0; border-bottom: var(--svi-border-w) solid var(--svi-border); }
-    header h1 { font-size: var(--svi-fs-lg); color: var(--svi-title); font-weight: 600; }
-    header .ver { color: var(--svi-text-dim); font-size: var(--svi-fs-sm); }
-    main { padding: var(--svi-gap) 0; color: var(--svi-fg); }
-    .svi-note { border: var(--svi-border-w) solid var(--svi-border); border-radius: var(--svi-r); padding: var(--svi-gap-sm); margin-top: var(--svi-gap); color: var(--svi-text-dim); font-size: var(--svi-fs-sm); }
+    header {
+      position: sticky; top: 0; z-index: 5;
+      display: flex; align-items: baseline; gap: var(--svi-gap-sm);
+      padding: var(--svi-gap) calc(var(--svi-gap) * 2);
+      background: var(--svi-bg);
+      border-bottom: var(--svi-border-w) solid var(--svi-border);
+    }
+    header h1 { font-size: 1.05rem; font-weight: 600; color: var(--svi-title); }
+    header .ver { font-size: var(--svi-fs-sm); color: var(--svi-text-dim); }
+    header .spacer { margin-left: auto; }
+    #status { font-size: var(--svi-fs-sm); color: var(--svi-text-dim); }
+    #status.ok { color: var(--svi-success-bright); }
+    #status.err { color: var(--svi-error-bright); }
+    /* 分组卡（SviControls.collapsible）在宽屏下并排，窄屏自动回落单列 */
+    main {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+      gap: var(--svi-gap);
+      align-items: start;
+      max-width: 1240px;
+      margin: 0 auto;
+      padding: var(--svi-gap) calc(var(--svi-gap) * 2) calc(var(--svi-gap) * 3);
+    }
+    @media (max-width: 820px) { main { grid-template-columns: 1fr; } }
+    .svi-note {
+      max-width: 1240px;
+      margin: 0 auto var(--svi-gap);
+      padding: 0 calc(var(--svi-gap) * 2);
+      color: var(--svi-text-dim);
+      font-size: var(--svi-fs-sm);
+      line-height: 1.6;
+    }
   </style>
 </head>
 <body>
   <header>
     <h1>智能反色 · 设置</h1>
     <span class="ver" id="ver"></span>
+    <span class="spacer"></span>
+    <span id="status">读取中…</span>
   </header>
-  <main id="svi-options-root">
-    <!-- v6.4 重建层在此挂载全部设置区块 (12 个区块, 与内嵌面板同源控件库与 token) -->
-  </main>
+  <main id="svi-options-root"></main>
   <div class="svi-note">
-    本页与用户脚本内嵌面板、扩展弹窗共用同一份设计 token(构建时注入)与同一套控件库。
-    设置项与偏好键与内嵌面板完全一致 —— 任一处修改, 另一处刷新即见。
+    本页与用户脚本内嵌面板、扩展弹窗共用同一份设计 token、同一套控件库与同一份控件样式（均由构建时注入）。
+    设置项与偏好键与内嵌面板完全一致，落盘到同一份 <code>svi:prefs</code>；
+    任一处修改，另一处刷新页面后即见。
   </div>
+  <!-- 均为扩展设置页自有脚本（不进 manifest content_scripts；顺序不可调换：
+       schema 提供设置项清单 → 控件库提供渲染工厂 → options.js 组装页面） -->
+  <script src="settings-schema.js"></script>
+  <script src="ui-controls.js"></script>
   <script src="options.js"></script>
 </body>
 </html>

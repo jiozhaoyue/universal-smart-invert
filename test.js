@@ -4854,6 +4854,202 @@ setTimeout(() => {
 })();
 
 // ============================================================
+// v6.4 R1b 单测 (设置项清单三向无缺失 + options 页与内容脚本的存储协议同构)
+// 契约来源: .trellis/tasks/09-25-v6-ui-rebuild/prd.md R4 / implement.md 阶段 R1b 的 AC ①②③
+// ============================================================
+(function () {
+  const fs = require('fs');
+  const path = require('path');
+  const ROOT = __dirname;
+  const src = fs.readFileSync(path.join(ROOT, 'universal-smart-invert.user.js'), 'utf8');
+  const optSrc = fs.readFileSync(path.join(ROOT, 'scripts/extension-src/options.js'), 'utf8');
+
+  // ---- 0. 真源抽取（与 scripts/build-extension.js 用同一条抽块规则）----
+  const blockM = /\/\* v6\.4-SETTINGS-SCHEMA-START \*\/([\s\S]*?)\/\* v6\.4-SETTINGS-SCHEMA-END \*\//.exec(src);
+  assert.ok(blockM, 'R1b: 用户脚本里必须有 v6.4-SETTINGS-SCHEMA-START/END 块');
+  const SCHEMA = new Function(blockM[1] + '\nreturn SVI_SETTINGS_SCHEMA;')();
+  const dpM = /const DEFAULT_PREFS = (\{[\s\S]*?\n  \});/.exec(src);
+  assert.ok(dpM, 'R1b: 必须能定位 DEFAULT_PREFS');
+  const DEFAULTS = new Function('return (' + dpM[1] + ')')();
+
+  const schemaKeys = [];
+  for (const g of SCHEMA) for (const it of g.items) schemaKeys.push(it.key);
+
+  const getPath = (obj, p) => {
+    let c = obj;
+    for (const k of String(p).split('.')) { if (c == null || typeof c !== 'object') return undefined; c = c[k]; }
+    return c;
+  };
+  // 默认值的**叶子路径**（对象继续展开；数组与空对象按叶子算 —— 空对象如 siteOverrides 本身就是一个键）
+  const leaves = (o, p, out) => {
+    const ks = Object.keys(o);
+    if (!ks.length) { if (p) out.push(p); return out; }
+    for (const k of ks) {
+      const v = o[k];
+      const np = p ? p + '.' + k : k;
+      if (v && typeof v === 'object' && !Array.isArray(v)) leaves(v, np, out); else out.push(np);
+    }
+    return out;
+  };
+
+  // ---- 例外表: DEFAULT_PREFS 里**刻意不上**设置页的键 ----
+  //   每个键都必须写清**为什么不该有 options 项**（不许笼统写「纯 UI 态」）；
+  //   表本身也受断言约束: 已上 options 的、或已不存在的键留在表里会让测试变红（防表腐化）。
+  const EXCEPTIONS = {
+    // (a) 面板自身的形态与开合态 —— 设置页是全页标签, 没有「面板停靠 / 窗口位置」这回事
+    enabled: 'DEFAULT_PREFS 里的死键: 全仓无任何读取点（站点电源实际由 siteProfile.enabled / runtime.siteActive 承载）, 保留只为不改既有存储形状',
+    settingsOpen: '设置面板的开合态（UI 态, 非用户偏好）',
+    advancedOpen: '设置面板高级区的展开态（UI 态）',
+    'pos.x': '设置面板窗口位置（拖拽写入的 UI 态）',
+    'pos.y': '设置面板窗口位置（拖拽写入的 UI 态）',
+    'pos.edge': '设置面板停靠边（拖拽写入的 UI 态）',
+    settingsLayout: '设置面板布局: 居中 / 靠左 / 靠右 —— 面板自身的形态, 设置页是全页标签无此概念',
+    settingsWidth: '设置面板停靠态宽度 —— 同上, 面板自身形态',
+    // (b) 数据容器 —— 由交互（Alt+点击 / 站点三态）或导出导入写, 不是「一个控件对应一个值」
+    siteOverrides: '站点级覆盖表: 由站点三态循环 / 弹窗「清除本站覆盖」读写, 不是标量设置项',
+    manualOverrides: '手动结论表: 由 Alt+点击 一次生效写入（数据, 非设置项）',
+    'actions.hide.scope': 'hide 动作的作用域（session / rule）: 由 Alt+Shift+点击 的三态循环写入, 没有独立控件',
+    // (c) 引擎内部阈值 / 预算 —— 刻意不上 UI（改坏会让判定失准, 且面板从 v4 起就没给过入口）
+    statsEnabled: '引擎侧本地统计开关（无 UI; 面板的数据区块只做导出/导入）',
+    bgExcludeSelectors: '背景替换排除选择器（无 UI; 由规则包 / 备份导入写入的载体字段）',
+    storeBackend: '存储后端（无 UI; 由 Store.detectBackend 自动探测 sync → local 链）',
+    eagerScanBudget: '启动扫描预算（引擎常量, 无 UI）',
+    localFirstDecide: '本地优先判定总开关（v4.6 引擎行为开关, 无 UI）',
+    calibrateMinSamples: '整图判定自校准的最小样本数（引擎阈值, 无 UI）',
+    falseInvertRate: '误反占比阈值（引擎阈值, 无 UI）',
+    flashWindowRatio: '转场白闪门阈值（引擎阈值, 无 UI）',
+    animDecodeBudgetMs: '动图谱分析毫秒预算（引擎预算, 无 UI）',
+    animRecheckMs: '动图结论复议间隔（引擎预算, 无 UI）',
+    maskSettleTimeoutMs: '单元素摘罩超时兜底（引擎预算, 无 UI）',
+    siteMinSeen: '本站「已知会反色」门的最少样本数（引擎阈值, 无 UI）',
+    // (d) 派生值 —— 真源在别的键上, 自身只是兼容旧版本的镜像
+    flashGuard: '由 flashGuardLevel 派生出的兼容旧值（面板注释写明「派生值（旧版本可读）」）',
+    // (e) 面板**有** UI, 但那是自建 DOM 而非控件库工厂 —— 抽出器抽不到, 本轮也不硬凑
+    //     （色卡列表 / 规则列表编辑器需要新控件; 属 R2「面板 12 区块重建」的同一批工作,
+    //      届时与面板一起换成 SviControls 工厂并同时进 schema）
+    shieldColors: '面板有 UI（buildShieldSection 自建色卡列表 + 取色器添加）, 需新控件类型; R2 重建时一并进 schema',
+    elementRules: '面板有 UI（元素规则列表编辑器）, 需新控件类型（结构化列表增删）; R2 重建时一并进 schema',
+    bgReplace: '面板的 UI 是**站点级三态**按钮「背景:开/关」（写 siteOverrides）; 此键是全局默认, 面板无独立行',
+  };
+
+  // 「相关」判定: 等价、或互为祖先/后代（默认值是叶子、面板引用可能落在内部节点上, 如 pos / shieldColors）
+  const related = (a, b) => a === b || a.indexOf(b + '.') === 0 || b.indexOf(a + '.') === 0;
+  const onOptions = (k) => schemaKeys.some((s) => related(k, s));
+  const inTable = (k) => Object.keys(EXCEPTIONS).some((e) => related(k, e));
+
+  // ---- 1. AC① 每个 schema 键都必须在 DEFAULT_PREFS 里取得到值（含点号路径）----
+  {
+    const missing = schemaKeys.filter((k) => getPath(DEFAULTS, k) === undefined);
+    assert.deepStrictEqual(missing, [],
+      'R1b: schema 的键必须在 DEFAULT_PREFS 里存在（点号路径逐段走）, 缺失 ' + JSON.stringify(missing));
+    // 键不得重复（重复 = 同一项渲染两次）
+    assert.strictEqual(new Set(schemaKeys).size, schemaKeys.length, 'R1b: schema 里不得有重复键');
+  }
+
+  // ---- 2. AC② 默认值每个叶子: 要么被 schema 覆盖（自身或祖先）, 要么在例外表里逐条写明理由 ----
+  {
+    const defaultLeaves = leaves(DEFAULTS, '', []);
+    const uncovered = defaultLeaves.filter((k) => !onOptions(k));
+    const unlisted = uncovered.filter((k) => !inTable(k));
+    assert.deepStrictEqual(unlisted, [],
+      'R1b: 未被 schema 覆盖的默认值键必须在例外表里写明理由, 未登记 ' + JSON.stringify(unlisted));
+    const stale = Object.keys(EXCEPTIONS).filter((k) => getPath(DEFAULTS, k) === undefined || onOptions(k));
+    assert.deepStrictEqual(stale, [],
+      'R1b: 例外表里有键已上 options（应删）或已不存在于 DEFAULT_PREFS, 实测 ' + JSON.stringify(stale));
+    for (const k of Object.keys(EXCEPTIONS)) {
+      assert.ok(String(EXCEPTIONS[k]).length >= 12, 'R1b: 例外 ' + k + ' 的理由过于笼统, 必须写清为什么不该有界面');
+    }
+  }
+
+  // ---- 3. AC③ schema 键面 ⟷ 面板键面 双向核对（防「面板有、options 没有」与「options 有、面板没有」）----
+  {
+    const clsM = /class UIController \{([\s\S]*?)\n  \}\n/.exec(src);
+    assert.ok(clsM, 'R1b: 必须能定位 UIController 类体');
+    const roots = new Set(Object.keys(DEFAULTS));
+    const panelKeys = new Set();
+    for (const hit of clsM[1].matchAll(/\bstate\.([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)/g)) {
+      if (!roots.has(hit[1].split('.')[0])) continue;   // 剔除 state.className / state.textContent 类噪声
+      // 归一到「在 DEFAULT_PREFS 里存在的最深前缀」: state.shieldColors.push → shieldColors
+      const segs = hit[1].split('.');
+      let p = segs[0];
+      for (let i = 1; i < segs.length; i++) {
+        if (getPath(DEFAULTS, p + '.' + segs[i]) === undefined) break;
+        p = p + '.' + segs[i];
+      }
+      panelKeys.add(p);
+    }
+    assert.ok(panelKeys.size >= 90, 'R1b: 面板键面抽取结果过少（' + panelKeys.size + '）, 抽取规则可能已失效');
+    const notOnPanel = schemaKeys.filter((k) => ![...panelKeys].some((p) => related(k, p)));
+    assert.deepStrictEqual(notOnPanel, [],
+      'R1b: schema 的键必须在面板里也有落点（否则 options 会造出面板没有的设置项）, 实测 ' + JSON.stringify(notOnPanel));
+    const notOnOptions = [...panelKeys].filter((k) => !onOptions(k) && !inTable(k));
+    assert.deepStrictEqual(notOnOptions, [],
+      'R1b: 面板引用的键必须在 schema 或例外表里（防面板新增项而 options 漏项）, 实测 ' + JSON.stringify(notOnOptions));
+  }
+
+  // ---- 4. kind → 控件工厂 的映射必须完整（schema 新增一种 kind, options 必须跟得上）----
+  {
+    const kindM = /const KINDS = \{([\s\S]*?)\n  \};/.exec(optSrc);
+    assert.ok(kindM, 'R1b: options.js 里必须有 KINDS 映射表');
+    const kinds = new Set([...kindM[1].matchAll(/^\s{4}([a-zA-Z]+)\(item\)/gm)].map((m) => m[1]));
+    const used = [...new Set(SCHEMA.flatMap((g) => g.items.map((it) => it.kind)))];
+    const unimplemented = used.filter((k) => !kinds.has(k));
+    assert.deepStrictEqual(unimplemented, [],
+      'R1b: schema 用到的 kind 必须在 options.js 的 KINDS 里有实现, 缺失 ' + JSON.stringify(unimplemented));
+    // 控件工厂必须真的存在（避免 kind 映射到一个拼错的工厂名, 运行期才炸）
+    const { SviControls } = svi;
+    for (const kind of used) {
+      const body = new RegExp('^\\s{4}' + kind + '\\(item\\) \\{([\\s\\S]*?)\\n    \\},', 'm').exec(kindM[1]);
+      assert.ok(body, 'R1b: 取不到 kind ' + kind + ' 的实现体');
+      const callM = /C\.([a-zA-Z]+)\(/.exec(body[1]);
+      assert.ok(callM, 'R1b: kind ' + kind + ' 必须通过 C.<工厂> 构造');
+      assert.strictEqual(typeof SviControls[callM[1]], 'function',
+        'R1b: kind ' + kind + ' 指向的控件工厂不存在: SviControls.' + callM[1]);
+    }
+  }
+
+  // ---- 5. options 页与内容脚本的**存储协议同构**（两处各写一份协议, 靠这组断言防漂移）----
+  {
+    const grab = (re, what) => { const m = re.exec(optSrc); assert.ok(m, 'R1b: options.js 里必须能取到 ' + what); return m[1]; };
+    assert.strictEqual(grab(/const PREFIX = '([^']+)';/, 'PREFIX'),
+      /const SVI_PREFIX = '([^']+)';/.exec(src)[1],
+      'R1b: options 页的存储前缀必须与内容脚本 SVI_PREFIX 一致');
+    assert.strictEqual(Number(grab(/const CHUNK_SIZE = (\d+);/, 'CHUNK_SIZE')), svi.Store.CHUNK_SIZE,
+      'R1b: options 页的分片预算必须与 Store.CHUNK_SIZE 一致（不一致会让大值读取拼不出来）');
+    assert.strictEqual(grab(/const LOGICAL = '([^']+)';/, 'LOGICAL'), 'prefs',
+      'R1b: options 页写的逻辑键必须就是内容脚本写的那个（Store.set(\'prefs\', …)）');
+    assert.ok(/Store\.set\('prefs'/.test(src), 'R1b: 内容脚本必须仍然把偏好写在逻辑键 prefs 上');
+    const savePrefsDebounce = Number(/function savePrefs\(\) \{[\s\S]*?setTimeout\(flushPrefsNow, (\d+)\)/.exec(src)[1]);
+    assert.strictEqual(Number(grab(/const DEBOUNCE_MS = (\d+);/, 'DEBOUNCE_MS')), savePrefsDebounce,
+      'R1b: options 页的写入防抖应与内容脚本 savePrefs 同值');
+
+    // 分片规则**行为**同构: 抽出 options.js 的 chunkRaw, 与 Store.chunkRaw 逐片比对
+    const chunkBody = grab(/function chunkRaw\(raw\) \{([\s\S]*?)\n  \}/, 'chunkRaw');
+    const optChunkRaw = new Function('CHUNK_SIZE', 'return function chunkRaw(raw) {' + chunkBody + '\n  };')(svi.Store.CHUNK_SIZE);
+    const samples = [
+      'a'.repeat(10),
+      'x'.repeat(6999),                        // 恰好不到一片
+      'x'.repeat(7000),                        // 恰好一片
+      'x'.repeat(7001),                        // 跨片
+      '中'.repeat(3000),                       // 3 字节字符: 按字节预算切片
+      '😀'.repeat(2000),                       // 4 字节 / 代理对: 不许把一对拆开
+      'ab😀中'.repeat(1500),                    // 混合
+      JSON.stringify({ siteBlacklist: ['中'.repeat(500)], note: '😀' }),
+    ];
+    for (const s of samples) {
+      assert.deepStrictEqual(optChunkRaw(s), svi.Store.chunkRaw(s),
+        'R1b: 分片规则必须与 Store.chunkRaw 逐片一致（样本长度 ' + s.length + '）');
+    }
+    // 拼回去必须还是原串（切片本身不得丢字符）
+    for (const s of samples) assert.strictEqual(svi.Store.chunkRaw(s).join(''), s, 'R1b: 分片拼接必须无损');
+  }
+
+  console.log('✓ v6.4 R1b 单测 passed: ' + SCHEMA.length + ' 组 / ' + schemaKeys.length + ' 项 三向核对无缺失'
+    + ' + 例外表 ' + Object.keys(EXCEPTIONS).length + ' 条逐条写明理由'
+    + ' + kind→控件工厂映射完整 + 存储协议(前缀/逻辑键/分片预算/防抖/切片规则)与内容脚本同构');
+})();
+
+// ============================================================
 // v6.5 单测 (CRX3 结构校验 + 密钥纪律)
 // 契约来源: .trellis/tasks/09-25-v6-ext-engineering/prd.md R7 / R8
 // ============================================================

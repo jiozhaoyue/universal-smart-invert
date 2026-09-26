@@ -5,6 +5,12 @@
  * Reads universal-smart-invert.user.js and emits:
  *   - extension/content.js    = prelude (EXT_MODE + GM shims) + core body (metadata stripped)
  *   - extension/manifest.json = MV3 manifest with name/version/description synced from the header
+ *   - extension/popup.*, options.*    = copied from scripts/extension-src/, with the design token
+ *                                       block injected into every HTML (v6.4)
+ *   - extension/ui-controls.js        = SviControls library block (v6.4 R1a)
+ *   - extension/settings-schema.js    = settings schema + DEFAULT_PREFS + light colour cards (v6.4 R1a/R1b)
+ *   - extension/options.html 额外注入整份面板 CSS（去掉 token 块，v6.4 R1b）——
+ *     它整页都由 SviControls 搭出来，控件样式只能有一个实现点。
  *
  * Prelude contract (extension form of the userscript):
  *   - EXT_MODE lives in the prelude's wrapper scope: the core reads it via
@@ -222,6 +228,22 @@ function main() {
     tokenLines = m[1].trim().split(String.fromCharCode(10)).length;
     return m[1];
   })();
+  // v6.4 R1b: 设置页（options）还要**整份面板 CSS** —— 它渲染的是同一套 `SviControls`
+  //   控件（`.svi-modal-*` / `.svi-chip` / `.svi-msg` 等），控件样式只能有一个实现点。
+  //   页面内面板的 CSS 就是那个点，故同样在构建期抽块注入 options.html 的
+  //   `/* SVI_PANEL_CSS_INJECT */` 占位，而不是在扩展页里手写第二套控件样式。
+  //   注入的是**去掉 token 块**的版本：token 已由上面的占位单独注入，避免同页定义两次。
+  //   （test.js 的零字面量断言会把 options.html 里 token 块之外的 #hex / rgba() 全部揪出来，
+  //   抽块后的面板 CSS 必须保持零字面量 —— 面板 CSS 本身已经全部走 var(--svi-*)。）
+  const panelCss = (() => {
+    const m = /const css = `([\s\S]*?)`;/.exec(source);
+    if (!m) fail('panel CSS template (const css = `...`) not found in userscript');
+    const stripped = m[1].replace(/\/\* v6\.4-TOKENS-START \*\/[\s\S]*?\/\* v6\.4-TOKENS-END \*\//,
+      '/* 设计 token 由上方 SVI_TOKEN_INJECT 占位注入，此处不再重复定义 */');
+    if (stripped === m[1]) fail('panel CSS 里没找到 v6.4-TOKENS 块 —— 抽块前请先确认锚点还在');
+    return stripped;
+  })();
+
   const HTML_FILES = ['popup.html', 'popup.js', 'options.html', 'options.js'];
   const popupSrcDir = path.join(__dirname, 'extension-src');
   for (const f of HTML_FILES) {
@@ -234,8 +256,69 @@ function main() {
       }
       out = out.replace('/* SVI_TOKEN_INJECT */', tokenBlock.trim());
     }
+    // 面板 CSS 占位只在需要的页面出现: options 必须有（它整页都由控件库搭出来）；
+    // popup 是 320px 宽的紧凑自绘页，不消费它，故不强制。
+    if (out.indexOf('/* SVI_PANEL_CSS_INJECT */') >= 0) {
+      out = out.replace('/* SVI_PANEL_CSS_INJECT */', panelCss);
+    } else if (f === 'options.html') {
+      fail('options.html is missing the /* SVI_PANEL_CSS_INJECT */ placeholder — 控件样式必须注入, 不得手写第二套');
+    }
     fs.writeFileSync(path.join(OUT_DIR, f), out, 'utf8');
   }
+
+  // v6.4 R1: 控件库与设置项 schema 同样是「真源在用户脚本、构建时抽出」——
+  //   `v6.4-CONTROLS-START/END`（SviControls 控件库，块内零外部依赖，抽到扩展页即可直接用）
+  //   与 `v6.4-SETTINGS-SCHEMA-START/END`（设置项单一真源，供 options 页渲染）。
+  //   两者**缺标记即构建失败**，防止有人手写第二份控件库 / 第二份设置清单把同源机制绕过去。
+  const extractBlock = (what, startMark, endMark) => {
+    const re = new RegExp('/\\* ' + startMark + ' \\*/([\\s\\S]*?)/\\* ' + endMark + ' \\*/');
+    const m = re.exec(source);
+    if (!m) fail(what + ' block not found in userscript (expected ' + startMark + '/' + endMark + ')');
+    return m[1].trim();
+  };
+  const controlsBlock = extractBlock('SviControls', 'v6\\.4-CONTROLS-START', 'v6\\.4-CONTROLS-END');
+  const schemaBlock = extractBlock('settings schema', 'v6\\.4-SETTINGS-SCHEMA-START', 'v6\\.4-SETTINGS-SCHEMA-END');
+
+  // 默认值表：DEFAULT_PREFS 是纯字面量（构建期已核对块内无外部标识符），故可直接求值。
+  const dpMatch = /const DEFAULT_PREFS = (\{[\s\S]*?\n  \});/.exec(source);
+  if (!dpMatch) fail('DEFAULT_PREFS not found in userscript');
+  let defaults = null;
+  try {
+    defaults = new Function('return (' + dpMatch[1] + ')')();
+  } catch (e) {
+    fail('DEFAULT_PREFS 求值失败（它应保持纯字面量，不许引用外部标识符）: ' + e.message);
+  }
+
+  // 浅色色卡清单（`chipsOf` 控件的候选项）：同样是**构建期抽出**而非在扩展页里另写一份。
+  //   options 页只拿得到色卡的 id/名称/颜色，判定用的 rgb 三元组留在脚本侧（页面不需要）。
+  const cpMatch = /const IMG_COLOR_PRESETS = (\[[\s\S]*?\n  \]);/.exec(source);
+  if (!cpMatch) fail('IMG_COLOR_PRESETS not found in userscript');
+  let colorPresets = null;
+  try {
+    colorPresets = new Function('return (' + cpMatch[1] + ')')();
+  } catch (e) {
+    fail('IMG_COLOR_PRESETS 求值失败（它应保持纯字面量）: ' + e.message);
+  }
+  if (!colorPresets.length || colorPresets.some((c) => !c || !c.id || !c.color)) {
+    fail('IMG_COLOR_PRESETS 形状不符（每项需要 id / name / color）');
+  }
+
+  const schemaOut = 'settings-schema.js';
+  const controlsOut = 'ui-controls.js';
+  fs.writeFileSync(path.join(OUT_DIR, controlsOut),
+    '// 构建产物：由 scripts/build-extension.js 从用户脚本的 v6.4-CONTROLS 块抽出，勿手改。\n'
+    + '// 供扩展设置页（options）复用同一套控件库 —— 单文件真源约束下的同源机制。\n'
+    + '(function () {\n  \'use strict\';\n' + controlsBlock + '\n  window.SviControls = SviControls;\n})();\n', 'utf8');
+  fs.writeFileSync(path.join(OUT_DIR, schemaOut),
+    '// 构建产物：由 scripts/build-extension.js 从用户脚本的 v6.4-SETTINGS-SCHEMA 块抽出，勿手改。\n'
+    + '\'use strict\';\n' + schemaBlock
+    + '\nconst SVI_DEFAULTS = ' + JSON.stringify(defaults, null, 2) + ';\n'
+    // chipsOf 的候选项（浅色色卡）：id / 名称 / 色值，末尾不带 rgb 判定数据
+    + 'const SVI_IMG_COLOR_PRESETS = '
+    + JSON.stringify(colorPresets.map((c) => ({ id: c.id, name: c.name, color: c.color })), null, 2) + ';\n'
+    + 'window.SVI_SETTINGS_SCHEMA = SVI_SETTINGS_SCHEMA;\n'
+    + 'window.SVI_DEFAULTS = SVI_DEFAULTS;\n'
+    + 'window.SVI_IMG_COLOR_PRESETS = SVI_IMG_COLOR_PRESETS;\n', 'utf8');
 
   // Icons are produced by scripts/gen-icons.js; verify presence so the
   // manifest never references missing files in an unpacked load.
@@ -255,6 +338,12 @@ function main() {
   console.log('[build-extension] wrote      : ' + path.relative(ROOT, MANIFEST_OUT));
   console.log('[build-extension] wrote      : ' + HTML_FILES.map((f) => path.relative(ROOT, path.join(OUT_DIR, f))).join(', '));
   console.log('[build-extension] tokens     : 已注入 popup/options (' + tokenLines + ' 行, 真源 = userscript 的 v6.4-TOKENS 块)');
+  console.log('[build-extension] panel CSS  : 已注入 options.html ('
+    + panelCss.trim().split(String.fromCharCode(10)).length + ' 行面板 CSS, 去掉 token 块) —— 控件样式单一实现点');
+  console.log('[build-extension] blocks     : 已抽出 ' + controlsOut + ' (' + controlsBlock.split('\n').length
+    + ' 行控件库) + ' + schemaOut + ' (' + schemaBlock.split('\n').length
+    + ' 行 schema, ' + (defaults ? Object.keys(defaults).length : 0) + ' 个默认值'
+    + ', ' + colorPresets.length + ' 张浅色色卡)');
   console.log('[build-extension] icons OK   : ' + ICON_SIZES.map((s) => `icon${s}.png`).join(', '));
   console.log('[build-extension] prelude    : EXT_MODE=true (wrapper scope) + GM_xmlhttpRequest/GM.xmlHttpRequest/GM_addStyle shims; Store uses chrome.storage natively');
 }

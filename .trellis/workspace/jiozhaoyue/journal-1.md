@@ -502,3 +502,78 @@ Session summary was not supplied.
 ### Status
 
 [OK] **Completed**
+
+## Session 17: v6-6 归档 + v6-5 收口（阶段 2/3/4）+ v6-4 阶段 R0/R1a（交接点）
+<!-- trellis-session: v=2 fp=handoff-20260926 -->
+
+**Date**: 2026-09-26
+**Task**: v6 批次收口与 UI 重建（父任务 `09-25-v6-partial-and-ui`，4/6 子任务已归档）
+**Branch**: `main`
+
+### Summary
+
+本轮把 v6-5（扩展工程）做到**除密钥外全交付**：新增真扩展 E2E 套件 `test-extension.js`（7 场景），
+覆盖「侧载真扩展 / 隔离世界 / 反色真实生效 / `chrome.storage` 持久化 / `document_start` 首屏时序 /
+popup 端到端」，并把门禁从四绿扩为**五绿**（含 CI 与发版流水线接线）。v6-4 侧完成 popup 三页签重建
+（阶段 R0）与 options 的**真源+构建**（阶段 R1a）。v6-6 已归档。
+
+**会话被用户中止于 v6-4 R1b 之前**（原话：「停止，将状态全写trelli文档交接」），
+故本轮以「一致可提交点 + 完整交接文档」收尾，不留在途半成品。
+
+### Main Changes
+
+- **v6-5 阶段 2/3**：`test-extension.js`（CDP `Extensions.loadUnpacked` 侧载真实构建产物；
+  Chrome/Edge 137+ 已忽略 `--load-extension`）+ 首屏时序探针 + popup 三条协议往返与内部页降级
+- **v6-5 阶段 4**：`release.yml` 加装 Chrome 与「必跑」真扩展 E2E；R10 文档复核（已满足）
+- **v6-4 R0**：popup 重建为三页签（反色 / 本站 / 更多），保持既有三条协议只做加法、
+  新增第四条 `svi-site-reset` + `uiController.resetSiteOverrides()`
+- **v6-4 R1a**：设置项**单一真源**（`SVI_SETTINGS_SCHEMA`，13 组 / 89 项，从面板行定义机械抽取）+
+  **控件库抽块**（`v6.4-CONTROLS-START/END`，355 行、自包含、20 词汇）+ 构建产物
+  `extension/ui-controls.js` / `settings-schema.js`（含 105 键默认值注入）
+- **v6-6 归档**（父任务进度 3/6 → 4/6）
+- 侧线取证（非仓库工作）：用户 Edge 配置「看似丢失」的根因定位见下「线下事项」
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `da3c58b` | test(v6.5): 真扩展 E2E 套件 —— 侧载真扩展 + 隔离世界 + chrome.storage 持久化（门禁四绿扩五绿） |
+| `2b5c431` | test(v6.5): 真扩展 E2E 阶段 3 —— document_start 首屏时序 + popup 端到端（7 场景全绿） |
+| `8cdfe49` | ci(v6.5): 阶段 4 收口 —— 发版流水线加装真扩展 E2E + 五绿 + R10 文档复核 |
+| `f58f7d9` | chore(task): archive 09-26-v6-form-fidelity |
+| `af60def` | feat(v6.4): 阶段 R0 完成 —— 扩展 popup 重建为三页签（反色 / 本站 / 更多） |
+
+### Testing
+
+- 五绿：`node --check` ✓ / `test.js` ✓ / `test-browser.js` **33 场景** ✓ / `test-extension.js` **7 场景** ✓ / build+pack ✓
+- 负向对照（证明断言咬得住）：无浏览器 → 打印「未验证」退出 0；内容脚本被改坏 → 套件变红退出 1
+- 首屏时序实测：首访 4 张图各裸奔 10 帧（≈130ms，与 README §13「首访不遮」一致，不断言）；
+  复访**零白闪**（判定 61~79ms 内完成），断言成立
+- `test.js` 存在**既有偶发**（`test.js:820` Store 分片定时竞态，约 1/5 概率变红，重跑即绿）——
+  已开独立任务卡（task_6addf5ba）
+
+### Status
+
+[!] **进行中（交接点）**：v6-5 除 R2 全交付；v6-4 在 R1a 完成处停止
+
+### Next Steps
+
+1. **v6-4 从 R1b 接着做**：`options.html/js` 渲染（13 组 / 89 项，用抽出的 `SviControls`）、
+   清单单测（schema ⟷ `DEFAULT_PREFS` ⟷ 面板引用键面，含例外表）、E2E 双向同步、评审门 G2
+   —— 逐条步骤写在 `.trellis/tasks/09-25-v6-ui-rebuild/implement.md` 的「R1b」小节
+2. 之后 R2（内嵌面板 12 区块重建，**不得放宽 bench 断言**）→ R3（emoji 清零，27 种 / 317 实例）→ R4（文档 + 四绿）
+3. **v6-5 R2（需用户单独确认）**：生成签名密钥、公钥写入 `manifest.json` 的 `key`
+4. 未决观察：复访时门判可武装但 `pendingMask.armed` 实测 false（零白闪靠引导快而非遮罩生效）—— 机制层待查
+
+### 线下事项（非仓库工作，供后续排查复用）
+
+用户报「Edge 主配置没了 / 退出登录 / 扩展开关全没」。只读取证结论：
+- **数据没丢**：`C:\Users\caocaobi\AppData\Local\Microsoft\Edge\User Data\Default` 完好
+  （书签 197 条与 9/18 自动备份逐项一致、Cookies 1.9MB、History 46MB、Login Data、会话标签在场、已登录元数据在）
+- **真实事件**：15:18:29 Edge 浏览器进程崩溃（minidump 解析：`0xC000001D` 非法指令，故障地址在
+  `msedge.dll`；进程内有 A-Volute **Nahimic** 注入 DLL）；15:19:17 重启、15:38:03 再崩重启
+  —— **复发性**（8/21 起 8 个转储，故障点始终在 Edge 自身模块）
+- **本仓无关**：bench 用 Google Chrome + 仓内 `.chrome-test-profile`；Edge 探针用临时配置
+- **误判来源**：本机 Windows 账号名 `Admin` 而用户目录是 `C:\Users\caocaobi`（账号改名，`C:\Users\Admin` 是空壳）
+- 已把关键文件备份到 `D:\Edge-backup-20260926`（278 MB）；建议停用 Edgemin（自启的内存压缩工具）后观察崩溃是否停止
+- 仍未确认：用户所说「正常打开是空的」那个窗口到底落在哪个配置/通道（需在窗口内看 `edge://version`）
