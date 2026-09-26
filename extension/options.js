@@ -263,6 +263,48 @@
           writeVal(item, next);
         });
     },
+    // 颜色列表 (色卡增删): 存储是字符串数组, 控件交回**整份新列表**
+    colorList(item) {
+      return C.colorList(item.label, item.hint,
+        () => { const v = readVal(item); return Array.isArray(v) ? v : []; },
+        (next) => writeVal(item, next),
+        { addLabel: item.addLabel || '添加', emptyText: item.emptyText || '暂无颜色' });
+    },
+    // 结构化列表增删 (元素级规则): 字段与只读行的形状全部来自 schema, 页面只提供「行为」
+    listEditor(item) {
+      const readList = () => { const v = readVal(item); return Array.isArray(v) ? v.slice() : []; };
+      const normAction = (a) => (a === 'protect' ? 'protect' : (a === 'recolor' ? 'recolor' : 'invert'));
+      return C.listEditor(item.label, item.hint, {
+        formCls: item.formCls || 'svi-er-form',
+        addLabel: item.addLabel, removeLabel: item.removeLabel, emptyText: item.emptyText,
+        getList: readList,
+        fields: item.fields, display: item.display,
+        onAdd: (values) => {
+          const selector = String(values.selector || '').trim();
+          if (!selector) { setStatus('请先填写元素特征', 'err'); return false; }
+          // 设置页不与任何站点绑定 → 只建「全部站点」规则; 本站维度的规则在页面内面板上添加
+          const pattern = '*';
+          const action = normAction(values.action);
+          const list = readList();
+          if (list.some((r) => r && r.pattern === pattern && r.selector === selector && r.action === action)) {
+            setStatus('该元素规则已存在', 'err');
+            return false;
+          }
+          // 刻意不写 id: 它由内容脚本的 normalizeElementRules **单点派生** (hash32 pattern|selector|action),
+          // 在扩展页再写一份 hash32 就是第二个实现点。落盘后再由内容脚本归一即可。
+          list.push({ pattern, selector, action, note: '', createdAt: Date.now() });
+          writeVal(item, list.slice(-200));
+          setStatus('元素规则已添加', 'ok');
+          return true;
+        },
+        onRemove: (idx) => {
+          const list = readList();
+          list.splice(idx, 1);
+          writeVal(item, list);
+          setStatus('元素规则已删除', 'ok');
+        },
+      });
+    },
   };
 
   let synced = [];

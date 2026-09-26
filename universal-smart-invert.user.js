@@ -4218,6 +4218,35 @@
         font-weight: 700;
         padding: 0 2px;
       }
+      /* v6.4 R2b: 内联图标 (SviControls.icon) —— 唯一图标实现点, 颜色随 currentColor */
+      .svi-icon {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        line-height: 0;
+        vertical-align: -1px;
+      }
+      /* v6.4 R2b: 颜色列表 (SviControls.colorList) 的色卡容器与色点 */
+      .svi-color-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+      .svi-color-dot {
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        border: 1px solid rgba(var(--svi-white-rgb), 0.3);
+        display: inline-block;
+        background: transparent;
+      }
+      /* v6.4 R2b: 结构化列表 (SviControls.listEditor) 的列表容器 */
+      .svi-list-box {
+        display: flex;
+        flex-direction: column;
+        gap: 0;
+        min-width: 0;
+      }
       .svi-btn-row-actions {
         display: flex;
         gap: 6px;
@@ -12104,6 +12133,10 @@
       { key: "saturate", kind: "slider", label: "色彩饱和度", hint: "消除或保留颜色", min: 0, max: 2, step: 0.01, unit: "" },
       { key: "hueRotate", kind: "slider", label: "色相旋转", hint: "校正颜色谱系", min: 0, max: 360, step: 1, unit: "°" },
       { key: "transitionMs", kind: "slider", label: "过渡动画时长", hint: "设为 0 毫秒即直接切换无渐变", min: 0, max: 1000, step: 10, unit: "毫秒" },
+      // bgReplace 的全局默认**刻意仍未上设置页**: 面板侧它的唯一入口是胶囊按钮「背景:开/关」三态
+      //   (写的是站点覆盖, 不是这个全局键), 而 R1b 的双向断言要求「schema 的键必须在面板里也有落点」
+      //   —— 上设置页就等于造出一个面板没有的设置项。这属既有 IA 缺口（全局默认只能靠导入改）,
+      //   不属 R2 的面板重建范围, 如实登记在 test.js 例外表里, 不在此处擅自扩范围。
     ] },
     { id: "image", title: "图片反色", items: [
       // 面板**没有**给这个总开关建行：它由面板头部的胶囊快捷按钮「图片:开/关」承载（同一处 state 写点）。
@@ -12162,10 +12195,29 @@
       { key: "sceneDelta", kind: "slider", label: "场景跃变门", hint: "相邻帧白占比变化超过此值才算\"场景变了\"（提前切换的依据）", min: 0.1, max: 0.9, step: 0.05, unit: "" },
       { key: "flashWhiteSkip", kind: "toggle", label: "转场白闪不切换", hint: "转场常有一两帧接近纯白：窗口内白帧占比不足时判为闪光，不触发反色（避免一闪一闪）" },
     ] },
-    // 原色屏蔽: （本区块无可直接承载的偏好项）
+    // 原色屏蔽 (v6.4 R2b 补): shieldColors 此前是面板**手写 DOM** 的色卡列表控件,
+    //   机械抽取抓不到它 → R2b 起由 SviControls.colorList 承载, 两处同一份形状声明。
+    { id: "shield", title: "原色屏蔽", items: [
+      { key: "shieldColors", kind: "colorList", label: "屏蔽列表", hint: "加入列表的原始颜色永不转换，背景替换与图片反色都会跳过，适合保护品牌色与警示色", addLabel: "添加屏蔽颜色", emptyText: "暂无屏蔽颜色" },
+    ] },
     { id: "site", title: "本站设置", items: [
       { key: "rulesEnabled", kind: "toggle", label: "内置种子规则", hint: "内置站点规则库作为兜底层，学习规则优先于它" },
       { key: "learnHits", kind: "slider", label: "学习命中阈值", hint: "同一特征手动修正达此次数后自动生效", min: 2, max: 6, step: 1, unit: "次" },
+      // 元素级规则 (v6.4 R2b 补): 面板侧由 SviControls.listEditor 承载 (此前是手写表单 + 手写列表刷新)。
+      //   **作用域差异如实标注**: 面板在本站打开, 故能提供「本站 / 全部站点」两档; 设置页不与任何站点绑定,
+      //   因此这里只给「全部站点」一档 —— 本站维度的规则请在页面内面板上、于目标站点添加。
+      { key: "elementRules", kind: "listEditor", label: "元素级规则", hint: "按元素特征强制反色或保持原色，优先于自动判断与学习规则（本站维度的规则请在目标站点的页面内面板里添加）",
+        addLabel: "添加规则", removeLabel: "删除", emptyText: "暂无元素规则 —— 添加后对匹配元素强制生效。",
+        fields: [
+          { key: "scope", kind: "select", value: "all", options: [["all", "全部站点"]] },
+          { key: "action", kind: "select", value: "invert", options: [["invert", "强制反色"], ["protect", "保持原色"], ["recolor", "局部改色"]] },
+          { key: "selector", kind: "text", placeholder: "元素特征，如 .ad-banner" },
+        ],
+        display: [
+          { key: "pattern", cls: "svi-learned-action", alias: { "*": "全部站点" } },
+          { key: "selector", cls: "svi-learned-stem", titleKey: "selector" },
+          { key: "action", cls: "svi-learned-action", alias: { invert: "反色", protect: "保护", recolor: "改色" }, aliasCls: { protect: "protect", recolor: "recolor" } },
+        ] },
     ] },
     { id: "lists", title: "站点名单", items: [
       { key: "siteMode", kind: "select", label: "站点管理模式", hint: "控制脚本在哪些站点生效", options: [["all", "全部启用", "所有站点默认启用。"], ["blacklist", "黑名单", "名单内站点停用，其余站点启用。"], ["whitelist", "白名单", "仅名单内站点启用，其余停用。"]] },
@@ -12571,7 +12623,172 @@
       const row = this.h('div', { class: 'svi-modal-row' }, this.labelBox(label, hint), input);
       return { row: row, sync: setVal };
     },
+
+    // ---- v6.4 R2b 新增控件 (面板「自建 DOM」区收口所需的两类 + 图标) ----
+
+    // 内联图标: 一律 SVG + fill:currentColor (颜色随 token / 继承色走, 不用 emoji 字形)。
+    //   模板是**冻结的静态常量** (无插值 → 不构成注入面); 图标名不认识时返回 null,
+    //   由调用点决定降级 (绝不抛异常 —— 一个缺失的图标不该让整块面板构建失败)。
+    icon(name, title, cls) {
+      const svg = this.ICONS ? this.ICONS[name] : null;
+      if (!svg) return null;
+      const span = this.h('span', { class: cls ? 'svi-icon ' + cls : 'svi-icon', title: title || '' });
+      // innerHTML 只吃**冻结的静态常量**(无插值) —— 有插值的 DOM 构建一律走 DOM API (XSS 纪律)
+      span.innerHTML = svg;
+      return span;
+    },
+
+    // 颜色列表 (色卡增删): getList → ['#rrggbb', ...]; onChange(nextArray) 收**整份新列表**。
+    //   为什么收整份而不是「增一项 / 删一项」: 两个动作都落在同一个存储键上, 且都要触发一次重扫,
+    //   让调用点自己决定怎么持久化 (面板 = savePrefs + 重扫; 设置页 = 写 prefs)。
+    //   控件只负责「把列表画出来 + 把用户的新列表交回去」(与其余行工厂同一种 {row, sync} 契约)。
+    colorList(label, hint, getList, onChange, opts) {
+      const o = opts || {};
+      const addLabel = o.addLabel || '添加';
+      const emptyText = o.emptyText || '暂无颜色';
+      const read = () => {
+        const v = getList();
+        return Array.isArray(v) ? v.slice() : [];
+      };
+      const box = this.h('div', { class: 'svi-color-list' });
+      const native = this.h('input', { type: 'color', class: 'svi-color-input-native', value: o.value || '#ffffff' });
+      const addBtn = this.h('button', { class: 'svi-mini-btn', text: addLabel });
+      const form = this.h('div', { class: 'svi-color-picker-row' },
+        this.h('div', { class: 'svi-color-picker-label' }, this.h('span', { text: addLabel })),
+        this.h('div', { class: 'svi-color-picker-controls' }, native, addBtn));
+      const row = this.h('div', { class: 'svi-modal-row' }, this.labelBox(label, hint), box, form);
+
+      const render = () => {
+        box.textContent = '';
+        const cur = read();
+        if (!cur.length) {
+          box.appendChild(this.h('div', { class: 'svi-hint-line', text: emptyText }));
+          return;
+        }
+        cur.forEach((hex, idx) => {
+          // 色值来自存储层 → 走 DOM 属性赋值而非 innerHTML (XSS 加固, 与面板原实现同一条纪律)
+          const hexText = String(hex);
+          const dot = this.h('span', { class: 'svi-color-dot' });
+          if (/^#[0-9a-fA-F]{6}$/.test(hexText)) dot.style.backgroundColor = hexText;
+          const x = this.icon('close', '移除', 'svi-shield-x') || this.h('span', { class: 'svi-shield-x', text: '移除' });
+          x.addEventListener('click', () => {
+            const next = read();
+            next.splice(idx, 1);
+            onChange(next);
+            render();
+          });
+          box.appendChild(this.h('span', { class: 'svi-shield-chip' }, dot, this.h('span', { text: hexText }), x));
+        });
+      };
+
+      addBtn.addEventListener('click', () => {
+        const hex = String(native.value || '');
+        const cur = read();
+        // 原生取色器只会给出 #rrggbb; 这里仍校验一次, 因为它同时是「存储里那份」的形状门
+        if (!/^#[0-9a-fA-F]{6}$/.test(hex) || cur.indexOf(hex) >= 0) return;
+        onChange(cur.concat(hex));
+        render();
+      });
+
+      render();
+      return { row: row, sync: render };
+    },
+
+    // 结构化列表编辑器 (增 / 删): 面板「元素级规则」与设置页共用同一 DOM 语义。
+    //   spec = {
+    //     getList: () => [...],
+    //     fields:  [{ key, kind: 'text'|'select', placeholder, options: [[值, 文案]], value }],
+    //              —— 数组顺序**就是** DOM 顺序 (添加表单里第一个下拉在最左)
+    //     display: [{ key, cls, alias: { 值: 文案 }, aliasCls: { 值: 类名 }, titleKey }],
+    //              —— 只读行的分段 (按顺序左边到右边)
+    //     addLabel / removeLabel / emptyText / formCls,
+    //     onAdd: (values) => boolean,   // 返回 false = 拒绝 (调用点自己给用户反馈, 控件不猜文案)
+    //     onRemove: (index) => void,
+    //   }
+    //   行内容一律 textContent (选择器/键来自存储层, XSS 加固)。
+    listEditor(label, hint, spec) {
+      const s = spec || {};
+      const fields = Array.isArray(s.fields) ? s.fields : [];
+      const display = Array.isArray(s.display) ? s.display : [];
+      const read = () => {
+        const v = s.getList ? s.getList() : [];
+        return Array.isArray(v) ? v : [];
+      };
+      const box = this.h('div', { class: 'svi-list-box' });
+      const inputs = {};
+      const inputOrder = [];
+      const form = this.h('div', { class: s.formCls || 'svi-er-form' });
+      for (const f of fields) {
+        if (f.kind === 'select') {
+          const sel = this.h('select', { class: 'svi-modal-select' });
+          const opts = Array.isArray(f.options) ? f.options : [];
+          for (const opt of opts) sel.appendChild(this.h('option', { value: opt[0], text: opt[1] }));
+          sel.value = f.value != null ? String(f.value) : String((opts[0] || [''])[0]);
+          inputs[f.key] = sel;
+          inputOrder.push(f.key);
+          form.appendChild(sel);
+        } else {
+          const inp = this.h('input', { type: 'text', class: 'svi-modal-text', placeholder: f.placeholder || '' });
+          inputs[f.key] = inp;
+          inputOrder.push(f.key);
+          form.appendChild(inp);
+        }
+      }
+      const addBtn = this.h('button', { class: 'svi-mini-btn', text: s.addLabel || '添加' });
+      form.appendChild(addBtn);
+      const row = this.h('div', { class: 'svi-modal-row' }, this.labelBox(label, hint), box, form);
+
+      const render = () => {
+        box.textContent = '';
+        const cur = read();
+        if (!cur.length) {
+          box.appendChild(this.h('div', { class: 'svi-hint-line', text: s.emptyText || '暂无条目' }));
+          return;
+        }
+        cur.forEach((item, idx) => {
+          const line = this.h('div', { class: 'svi-learned-row' });
+          for (const seg of display) {
+            const raw = String((item && item[seg.key] != null) ? item[seg.key] : '');
+            const aliasMap = seg.alias || {};
+            const clsMap = seg.aliasCls || {};
+            const text = Object.prototype.hasOwnProperty.call(aliasMap, raw) ? aliasMap[raw] : raw;
+            const el = this.h('span', { class: (seg.cls || '') + (clsMap[raw] ? ' ' + clsMap[raw] : ''), text: text });
+            if (seg.titleKey) el.title = String((item && item[seg.titleKey]) || '');
+            line.appendChild(el);
+          }
+          const del = this.h('button', { class: 'svi-mini-btn danger', text: s.removeLabel || '删除' });
+          del.addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            if (s.onRemove) s.onRemove(idx);
+            render();
+          });
+          line.appendChild(del);
+          box.appendChild(line);
+        });
+      };
+
+      addBtn.addEventListener('click', () => {
+        const values = {};
+        for (const key of inputOrder) values[key] = String(inputs[key].value == null ? '' : inputs[key].value);
+        if (s.onAdd && s.onAdd(values) === false) return; // 被调用点拒绝: 保留输入, 让它自己解释原因
+        // 只清空文本输入 (下拉保留上次选择 —— 连续添加多条同类规则时不用重选)
+        for (const key of inputOrder) {
+          if (String(inputs[key].tagName || '').toLowerCase() === 'input') inputs[key].value = '';
+        }
+        render();
+      });
+
+      render();
+      return { row: row, sync: render };
+    },
   };
+
+  // 图标路径表 (静态常量; 与 icon() 同源, 是「不留 emoji 字形」的唯一图标实现点)。
+  //   fill:currentColor —— 颜色随所在元素的 color 走, 故按钮态/危险态自动跟随 token。
+  SviControls.ICONS = Object.freeze({
+    close: '<svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true"><path d="M3.5 3.5 L12.5 12.5 M12.5 3.5 L3.5 12.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" fill="none"/></svg>',
+    trash: '<svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true"><path d="M3 4.5 H13 M6.5 4.5 V3 H9.5 V4.5 M4.5 4.5 L5.2 13 H10.8 L11.5 4.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>',
+  });
   /* v6.4-CONTROLS-END */
 
   // v6.4 R2a: 旧 `ui` 转发垫片已删除 —— 面板 118 处调用点直接走 SviControls.*,
@@ -12609,8 +12826,9 @@
       this.blacklistTa = null;
       this.whitelistTa = null;
       this.ruleSummary = null;
-      this.shieldChipsBox = null;
-      this.shieldColorInput = null;
+      // v6.4 R2b: 两处「自建 DOM」区块改为控件自持 —— 面板只留句柄, 刷新即 ctl.sync()
+      this.shieldCtl = null;
+      this.elementRulesCtl = null;
       this.statsGrid = null;
       this.rowSyncs = [];           // 全部组件行的 sync 函数 (syncAll 统一刷新)
       // v4.0: 站点电源 / 页签 / 能力卡片
@@ -14614,67 +14832,63 @@
       this.siteRowSyncs.push(siteFxRow.sync);
 
       // —— 元素级规则 (v3.3: 站点黑白名单之外的精细控制) ——
-      const erTitle = document.createElement('div');
-      erTitle.className = 'svi-sub-title';
-      erTitle.textContent = '元素级规则';
-      sec.appendChild(erTitle);
-      sec.appendChild(SviControls.infoLine('按元素特征强制反色或保持原色，优先于自动判断与学习规则。').row);
-
-      this.elementRulesBox = document.createElement('div');
-      sec.appendChild(this.elementRulesBox);
-
-      const erForm = document.createElement('div');
-      erForm.className = 'svi-er-form';
-      const mkOpt = (v, label) => {
-        const o = document.createElement('option');
-        o.value = v;
-        o.textContent = label;
-        return o;
-      };
-      const erScopeSel = document.createElement('select');
-      erScopeSel.className = 'svi-modal-select';
-      erScopeSel.appendChild(mkOpt('site', '本站'));
-      erScopeSel.appendChild(mkOpt('all', '全部站点'));
-      const erActionSel = document.createElement('select');
-      erActionSel.className = 'svi-modal-select';
-      erActionSel.appendChild(mkOpt('invert', '强制反色'));
-      erActionSel.appendChild(mkOpt('protect', '保持原色'));
-      erActionSel.appendChild(mkOpt('recolor', '局部改色'));
-      const erInput = document.createElement('input');
-      erInput.type = 'text';
-      erInput.className = 'svi-modal-text';
-      erInput.placeholder = '元素特征，如 .ad-banner';
-      const erAdd = document.createElement('button');
-      erAdd.className = 'svi-mini-btn';
-      erAdd.textContent = '添加规则';
-      erAdd.addEventListener('click', () => {
-        const selector = erInput.value.trim();
-        if (!selector) {
-          showToast('请先填写元素特征');
-          return;
-        }
-        const pattern = erScopeSel.value === 'all' ? '*' : host;
-        const action = erActionSel.value === 'protect' ? 'protect' : (erActionSel.value === 'recolor' ? 'recolor' : 'invert');
-        const list = Array.isArray(state.elementRules) ? state.elementRules : (state.elementRules = []);
-        if (list.some((r) => r && r.pattern === pattern && r.selector === selector && r.action === action)) {
-          showToast('该元素规则已存在');
-          return;
-        }
-        list.push({ id: hash32(pattern + '|' + selector + '|' + action + '|' + Date.now()), pattern, selector, action, note: '', createdAt: Date.now() });
-        if (list.length > 200) state.elementRules = list.slice(-200);
-        savePrefs();
-        erInput.value = '';
-        this.refreshElementRules();
-        window.__svi_image_engine?.clearCacheAndRescan();
-        try {
-          const bgEng = window.__svi && window.__svi.engines ? window.__svi.engines.bgImage : null;
-          if (bgEng && typeof bgEng.sweep === 'function') bgEng.sweep();
-        } catch (e) { /* ignore */ }
-        showToast('元素规则已添加');
-      });
-      erForm.append(erScopeSel, erActionSel, erInput, erAdd);
-      sec.appendChild(erForm);
-      this.refreshElementRules();
+      //   v6.4 R2b: 由 listEditor 控件承载 (此前是本区块手写的表单 + 列表刷新两处 DOM)。
+      //   形状 (字段顺序 / 文案 / 只读行的分段) 与设置页**同一份声明**, 行为由调用点注入。
+      const erCtl = SviControls.listEditor(
+        '元素级规则',
+        '按元素特征强制反色或保持原色，优先于自动判断与学习规则',
+        {
+          formCls: 'svi-er-form',
+          addLabel: '添加规则',
+          emptyText: '暂无元素规则 —— 添加后对匹配元素强制生效。',
+          getList: () => (Array.isArray(state.elementRules) ? state.elementRules : []),
+          fields: [
+            { key: 'scope', kind: 'select', value: 'site', options: [['site', '本站'], ['all', '全部站点']] },
+            { key: 'action', kind: 'select', value: 'invert', options: [['invert', '强制反色'], ['protect', '保持原色'], ['recolor', '局部改色']] },
+            { key: 'selector', kind: 'text', placeholder: '元素特征，如 .ad-banner' },
+          ],
+          display: [
+            { key: 'pattern', cls: 'svi-learned-action', alias: { '*': '全部站点' } },
+            { key: 'selector', cls: 'svi-learned-stem', titleKey: 'selector' },
+            { key: 'action', cls: 'svi-learned-action', alias: { invert: '反色', protect: '保护', recolor: '改色' }, aliasCls: { protect: 'protect', recolor: 'recolor' } },
+          ],
+          onAdd: (values) => {
+            const selector = String(values.selector || '').trim();
+            if (!selector) {
+              showToast('请先填写元素特征');
+              return false;
+            }
+            const pattern = values.scope === 'all' ? '*' : host;
+            const action = values.action === 'protect' ? 'protect' : (values.action === 'recolor' ? 'recolor' : 'invert');
+            const list = Array.isArray(state.elementRules) ? state.elementRules : (state.elementRules = []);
+            if (list.some((r) => r && r.pattern === pattern && r.selector === selector && r.action === action)) {
+              showToast('该元素规则已存在');
+              return false;
+            }
+            list.push({ id: hash32(pattern + '|' + selector + '|' + action + '|' + Date.now()), pattern, selector, action, note: '', createdAt: Date.now() });
+            if (list.length > 200) state.elementRules = list.slice(-200);
+            savePrefs();
+            window.__svi_image_engine?.clearCacheAndRescan();
+            try {
+              const bgEng = window.__svi && window.__svi.engines ? window.__svi.engines.bgImage : null;
+              if (bgEng && typeof bgEng.sweep === 'function') bgEng.sweep();
+            } catch (e) { /* ignore */ }
+            showToast('元素规则已添加');
+            return true;
+          },
+          onRemove: (idx) => {
+            const list = Array.isArray(state.elementRules) ? state.elementRules : [];
+            list.splice(idx, 1);
+            savePrefs();
+            window.__svi_image_engine?.clearCacheAndRescan();
+            try {
+              const bgEng = window.__svi && window.__svi.engines ? window.__svi.engines.bgImage : null;
+              if (bgEng && typeof bgEng.sweep === 'function') bgEng.sweep();
+            } catch (e) { /* ignore */ }
+          },
+        });
+      this.elementRulesCtl = erCtl;
+      sec.appendChild(erCtl.row);
 
       // —— 学习规则 (v3.3 由独立「智能」区块并入; v4.0 站点名单移入全局页签) ——
       const learnTitle = document.createElement('div');
@@ -14730,48 +14944,10 @@
       return sec;
     }
 
-    // v3.3: 元素级规则列表刷新 (选择器来自存储层 → 一律 textContent, XSS 加固)
+    // v3.3 元素级规则列表刷新 —— v6.4 R2b 起由 listEditor 控件自持渲染
+    //   (只读行的分段形状与设置页同一份声明; 存储层字符串一律 textContent, XSS 加固不变)
     refreshElementRules() {
-      if (!this.elementRulesBox) return;
-      this.elementRulesBox.textContent = '';
-      const rules = Array.isArray(state.elementRules) ? state.elementRules : [];
-      if (!rules.length) {
-        const empty = document.createElement('div');
-        empty.className = 'svi-hint-line';
-        empty.textContent = '暂无元素规则 —— 添加后对匹配元素强制生效。';
-        this.elementRulesBox.appendChild(empty);
-        return;
-      }
-      rules.forEach((rule, idx) => {
-        const row = document.createElement('div');
-        row.className = 'svi-learned-row';
-        const scope = document.createElement('span');
-        scope.className = 'svi-learned-action';
-        scope.textContent = rule.pattern === '*' ? '全部站点' : rule.pattern;
-        const stem = document.createElement('span');
-        stem.className = 'svi-learned-stem';
-        stem.textContent = rule.selector; // 存储层字符串 → textContent (XSS 加固)
-        stem.title = rule.selector;
-        const action = document.createElement('span');
-        action.className = 'svi-learned-action' + (rule.action === 'protect' ? ' protect' : (rule.action === 'recolor' ? ' recolor' : ''));
-        action.textContent = rule.action === 'protect' ? '保护' : (rule.action === 'recolor' ? '改色' : '反色');
-        const del = document.createElement('button');
-        del.className = 'svi-mini-btn danger';
-        del.textContent = '删除';
-        del.addEventListener('click', (e) => {
-          e.stopPropagation();
-          state.elementRules.splice(idx, 1);
-          savePrefs();
-          this.refreshElementRules();
-          window.__svi_image_engine?.clearCacheAndRescan();
-          try {
-            const bgEng = window.__svi && window.__svi.engines ? window.__svi.engines.bgImage : null;
-            if (bgEng && typeof bgEng.sweep === 'function') bgEng.sweep();
-          } catch (err) { /* ignore */ }
-        });
-        row.append(scope, stem, action, del);
-        this.elementRulesBox.appendChild(row);
-      });
+      if (this.elementRulesCtl) this.elementRulesCtl.sync();
     }
 
     refreshSiteSection() {
@@ -14804,94 +14980,27 @@
     // v2.0 模态区块: 🛡️ 原色屏蔽 (经 ui 组件库重建)
     // ==========================================
     buildShieldSection() {
-      const sec = document.createElement('div');
-      sec.className = 'svi-modal-section';
-      sec.id = 'svi-sec-shield';
+      const sec = SviControls.section('原色屏蔽', '这些颜色永不转换', 'svi-sec-shield');
 
-      const secTitle = document.createElement('div');
-      secTitle.className = 'svi-sec-title';
-      secTitle.innerHTML = `<span>🛡️ 原色屏蔽</span>`;
-      sec.appendChild(secTitle);
-
-      const hint = SviControls.infoLine('加入屏蔽列表的原始颜色永不转换，背景替换与图片反色都会跳过，适合保护品牌色与警示色。');
-      sec.appendChild(hint.row);
-
-      this.shieldChipsBox = document.createElement('div');
-      this.shieldChipsBox.style.cssText = 'display: flex; flex-wrap: wrap; gap: 6px;';
-      sec.appendChild(this.shieldChipsBox);
-
-      const addRow = document.createElement('div');
-      addRow.className = 'svi-color-picker-row';
-
-      const addLabel = document.createElement('div');
-      addLabel.className = 'svi-color-picker-label';
-      addLabel.innerHTML = `<span>➕ 添加屏蔽颜色</span>`;
-
-      const addControls = document.createElement('div');
-      addControls.className = 'svi-color-picker-controls';
-
-      this.shieldColorInput = document.createElement('input');
-      this.shieldColorInput.type = 'color';
-      this.shieldColorInput.className = 'svi-color-input-native';
-      this.shieldColorInput.value = '#ffffff';
-      this.shieldColorInput.style.cssText = 'width: 40px; height: 26px; padding: 0; border: 1px solid rgba(255,255,255,0.2); border-radius: 6px; background: transparent; cursor: pointer;';
-
-      const addBtn = document.createElement('button');
-      addBtn.className = 'svi-mini-btn';
-      addBtn.textContent = '添加';
-      addBtn.addEventListener('click', () => {
-        const hex = this.shieldColorInput.value;
-        if (!state.shieldColors.includes(hex)) {
-          state.shieldColors.push(hex);
+      // v6.4 R2b: 由 colorList 控件承载 (此前是本区块手写的色卡列表 + 添加表单两处 DOM)。
+      //   增 / 删都交回**整份新列表**, 调用点负责落盘与重扫 —— 控件不碰存储。
+      const ctl = SviControls.colorList(
+        '屏蔽列表',
+        '加入列表的原始颜色永不转换，背景替换与图片反色都会跳过，适合保护品牌色与警示色',
+        () => (Array.isArray(state.shieldColors) ? state.shieldColors : []),
+        (next) => {
+          state.shieldColors = next;
           savePrefs();
-          this.refreshShieldSection();
           window.__svi_image_engine?.clearCacheAndRescan();
-        }
-      });
-
-      addControls.append(this.shieldColorInput, addBtn);
-      addRow.append(addLabel, addControls);
-      sec.appendChild(addRow);
-
-      this.refreshShieldSection();
-      return sec;
+        },
+        { addLabel: '添加屏蔽颜色', emptyText: '暂无屏蔽颜色' });
+      this.shieldCtl = ctl;
+      sec.add(ctl);
+      return sec.el;
     }
 
     refreshShieldSection() {
-      if (!this.shieldChipsBox) return;
-      this.shieldChipsBox.textContent = '';
-      if (!state.shieldColors.length) {
-        const empty = document.createElement('span');
-        empty.className = 'svi-hint-line';
-        empty.textContent = '暂无屏蔽颜色';
-        this.shieldChipsBox.appendChild(empty);
-        return;
-      }
-      state.shieldColors.forEach((hex, idx) => {
-        const chip = document.createElement('span');
-        chip.className = 'svi-shield-chip';
-        // DOM 构建而非 innerHTML: 屏蔽色值来自存储层, 必须杜绝任何注入面 (XSS 加固)
-        const hexText = String(hex);
-        const dot = document.createElement('span');
-        dot.style.cssText = 'width:12px;height:12px;border-radius:50%;border:1px solid rgba(0,0,0,0.3);display:inline-block;';
-        if (/^#[0-9a-fA-F]{6}$/.test(hexText)) {
-          dot.style.backgroundColor = hexText;
-        }
-        const label = document.createElement('span');
-        label.textContent = hexText;
-        const removeX = document.createElement('span');
-        removeX.className = 'svi-shield-x';
-        removeX.title = '移除';
-        removeX.textContent = '✕';
-        removeX.addEventListener('click', () => {
-          state.shieldColors.splice(idx, 1);
-          savePrefs();
-          this.refreshShieldSection();
-          window.__svi_image_engine?.clearCacheAndRescan();
-        });
-        chip.append(dot, label, removeX);
-        this.shieldChipsBox.appendChild(chip);
-      });
+      if (this.shieldCtl) this.shieldCtl.sync();
     }
 
     // ==========================================

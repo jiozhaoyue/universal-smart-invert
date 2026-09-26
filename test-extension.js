@@ -482,9 +482,12 @@ function startServer() {
     await P.send('Page.reload');
     const extCtx2 = await pickExtWorld();
     const after = await waitFor(async () => {
-      const v = await P.ev('(() => ({ hover: window.__svi.prefs.hoverRestore, cls: document.documentElement.className }))()', extCtx2.id);
-      return v && v.cls ? v : null;
-    }, BOOT_TIMEOUT_MS, '重载后重新引导完成');
+      // 前置条件必须包含 **Store 已完成远端命名空间装载** —— 只等 htmlClass 是竞态：
+      //   引导期先按默认值渲染出 htmlClass, 之后 Store.init() 才异步把远端 svi:prefs 装进来
+      //   （onRemoteLoaded 里才 `state = loadState()`）。少等这一步会读到默认值, 表现为随机红。
+      const v = await P.ev('(() => ({ hover: window.__svi.prefs.hoverRestore, cls: document.documentElement.className, loaded: !!(window.__svi.Store && window.__svi.Store._remoteLoaded) }))()', extCtx2.id);
+      return v && v.cls && v.loaded ? v : null;
+    }, BOOT_TIMEOUT_MS, '重载后重新引导完成且远端偏好已装载');
     console.log('    重载后: hoverRestore = ' + after.hover + ' | htmlClass = ' + after.cls);
     assert.strictEqual(after.hover, !before.orig, '清掉 localStorage 并重载后，偏好必须仍存活 (chrome.storage 为真源)');
     assert.strictEqual(after.cls.includes('svi-hover-restore'), after.hover === true,
@@ -725,8 +728,26 @@ function startServer() {
     }, BOOT_TIMEOUT_MS, 'options 页渲染完成');
 
     // 7a. 渲染结果与真源逐键比对
+    //   v6.4 R2b: 控件词汇里出现了**复合控件**（colorList 的添加行带 1 个取色器；listEditor 的添加表单
+    //   带 N 个下拉 + M 个文本框）。它们内部的原生元素**不属于**该 kind 自身的控制件，因此全局计数
+    //   必须把「位于某个复合控件行内部」的元素排除掉 —— 否则「下拉数 == select+hour 项数」这条
+    //   会因为复合控件多出几个下拉而失效（而那是好设计导致的，不是回归）。
+    //   排除口径按**真源**判定（复合行的 key 来自 schema），不写死类名。
     const rendered = await O.ev(`(() => {
       const cards = [...document.querySelectorAll('main > .svi-collapsible')];
+      const COMPOSITE = new Set((window.SVI_SETTINGS_SCHEMA || [])
+        .flatMap((g) => g.items)
+        .filter((it) => it.kind === 'colorList' || it.kind === 'listEditor')
+        .map((it) => it.key));
+      const inner = (el) => {
+        let p = el.parentElement;
+        while (p) {
+          if (p.dataset && p.dataset.sviKey && COMPOSITE.has(p.dataset.sviKey)) return true;
+          p = p.parentElement;
+        }
+        return false;
+      };
+      const outer = (sel) => [...document.querySelectorAll(sel)].filter((e) => !inner(e)).length;
       return {
         keys: [...document.querySelectorAll('[data-svi-key]')].map((e) => e.dataset.sviKey),
         groups: cards.map((e) => ({
@@ -734,13 +755,35 @@ function startServer() {
           items: e.querySelectorAll('[data-svi-key]').length,
         })),
         heads: document.querySelectorAll('.svi-collapsible-head').length,
-        checkboxes: document.querySelectorAll('input[type=checkbox]').length,
-        ranges: document.querySelectorAll('input[type=range]').length,
-        numbers: document.querySelectorAll('input[type=number]').length,
-        selects: document.querySelectorAll('select').length,
-        textareas: document.querySelectorAll('textarea').length,
-        colors: document.querySelectorAll('input[type=color]').length,
+        checkboxes: outer('input[type=checkbox]'),
+        ranges: outer('input[type=range]'),
+        numbers: outer('input[type=number]'),
+        selects: outer('select'),
+        textareas: outer('textarea'),
+        colors: outer('input[type=color]'),
         chips: document.querySelectorAll('.svi-color-chip').length,
+        // 复合控件自带件的**真源驱动**核对（比全局计数更严：逐项按 schema 的字段形状比对）
+        composite: (window.SVI_SETTINGS_SCHEMA || []).flatMap((g) => g.items)
+          .filter((it) => it.kind === 'colorList' || it.kind === 'listEditor')
+          .map((it) => {
+            const row = document.querySelector('[data-svi-key="' + it.key + '"]');
+            const fields = it.fields || [];
+            const addBtn = row
+              ? (row.querySelector('.svi-er-form button.svi-mini-btn') || row.querySelector('.svi-color-picker-controls button.svi-mini-btn'))
+              : null;
+            return {
+              key: it.key,
+              kind: it.kind,
+              selects: row ? row.querySelectorAll('select').length : -1,
+              wantSelects: fields.filter((f) => f.kind === 'select').length,
+              texts: row ? row.querySelectorAll('input.svi-modal-text').length : -1,
+              wantTexts: it.kind === 'listEditor' ? fields.filter((f) => f.kind !== 'select').length : 0,
+              colors: row ? row.querySelectorAll('input[type=color]').length : -1,
+              wantColors: it.kind === 'colorList' ? 1 : 0,
+              addLabel: addBtn ? addBtn.textContent : '',
+              wantAddLabel: it.addLabel || '',
+            };
+          }),
         errs: [...document.querySelectorAll('.svi-msg-error')].map((e) => e.textContent),
         area: window.__sviOptions.storageArea(),
         declaredGroups: window.__sviOptions.schemaGroups,
@@ -762,8 +805,19 @@ function startServer() {
     assert.strictEqual(rendered.numbers, kindCount('slider'), '每个滑块都要配一个数值输入框');
     assert.strictEqual(rendered.selects, kindCount('select') + kindCount('hour'), '下拉数必须等于 select + hour 的项数');
     assert.strictEqual(rendered.textareas, kindCount('text'), '多行文本框数必须等于 text 的项数');
-    assert.strictEqual(rendered.colors, kindCount('color'), '取色器数必须等于 color 的项数');
+    assert.strictEqual(rendered.colors, kindCount('color'), '取色器数必须等于 color 的项数（复合控件内部的取色器不计入）');
     assert.strictEqual(rendered.chips, 4, '色卡多选应渲染出 4 张浅色色卡');
+
+    // 7a-2. 复合控件 (colorList / listEditor) 的「自带件」必须与真源声明的字段形状逐项对上
+    //   —— 这比原来的全局计数更严：它按 schema 的 fields 声明核对每个复合控件里到底有几个什么控件。
+    for (const c of rendered.composite) {
+      assert.strictEqual(c.selects, c.wantSelects, c.key + ' 的添加表单下拉数必须等于 schema 声明的字段数');
+      assert.strictEqual(c.texts, c.wantTexts, c.key + ' 的添加表单文本框数必须等于 schema 声明的字段数');
+      assert.strictEqual(c.colors, c.wantColors, c.key + ' 的取色器数必须等于 schema 的声明');
+      assert.strictEqual(c.addLabel, c.wantAddLabel, c.key + ' 的添加按钮文案必须等于 schema 的声明');
+    }
+    assert.ok(rendered.composite.length >= 2, '至少要有 colorList 与 listEditor 各一项落在设置页上');
+    console.log('    复合控件: ' + rendered.composite.map((c) => c.key + '(' + c.kind + ' 下拉' + c.selects + '/文本框' + c.texts + '/取色器' + c.colors + ')').join(' '));
     console.log('    渲染: ' + rendered.groups.length + ' 组 / ' + rendered.keys.length + ' 项'
       + ' | 开关 ' + rendered.checkboxes + ' 滑块 ' + rendered.ranges + ' 下拉 ' + rendered.selects
       + ' 文本框 ' + rendered.textareas + ' 取色器 ' + rendered.colors + ' 色卡 ' + rendered.chips
@@ -817,6 +871,50 @@ function startServer() {
     assert.ok(/已保存/.test(statusText), '落盘后状态行应报告已保存, 实测: ' + JSON.stringify(statusText));
     console.log('    改 maskBlur=' + NEW_BLUR + ' → svi:prefs 已更新 (状态行: ' + statusText + ') ✓');
 
+    // 7d-2. v6.4 R2b 新增的两个**复合控件**必须真的能写（渲染对 ≠ 能用；这条防「画了个壳」）
+    //   色卡列表: 设探针色 → 点「添加屏蔽颜色」; 元素规则: 填选择器 → 点「添加规则」
+    const preShield = Array.isArray(JSON.parse(parked).shieldColors) ? JSON.parse(parked).shieldColors : [];
+    const preRules = Array.isArray(JSON.parse(parked).elementRules) ? JSON.parse(parked).elementRules : [];
+    let PROBE_COLOR = '#123456';
+    for (let i = 0; preShield.indexOf(PROBE_COLOR) >= 0 && i < 16; i++) {
+      PROBE_COLOR = '#' + ((parseInt(PROBE_COLOR.slice(1), 16) + 0x111111) & 0xffffff).toString(16).padStart(6, '0');
+    }
+    assert.strictEqual(preShield.indexOf(PROBE_COLOR), -1, 'fixture 前提: 探针色不得已在既有屏蔽列表里');
+    const PROBE_SEL = '#svi-r2b-probe';
+    const droveComposite = await O.ev(`(() => {
+      const shieldRow = document.querySelector('[data-svi-key="shieldColors"]');
+      const native = shieldRow.querySelector('input[type=color]');
+      native.value = '${PROBE_COLOR}';
+      native.dispatchEvent(new Event('input', { bubbles: true }));
+      shieldRow.querySelector('.svi-color-picker-controls button.svi-mini-btn').click();
+      const listRow = document.querySelector('[data-svi-key="elementRules"]');
+      const form = listRow.querySelector('.svi-er-form');
+      const input = form.querySelector('input.svi-modal-text');
+      input.value = '${PROBE_SEL}';
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      form.querySelector('button.svi-mini-btn').click();
+      return {
+        chips: shieldRow.querySelectorAll('.svi-shield-chip').length,
+        rows: listRow.querySelectorAll('.svi-learned-row').length,
+        formCleared: form.querySelector('input.svi-modal-text').value === '',
+      };
+    })()`);
+    assert.strictEqual(droveComposite.chips, preShield.length + 1, '点「添加屏蔽颜色」应当场多出一张色卡');
+    assert.strictEqual(droveComposite.rows, preRules.length + 1, '点「添加规则」应当场多出一行规则');
+    assert.ok(droveComposite.formCleared, '添加成功后选择器输入框必须被清空（便于连续添加）');
+    let compositeDbg = null;
+    const compositeFlushed = await waitFor(async () => {
+      const raw = await readPrefsRaw();
+      if (!raw) return null;
+      let obj = null; try { obj = JSON.parse(raw); } catch (e) { return null; }
+      compositeDbg = { shield: obj.shieldColors, rules: obj.elementRules };
+      const okColor = Array.isArray(obj.shieldColors) && obj.shieldColors.indexOf(PROBE_COLOR) >= 0;
+      const okRule = Array.isArray(obj.elementRules) && obj.elementRules.some((r) => r && r.selector === PROBE_SEL && r.pattern === '*' && r.action === 'invert');
+      return okColor && okRule ? obj : null;
+    }, 8000, '复合控件的写入落到 svi:prefs').catch(() => null);
+    assert.ok(compositeFlushed, '两个复合控件的写入都必须真的落到存储里; 实测 ' + JSON.stringify(compositeDbg));
+    console.log('    复合控件写入 → svi:prefs: shieldColors +' + PROBE_COLOR + ' · elementRules +' + PROBE_SEL + ' ✓');
+
     // 7e. 内容脚本（新装的页面）读到该值 = 「刷新页面即见」
     P.resetCtxs();
     await P.send('Page.navigate', { url: PAGE_URL });
@@ -829,7 +927,14 @@ function startServer() {
         if (!c) return null;
         const v = await P.ev(`(() => {
           const S = window.__svi;
-          return S && S.prefs ? { blur: S.prefs.maskBlur, backend: S.Store && S.Store.backend } : null;
+          if (!S || !S.prefs) return null;
+          return {
+            blur: S.prefs.maskBlur,
+            backend: S.Store && S.Store.backend,
+            hasShield: Array.isArray(S.prefs.shieldColors) && S.prefs.shieldColors.indexOf('${PROBE_COLOR}') >= 0,
+            hasRule: Array.isArray(S.prefs.elementRules) && S.prefs.elementRules.some((r) => r && r.selector === '${PROBE_SEL}' && r.pattern === '*'),
+            ruleId: (Array.isArray(S.prefs.elementRules) ? S.prefs.elementRules.find((r) => r && r.selector === '${PROBE_SEL}') : null),
+          };
         })()`, c.id);
         seenByPage = v;
         return v && Number(v.blur) === NEW_BLUR ? v.blur : null;
@@ -843,6 +948,13 @@ function startServer() {
     assert.strictEqual(Number(readByPage), NEW_BLUR, '重载后的内容脚本必须读到 options 页写入的值');
     const ctxPage = await pickExtWorld();
     console.log('    内容脚本重载后 prefs.maskBlur = ' + readByPage + ' ✓');
+    // 同上：复合控件的写入也必须被内容脚本吃到（并照常走 normalizeElementRules 归一）
+    assert.ok(seenByPage && seenByPage.hasShield, '内容脚本必须读到 options 写入的屏蔽色');
+    assert.ok(seenByPage && seenByPage.hasRule, '内容脚本必须读到 options 写入的元素规则');
+    assert.ok(seenByPage.ruleId && typeof seenByPage.ruleId.id === 'string' && seenByPage.ruleId.id.length > 0,
+      '内容脚本侧的规则必须已带上由 normalizeElementRules 单点派生的 id');
+    console.log('    内容脚本重载后: 屏蔽色 ' + PROBE_COLOR + ' 在场 · 元素规则 ' + PROBE_SEL
+      + ' 在场 (id=' + seenByPage.ruleId.id + ') ✓');
 
     // 7e. 反向：内容脚本改一项 → options 页重载后读到（双向同步的另一半）
     const NEW_OPACITY = 0.35;
@@ -867,10 +979,12 @@ function startServer() {
     assert.strictEqual(backRead, String(NEW_OPACITY), 'options 页重载后必须读到内容脚本写入的值');
     console.log('    内容脚本写入 maskHoverOpacity=' + NEW_OPACITY + ' → options 重载后已读到 ✓');
 
-    // 收尾: 把这轮改过的两项还原成默认值, 免得影响后续场景（用内容脚本自己的写点, 与产品同一路径）
+    // 收尾: 把这轮改过的项还原成**本轮开始前**的样子, 免得影响后续场景（用内容脚本自己的写点, 与产品同一路径）
     await P.ev(`(async () => {
       window.__svi.prefs.maskBlur = ${Number(DEF.maskBlur)};
       window.__svi.prefs.maskHoverOpacity = ${Number(DEF.maskHoverOpacity)};
+      window.__svi.prefs.shieldColors = ${JSON.stringify(preShield)};
+      window.__svi.prefs.elementRules = ${JSON.stringify(preRules)};
       window.__svi.savePrefs();
       await new Promise((r) => setTimeout(r, 900));
       return true;
@@ -879,7 +993,10 @@ function startServer() {
     const restoredObj = restoredRaw ? JSON.parse(restoredRaw) : {};
     assert.strictEqual(Number(restoredObj.maskBlur), Number(DEF.maskBlur), '收尾必须把 maskBlur 还原成默认值');
     assert.strictEqual(Number(restoredObj.maskHoverOpacity), Number(DEF.maskHoverOpacity), '收尾必须把 maskHoverOpacity 还原成默认值');
-    console.log('    收尾还原: maskBlur=' + restoredObj.maskBlur + ' maskHoverOpacity=' + restoredObj.maskHoverOpacity + ' ✓');
+    assert.deepStrictEqual(restoredObj.shieldColors || [], preShield, '收尾必须把屏蔽色列表还原成进场时的样子');
+    assert.deepStrictEqual(restoredObj.elementRules || [], preRules, '收尾必须把元素规则列表还原成进场时的样子');
+    console.log('    收尾还原: maskBlur=' + restoredObj.maskBlur + ' maskHoverOpacity=' + restoredObj.maskHoverOpacity
+      + ' shieldColors=' + (restoredObj.shieldColors || []).length + ' 项 elementRules=' + (restoredObj.elementRules || []).length + ' 项 ✓');
 
     await B.send('Target.closeTarget', { targetId: optTargetId });   // 关掉之后不再断言（超时坑，见文件头）
 

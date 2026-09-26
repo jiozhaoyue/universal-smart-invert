@@ -4786,7 +4786,8 @@ setTimeout(() => {
       'toggleRow', 'multiSwitch', 'sliderRow', 'selectRow', 'checkRow',
       'chipRow', 'btnRow', 'navButton', 'resetButton',
       'colorPicker', 'shortcutRow', 'collapsible', 'messageBar',
-      'textRow', 'infoLine', 'pickerRow'];
+      'textRow', 'infoLine', 'pickerRow',
+      'icon', 'colorList', 'listEditor'];
     for (let i = 0; i < need.length; i++) {
       assert.strictEqual(typeof SviControls[need[i]], 'function', 'R2: 控件缺失 ' + need[i]);
     }
@@ -4819,13 +4820,30 @@ setTimeout(() => {
     assert.ok(SviControls.resetButton('重置', '', () => {}).row, 'R2: resetButton 返回 {row}');
     assert.ok(SviControls.shortcutRow('快捷键', '', () => 'Alt+I', () => {}).row, 'R2: shortcutRow 返回 {row}');
     assert.ok(SviControls.colorPicker('颜色', '', () => '#fff', () => {}).row, 'R2: colorPicker 返回 {row}');
+
+    // v6.4 R2b 新增三件: 图标 / 颜色列表 / 结构化列表编辑器
+    assert.ok(SviControls.icon('close', '移除'), 'R2b: icon 返回节点');
+    assert.ok(SviControls.icon('close', '移除', 'svi-shield-x'), 'R2b: icon 接受附加 class');
+    assert.strictEqual(SviControls.icon('这个图标不存在'), null,
+      'R2b: 未知图标名必须返回 null 而不是抛异常（一个缺失图标不该炸掉整块面板）');
+    const clCtl = SviControls.colorList('屏蔽列表', '提示', () => ['#ffffff'], () => {}, { addLabel: '添加' });
+    assert.ok(clCtl.row && typeof clCtl.sync === 'function', 'R2b: colorList 返回 {row, sync}');
+    clCtl.sync();
+    const leCtl = SviControls.listEditor('元素级规则', '提示', {
+      getList: () => [],
+      fields: [{ key: 'action', kind: 'select', options: [['invert', '强制反色']] }, { key: 'selector', kind: 'text' }],
+      display: [{ key: 'selector', cls: 'svi-learned-stem' }],
+    });
+    assert.ok(leCtl.row && typeof leCtl.sync === 'function', 'R2b: listEditor 返回 {row, sync}');
+    leCtl.sync();
   }
 
   // ---- 3. 单一实现点: 每个行工厂在整份真源里只允许出现一次定义 ----
   {
     const factories = ['toggleRow', 'sliderRow', 'selectRow', 'chipRow', 'btnRow', 'textRow',
       'infoLine', 'pickerRow', 'checkRow', 'multiSwitch', 'collapsible', 'messageBar',
-      'labelBox', 'section', 'group', 'navButton', 'resetButton', 'colorPicker', 'shortcutRow'];
+      'labelBox', 'section', 'group', 'navButton', 'resetButton', 'colorPicker', 'shortcutRow',
+      'icon', 'colorList', 'listEditor'];
     for (let i = 0; i < factories.length; i++) {
       const re = new RegExp('^\\s{4}' + factories[i] + '\\(', 'gm');
       const defs = (src.match(re) || []).length;
@@ -4925,11 +4943,11 @@ setTimeout(() => {
     siteMinSeen: '本站「已知会反色」门的最少样本数（引擎阈值, 无 UI）',
     // (d) 派生值 —— 真源在别的键上, 自身只是兼容旧版本的镜像
     flashGuard: '由 flashGuardLevel 派生出的兼容旧值（面板注释写明「派生值（旧版本可读）」）',
-    // (e) 面板**有** UI, 但那是自建 DOM 而非控件库工厂 —— 抽出器抽不到, 本轮也不硬凑
-    //     （色卡列表 / 规则列表编辑器需要新控件; 属 R2「面板 12 区块重建」的同一批工作,
-    //      届时与面板一起换成 SviControls 工厂并同时进 schema）
-    shieldColors: '面板有 UI（buildShieldSection 自建色卡列表 + 取色器添加）, 需新控件类型; R2 重建时一并进 schema',
-    elementRules: '面板有 UI（元素规则列表编辑器）, 需新控件类型（结构化列表增删）; R2 重建时一并进 schema',
+    // (e) 曾因「面板用自建 DOM、抽出器抽不到」而登记的 2 条, R2b 已改为 SviControls 工厂并同时进 schema
+    //     （shieldColors → colorList / elementRules → listEditor）。
+    //     bgReplace **仍留在此表**: 面板侧的全局默认没有任何独立行（唯一入口是胶囊按钮「背景:开/关」三态,
+    //     写的是站点覆盖）—— 上设置页就等于造出面板没有的设置项, 违反上面第 3 节的对称断言。
+    //     这是既有 IA 缺口（全局默认只能靠规则包 / 备份导入改）, 不属 UI 重建范围, 如实登记。
     bgReplace: '面板的 UI 是**站点级三态**按钮「背景:开/关」（写 siteOverrides）; 此键是全局默认, 面板无独立行',
   };
 

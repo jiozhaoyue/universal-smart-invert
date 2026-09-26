@@ -435,6 +435,35 @@
         font-weight: 700;
         padding: 0 2px;
       }
+      /* v6.4 R2b: 内联图标 (SviControls.icon) —— 唯一图标实现点, 颜色随 currentColor */
+      .svi-icon {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        line-height: 0;
+        vertical-align: -1px;
+      }
+      /* v6.4 R2b: 颜色列表 (SviControls.colorList) 的色卡容器与色点 */
+      .svi-color-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+      .svi-color-dot {
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        border: 1px solid rgba(var(--svi-white-rgb), 0.3);
+        display: inline-block;
+        background: transparent;
+      }
+      /* v6.4 R2b: 结构化列表 (SviControls.listEditor) 的列表容器 */
+      .svi-list-box {
+        display: flex;
+        flex-direction: column;
+        gap: 0;
+        min-width: 0;
+      }
       .svi-btn-row-actions {
         display: flex;
         gap: 6px;

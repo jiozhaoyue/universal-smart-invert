@@ -13,6 +13,10 @@
       { key: "saturate", kind: "slider", label: "色彩饱和度", hint: "消除或保留颜色", min: 0, max: 2, step: 0.01, unit: "" },
       { key: "hueRotate", kind: "slider", label: "色相旋转", hint: "校正颜色谱系", min: 0, max: 360, step: 1, unit: "°" },
       { key: "transitionMs", kind: "slider", label: "过渡动画时长", hint: "设为 0 毫秒即直接切换无渐变", min: 0, max: 1000, step: 10, unit: "毫秒" },
+      // bgReplace 的全局默认**刻意仍未上设置页**: 面板侧它的唯一入口是胶囊按钮「背景:开/关」三态
+      //   (写的是站点覆盖, 不是这个全局键), 而 R1b 的双向断言要求「schema 的键必须在面板里也有落点」
+      //   —— 上设置页就等于造出一个面板没有的设置项。这属既有 IA 缺口（全局默认只能靠导入改）,
+      //   不属 R2 的面板重建范围, 如实登记在 test.js 例外表里, 不在此处擅自扩范围。
     ] },
     { id: "image", title: "图片反色", items: [
       // 面板**没有**给这个总开关建行：它由面板头部的胶囊快捷按钮「图片:开/关」承载（同一处 state 写点）。
@@ -71,10 +75,29 @@
       { key: "sceneDelta", kind: "slider", label: "场景跃变门", hint: "相邻帧白占比变化超过此值才算\"场景变了\"（提前切换的依据）", min: 0.1, max: 0.9, step: 0.05, unit: "" },
       { key: "flashWhiteSkip", kind: "toggle", label: "转场白闪不切换", hint: "转场常有一两帧接近纯白：窗口内白帧占比不足时判为闪光，不触发反色（避免一闪一闪）" },
     ] },
-    // 原色屏蔽: （本区块无可直接承载的偏好项）
+    // 原色屏蔽 (v6.4 R2b 补): shieldColors 此前是面板**手写 DOM** 的色卡列表控件,
+    //   机械抽取抓不到它 → R2b 起由 SviControls.colorList 承载, 两处同一份形状声明。
+    { id: "shield", title: "原色屏蔽", items: [
+      { key: "shieldColors", kind: "colorList", label: "屏蔽列表", hint: "加入列表的原始颜色永不转换，背景替换与图片反色都会跳过，适合保护品牌色与警示色", addLabel: "添加屏蔽颜色", emptyText: "暂无屏蔽颜色" },
+    ] },
     { id: "site", title: "本站设置", items: [
       { key: "rulesEnabled", kind: "toggle", label: "内置种子规则", hint: "内置站点规则库作为兜底层，学习规则优先于它" },
       { key: "learnHits", kind: "slider", label: "学习命中阈值", hint: "同一特征手动修正达此次数后自动生效", min: 2, max: 6, step: 1, unit: "次" },
+      // 元素级规则 (v6.4 R2b 补): 面板侧由 SviControls.listEditor 承载 (此前是手写表单 + 手写列表刷新)。
+      //   **作用域差异如实标注**: 面板在本站打开, 故能提供「本站 / 全部站点」两档; 设置页不与任何站点绑定,
+      //   因此这里只给「全部站点」一档 —— 本站维度的规则请在页面内面板上、于目标站点添加。
+      { key: "elementRules", kind: "listEditor", label: "元素级规则", hint: "按元素特征强制反色或保持原色，优先于自动判断与学习规则（本站维度的规则请在目标站点的页面内面板里添加）",
+        addLabel: "添加规则", removeLabel: "删除", emptyText: "暂无元素规则 —— 添加后对匹配元素强制生效。",
+        fields: [
+          { key: "scope", kind: "select", value: "all", options: [["all", "全部站点"]] },
+          { key: "action", kind: "select", value: "invert", options: [["invert", "强制反色"], ["protect", "保持原色"], ["recolor", "局部改色"]] },
+          { key: "selector", kind: "text", placeholder: "元素特征，如 .ad-banner" },
+        ],
+        display: [
+          { key: "pattern", cls: "svi-learned-action", alias: { "*": "全部站点" } },
+          { key: "selector", cls: "svi-learned-stem", titleKey: "selector" },
+          { key: "action", cls: "svi-learned-action", alias: { invert: "反色", protect: "保护", recolor: "改色" }, aliasCls: { protect: "protect", recolor: "recolor" } },
+        ] },
     ] },
     { id: "lists", title: "站点名单", items: [
       { key: "siteMode", kind: "select", label: "站点管理模式", hint: "控制脚本在哪些站点生效", options: [["all", "全部启用", "所有站点默认启用。"], ["blacklist", "黑名单", "名单内站点停用，其余站点启用。"], ["whitelist", "白名单", "仅名单内站点启用，其余停用。"]] },
