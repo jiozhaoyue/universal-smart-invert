@@ -64,6 +64,15 @@ script's world (`chrome.runtime.id` + `getManifest().version`) — never weaken 
 negative control proving the assertions bite); `SVI_CHROME_PATH` is then the **only** candidate, which
 is what makes the "no browser → 未验证" downgrade path reachable.
 
+Harness traps that cost real debugging time in that suite — do not "simplify" them away:
+`Page.addScriptToEvaluateOnNewDocument` used for a first-paint probe must run in its own
+`worldName`, not the page's main world (in the main world the content script's isolated world
+becomes unfindable); the launch needs the three `--disable-*-throttling/backgrounding` flags or rAF
+drops to ~1 frame per 500ms when the window is occluded; a local fixture boots in ~125ms so a frame
+counter must be allowed to accumulate before it is read; and cross-tab "hot restore" checks need
+`Page.bringToFront` on the page under test, since rAF/idle stall in a hidden tab (that alone looked
+exactly like a product defect).
+
 Bench gotchas: uses a FIXED profile dir `.chrome-test-profile/` (gitignored) that the runner
 wipes at start; needs `--enable-unsafe-swiftshader` for WebGL scenarios; scenarios 2b/18 rely on
 in-run persistence, so never add global storage cleanup mid-run.

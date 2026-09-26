@@ -1,6 +1,6 @@
 'use strict';
 /*
- * test-extension.js — 真扩展 E2E（Trellis 任务 v6-5，阶段 2）
+ * test-extension.js — 真扩展 E2E（Trellis 任务 v6-5，阶段 2 + 阶段 3）
  *
  * 为什么单独一个套件（design D1）：
  *   `test-browser.js` 覆盖的是「把用户脚本用 <script> 注入页面」这一形态；本套件覆盖
@@ -15,12 +15,15 @@
  * 断言纪律：
  *   1. **先自验扩展真加载**（D1）：在内容脚本所在世界断言 `chrome.runtime.id` 等于 loadUnpacked
  *      返回的 ID、且 `getManifest().version` 等于构建产物版本 —— 绝不允许「静默测了个空页面」还报通过；
- *   2. 断言**真实生效**：不光看 DOM 属性，还要看 computedStyle.filter；
+ *   2. 断言**真实生效**：不光看 DOM 属性，还要看 computedStyle.filter / 真实 DOM 变化；
  *   3. 降级到「未验证」而非「通过」：无 Chrome 时打印 SKIP 并以 0 退出（与 test-browser.js 同纪律）。
+ *   4. 首屏时序只对**复访**断言：README §13 明写「首访站点一律不遮，宁可白闪一次也不白藏」，
+ *      把首访也断言成零白闪就是与产品文档打架。
  *
  * 用法:
  *   node test-extension.js
- *   SVI_CHROME_PATH=/path/to/chrome node test-extension.js   # 指定浏览器
+ *   SVI_EXT_DIR=<副本> node test-extension.js     # 负向对照：跑一个被改坏的副本
+ *   SVI_CHROME_PATH=/path/to/chrome node test-extension.js
  */
 
 const { spawn, execFileSync } = require('child_process');
@@ -57,7 +60,10 @@ function findChrome() {
   return null;
 }
 
-// —— 本地 fixture：浅底图（应反色）与深底图（应保持），走 http 以便 canvas 采样同源可读 ——
+// —— 本地 fixture ——
+// 6 张图（5 浅底 + 1 深底）：不只是为了覆盖两种判定，还因为「本站反色率门」要求
+// 样本 ≥ 5 且反色率 ≥ 35% 才会武装元素遮罩（README §13），图太少会让复访也过不了门，
+// 于是「首屏零白闪」这条永远测不到。
 const LIGHT_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="320" height="200">
 <rect width="320" height="200" fill="#f6f2e4"/>
 <rect x="40" y="40" width="80" height="120" fill="#333a45"/>
@@ -68,21 +74,70 @@ const DARK_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="320" height="20
 <circle cx="90" cy="100" r="46" fill="#e8eef7"/>
 <rect x="180" y="70" width="100" height="60" fill="#7aa2f7"/>
 </svg>`;
+const IMG_IDS = ['light1', 'light2', 'light3', 'light4', 'light5'];
+// 每张图各自包一层 <figure>：**不能**让它们互为同级兄弟 —— balanced 图像策略里
+// `gridSiblings >= 4` 会判为「缩略图网格」而整组跳过（产品按设计如此，见 passesImagePolicy），
+// fixture 长得像网格就会让本套件测了个空。
 const PAGE_HTML = `<!DOCTYPE html>
 <html lang="zh-CN"><head><meta charset="UTF-8"><title>svi extension bench</title>
-<style>body{margin:0;padding:24px;background:#fff;font:14px/1.6 system-ui}
-img{display:block;width:320px;height:200px;margin-bottom:16px}</style></head>
+<style>body{margin:0;padding:16px;background:#fff;font:14px/1.6 system-ui}
+figure{display:block;margin:0 0 10px}img{display:block;width:320px;height:200px}</style></head>
 <body>
 <h1>真扩展形态基准页</h1>
-<img id="light-img" src="/light.svg" alt="light">
-<img id="dark-img" src="/dark.svg" alt="dark">
+${IMG_IDS.map((id) => `<figure><img id="${id}" src="/${id}.svg" alt="article figure ${id}"></figure>`).join('\n')}
+<figure><img id="dark-img" src="/dark.svg" alt="article figure dark"></figure>
 </body></html>`;
+
+// —— 首屏时序探针（经 Page.addScriptToEvaluateOnNewDocument 在**页面脚本之前**装上）——
+// 跑在**自己的隔离世界**里，不碰页面主世界：实测把探针注进主世界会让内容脚本的隔离世界
+// 抓不到（`window.__svi` 找不到），是踩过的坑，别改回默认世界。DOM 是跨世界共享的，读得到。
+const PROBE_WORLD = '__svi_fp_probe__';
+const FP_PROBE = `(() => {
+  const fp = { frames: 0, bare: {}, pendingFirstAt: null, invertedFirstAt: null, gateClassAt: null };
+  window.__fp = fp;
+  try {
+    const t0 = performance.now();
+    const raf = (fn) => (typeof requestAnimationFrame === 'function')
+      ? requestAnimationFrame(fn) : setTimeout(() => fn(performance.now()), 16);
+    const marked = (el) => el.hasAttribute('data-svi-pending') || el.hasAttribute('data-svi-settled') || el.hasAttribute('data-svi-inverted');
+    const visible = (el) => {
+      const r = el.getBoundingClientRect();
+      return r.width > 0 && r.height > 0 && r.bottom > 0 && r.top < innerHeight;
+    };
+    function frame() {
+      try {
+        fp.frames++;
+        const t = performance.now() - t0;
+        const de = document.documentElement;
+        if (de && de.classList && de.classList.contains('svi-img-invert-on') && fp.gateClassAt === null) fp.gateClassAt = t;
+        const imgs = document.images || [];
+        for (let i = 0; i < imgs.length; i++) {
+          const img = imgs[i];
+          if (!(img.complete && img.naturalWidth > 0)) continue;
+          if (img.hasAttribute('data-svi-pending') && fp.pendingFirstAt === null) fp.pendingFirstAt = t;
+          if (img.hasAttribute('data-svi-inverted') && fp.invertedFirstAt === null) fp.invertedFirstAt = t;
+          if (!marked(img) && visible(img)) {
+            const key = img.id || img.src;
+            const b = fp.bare[key] || (fp.bare[key] = { firstAt: t, frames: 0 });
+            b.frames++;
+          }
+        }
+      } catch (e) {
+        // 逐帧捕获：漏在外面的异常会让 rAF 循环静默停摆，测出来的就只剩「帧数过少」这一现象
+        fp.err = String(e && e.message || e);
+        return;
+      }
+      if (fp.frames < 400) raf(frame);
+    }
+    raf(frame);
+  } catch (e) { window.__fpError = String(e && e.message || e); }
+})()`;
 
 function startServer() {
   return new Promise((resolve) => {
     const srv = http.createServer((req, res) => {
       const u = req.url.split('?')[0];
-      if (u === '/light.svg') { res.writeHead(200, { 'Content-Type': 'image/svg+xml' }); res.end(LIGHT_SVG); return; }
+      if (/^\/(light\d*|late)\.svg$/.test(u)) { res.writeHead(200, { 'Content-Type': 'image/svg+xml' }); res.end(LIGHT_SVG); return; }
       if (u === '/dark.svg') { res.writeHead(200, { 'Content-Type': 'image/svg+xml' }); res.end(DARK_SVG); return; }
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); res.end(PAGE_HTML);
     });
@@ -105,6 +160,15 @@ function startServer() {
   const manifest = JSON.parse(fs.readFileSync(path.join(EXT_DIR, 'manifest.json'), 'utf8'));
   const wantVersion = manifest.version;
 
+  // ---------- 场景 0（纯 Node）：形态能力边界必须被文档如实说明（design D4 的降级断言） ----------
+  console.log('[Ext] Scenario 0: 形态边界文档如实说明（无需浏览器） ...');
+  const readme = fs.readFileSync(path.join(ROOT, 'README.md'), 'utf8');
+  assert.ok(/document_start/.test(readme), 'README 必须写明扩展形态的 document_start 通道');
+  assert.ok(/document-end/.test(readme), 'README 必须写明用户脚本形态在 document-end 启动');
+  assert.ok(/首屏元素已经渲染过了|首访站点一律不遮/.test(readme),
+    'README 必须写明「用户脚本形态的首屏元素已渲染」或「首访不遮」这类降级事实，不得只宣传能力不提边界');
+  console.log('    README 同时写明能力与边界 ✓');
+
   // ---------- 降级纪律：无 Chrome → 打印「未验证」并以 0 退出 ----------
   const chromePath = findChrome();
   if (!chromePath) {
@@ -117,7 +181,9 @@ function startServer() {
   let httpSrv = null;
   let chrome = null;
   let ws = null;
+  let popupWs = null;
   const cleanup = () => {
+    try { if (popupWs) popupWs.close(); } catch (e) { /* ignore */ }
     try { if (ws) ws.close(); } catch (e) { /* ignore */ }
     try { if (chrome) chrome.kill(); } catch (e) { /* ignore */ }
     try { if (httpSrv) httpSrv.close(); } catch (e) { /* ignore */ }
@@ -137,6 +203,11 @@ function startServer() {
       '--no-first-run',
       '--no-default-browser-check',
       '--enable-unsafe-swiftshader',
+      // rAF 是首屏时序的测量仪器：窗口一旦被其它窗口遮挡，Chromium 会把 rAF 节流到近乎停摆
+      // （实测被遮挡时 500ms 只跑 1 帧），故必须关掉三类后台节流，否则测到的不是页面时序而是节流。
+      '--disable-background-timer-throttling',
+      '--disable-backgrounding-occluded-windows',
+      '--disable-renderer-backgrounding',
       '--window-size=1280,900',
       'about:blank',
     ], { stdio: ['ignore', 'ignore', 'ignore', 'pipe', 'pipe'] });
@@ -186,37 +257,42 @@ function startServer() {
     assert.ok(extId, 'Extensions.loadUnpacked 必须返回扩展 ID (否则浏览器未加载任何扩展): ' + JSON.stringify(loaded.error || loaded));
     console.log('    扩展 ID = ' + extId);
 
-    // —— CDP 客户端（WebSocket）——
+    // —— CDP 客户端（页面 target）——
+    const connect = async (wsUrl) => {
+      const sock = new WebSocket(wsUrl);
+      let seq = 0;
+      const pend = new Map();
+      const ctxs = [];
+      sock.onmessage = (m) => {
+        const g = JSON.parse(m.data);
+        if (g.id && pend.has(g.id)) { pend.get(g.id)(g); pend.delete(g.id); return; }
+        if (g.method === 'Runtime.executionContextCreated') ctxs.push(g.params.context);
+      };
+      await new Promise((res, rej) => { sock.onopen = res; sock.onerror = () => rej(new Error('WebSocket 连接失败')); });
+      const send = (method, params = {}) => new Promise((res) => {
+        const i = ++seq; pend.set(i, res);
+        sock.send(JSON.stringify({ id: i, method, params }));
+      });
+      const ev = async (expr, ctxId, awaitPromise = false) => {
+        const r = await send('Runtime.evaluate', {
+          expression: expr, returnByValue: true, awaitPromise,
+          ...(ctxId ? { contextId: ctxId } : {}),
+        });
+        // 协议级错误（例如 contextId 已随导航失效）必须**抛出**：静默返回 undefined
+        // 会让「等条件成立」的轮询一直空转到超时，把真因藏起来（踩过）。
+        if (r.error) throw new Error('CDP ' + (r.error.message || JSON.stringify(r.error)));
+        const rr = r.result || {};
+        if (rr.exceptionDetails) throw new Error('页面内求值抛错: ' + ((rr.exceptionDetails.exception || {}).description || rr.exceptionDetails.text));
+        return rr.result ? rr.result.value : undefined;
+      };
+      return { sock, send, ev, ctxs, resetCtxs: () => { ctxs.length = 0; } };
+    };
+
     const pageTarget = targets.find((t) => t.type === 'page');
     assert.ok(pageTarget && pageTarget.webSocketDebuggerUrl, '必须有可附着的 page target');
-    ws = new WebSocket(pageTarget.webSocketDebuggerUrl);
-    let msgSeq = 0;
-    const pending = new Map();
-    let isolatedContexts = [];
-    ws.onmessage = (m) => {
-      const g = JSON.parse(m.data);
-      if (g.id && pending.has(g.id)) { pending.get(g.id)(g); pending.delete(g.id); return; }
-      if (g.method === 'Runtime.executionContextCreated') {
-        const c = g.params.context;
-        if (c.auxData && c.auxData.type === 'isolated') isolatedContexts.push(c);
-      }
-    };
-    await new Promise((res, rej) => { ws.onopen = res; ws.onerror = () => rej(new Error('WebSocket 连接失败')); });
+    const P = await connect(pageTarget.webSocketDebuggerUrl);
+    ws = P.sock;
 
-    const send = (method, params = {}) => new Promise((res) => {
-      const i = ++msgSeq;
-      pending.set(i, res);
-      ws.send(JSON.stringify({ id: i, method, params }));
-    });
-    const evIn = async (expr, ctxId, awaitPromise = false) => {
-      const r = await send('Runtime.evaluate', {
-        expression: expr, returnByValue: true, awaitPromise,
-        ...(ctxId ? { contextId: ctxId } : {}),
-      });
-      const rr = r.result || {};
-      if (rr.exceptionDetails) throw new Error('页面内求值抛错: ' + ((rr.exceptionDetails.exception || {}).description || rr.exceptionDetails.text));
-      return rr.result ? rr.result.value : undefined;
-    };
     // 有界轮询：等条件成立，不在热路径上赌固定 sleep
     const waitFor = async (fn, timeoutMs, label) => {
       const t0 = Date.now();
@@ -227,49 +303,127 @@ function startServer() {
         await sleep(250);
       }
     };
-    // 挑选「真的含 window.__svi」的那个隔离世界 —— 不靠世界名猜，自证式挑选
+    // 挑选「真的含 window.__svi」的那个世界 —— 不靠世界名猜，自证式挑选
     const pickExtWorld = () => waitFor(async () => {
-      for (const c of isolatedContexts) {
-        try { if ((await evIn('typeof window.__svi', c.id)) === 'object') return c; } catch (e) { /* 上下文已失效 */ }
+      for (const c of P.ctxs) {
+        try { if ((await P.ev('typeof window.__svi', c.id)) === 'object') return c; } catch (e) { /* 上下文已失效 */ }
       }
       return null;
     }, BOOT_TIMEOUT_MS, '含 window.__svi 的隔离世界出现');
+    // 时序探针住在自己的隔离世界（PROBE_WORLD）里，按世界名取它
+    const pickProbeWorld = () => waitFor(async () => P.ctxs.find((c) => c.name === PROBE_WORLD) || null,
+      BOOT_TIMEOUT_MS, '时序探针世界 ' + PROBE_WORLD + ' 出现');
+    const booted = async () => (await P.ev('document.documentElement.classList.contains("svi-img-invert-on")')) === true;
 
-    await send('Runtime.enable');
-    await send('Page.enable');
+    await P.send('Runtime.enable');
+    await P.send('Page.enable');
 
-    // ---------- 场景 2：隔离世界 + 扩展自验 ----------
-    console.log('[Ext] Scenario 2: 隔离世界与扩展自验 ...');
-    await send('Page.navigate', { url: PAGE_URL });
+    // ---------- 场景 2：document_start 首屏时序（首访允许白闪 / 复访要求零白闪） ----------
+    console.log('[Ext] Scenario 2: document_start 首屏时序（首访 vs 复访）...');
+    const inst = await P.send('Page.addScriptToEvaluateOnNewDocument', { source: FP_PROBE, worldName: PROBE_WORLD });
+    const probeInstalled = { result: inst.result };
+    const FP_READ = `(() => {
+      const inv = {}; let invCount = 0, imgCount = 0;
+      const detail = [];
+      for (const img of document.images) {
+        imgCount++;
+        const k = img.id || img.src;
+        if (img.getAttribute('data-svi-inverted') === 'true') { inv[k] = 1; invCount++; }
+        detail.push({ id: img.id, complete: img.complete, nw: img.naturalWidth,
+          inv: img.getAttribute('data-svi-inverted'), pend: img.hasAttribute('data-svi-pending'),
+          cls: img.className, filter: (getComputedStyle(img).filter || 'none').slice(0, 40),
+          rect: (() => { const r = img.getBoundingClientRect(); return [Math.round(r.width), Math.round(r.height), Math.round(r.top)]; })() });
+      }
+      return { fp: window.__fp || null, err: window.__fpError || null, inv, invCount, imgCount, detail };
+    })()`;
+
+    const runOnce = async (label) => {
+      // 每次导航前清掉上一次的上下文表：否则按名字挑世界会挑到**上一轮遗留的**已失效上下文
+      P.resetCtxs();
+      await P.send('Page.navigate', { url: PAGE_URL });
+      await waitFor(booted, BOOT_TIMEOUT_MS, label + ': 反色门类落地');
+      const pw = await pickProbeWorld();
+      // 这个 fixture 在本地，扩展 125ms 就引导完了 —— 比前几帧还早。探针的 bare 是**累积**的
+      // （只增不减），所以先等帧数攒够再读，读到的才是完整时序；帧数太少则时序不可信。
+      await waitFor(async () => (await P.ev('window.__fp ? window.__fp.frames : 0', pw.id)) >= 60,
+        8000, label + ': 探针攒够 60 帧');
+      const r = await P.ev(FP_READ, pw.id);
+      assert.ok(r.fp, label + ': 首屏探针必须在页面脚本之前装上');
+      assert.ok(!r.err && !r.fp.err, label + ': 探针不得抛错 (setup: ' + r.err + ' / frame: ' + r.fp.err + ')');
+      assert.ok(r.fp.frames >= 20, label + ': 探针帧数过少 (' + r.fp.frames + ')，时序不可信');
+      // 非空真守卫：没有任何图被判反色时，「零白闪」是**空真**断言，必须挡住
+      assert.ok(r.invCount >= 1, label + ': 至少要有一张图被判反色，否则零白闪断言是空真 (' + r.invCount + ')');
+      const flashed = Object.keys(r.fp.bare || {}).filter((k) => r.inv[k]);
+      console.log(`    ${label}: 帧数=${r.fp.frames} 图数=${r.imgCount} 判反色=${r.invCount}` +
+        ` 门类@${r.fp.gateClassAt === null ? '-' : Math.round(r.fp.gateClassAt) + 'ms'}` +
+        ` pending@${r.fp.pendingFirstAt === null ? '-' : Math.round(r.fp.pendingFirstAt) + 'ms'}` +
+        ` 反色@${r.fp.invertedFirstAt === null ? '-' : Math.round(r.fp.invertedFirstAt) + 'ms'}`);
+      console.log(`    ${label}: 曾以原色出现的图 = ${flashed.length ? flashed.join(', ') : '(无)'}` +
+        (flashed.length ? '  → ' + JSON.stringify(r.fp.bare) : ''));
+      console.log('    [dbg] 逐图: ' + r.detail.map((d) => `${d.id}:${d.inv === 'true' ? 'inv' : d.inv === 'false' ? 'keep' : '-'}/${d.complete ? d.nw : 'x'}/${d.filter}`).join(' '));
+      return r;
+    };
+
+    const first = await runOnce('首访');
+    // 等站点样本落盘（反色率门要 ≥5 样本 + ≥35% 才武装遮罩）
+    await sleep(1500);
+    const revisit = await runOnce('复访');
+    await P.send('Page.removeScriptToEvaluateOnNewDocument', { identifier: probeInstalled.result.identifier });
+
+    // 门的机制断言（确定性，不依赖帧时序）：站点样本已记录且达门
+    // 注意：这里**不能** resetCtxs —— 刚跑完复访、页面还停在 PAGE_URL 上，会话表里就是本轮上下文。
+    const ctxT = await pickExtWorld();
+    const gate = await P.ev(`(() => {
+      // 键必须与产品一致: profileKey() = location.hostname（**不含端口**），别用 location.host
+      const S = window.__svi, key = location.hostname;
+      const me = S.siteMediaStore.stats(key);
+      const d = S.maskShouldArm(key, { seen: me.seen, inverted: me.inverted, minSeen: 5, rateThreshold: 0.35 });
+      return { key: key, storeKeys: Object.keys(S.siteMediaStore.load()), seen: me.seen, inverted: me.inverted,
+        armed: !!d.armed, reason: d.reason, maskArmed: !!S.pendingMask.armed };
+    })()`, ctxT.id);
+    console.log('    站样本门: ' + JSON.stringify(gate));
+    assert.ok(gate.seen >= 5, '复访前本站样本必须已记录 (样本数 ' + gate.seen + ')，否则复访也过不了门');
+    assert.strictEqual(gate.armed, true, '样本与反色率达标后该门必须武装，实测: ' + gate.reason);
+
+    // 结论断言：复访（遮罩已武装）下，被判反色的图**从未以原色出现过**
+    const revisitedFlash = Object.keys(revisit.fp.bare || {}).filter((k) => revisit.inv[k]);
+    assert.deepStrictEqual(revisitedFlash, [],
+      '复访必须零白闪：下列图在被反色前曾以原色出现过 → ' + JSON.stringify(revisit.fp.bare));
+    console.log('    复访零白闪 ✓（首访白闪次数按 README §13 允许，仅作证据打印）');
+
+    // ---------- 场景 3：隔离世界 + 扩展自验 ----------
+    console.log('[Ext] Scenario 3: 隔离世界与扩展自验 ...');
+    P.resetCtxs();
+    await P.send('Page.navigate', { url: PAGE_URL });
     const extCtx = await pickExtWorld();
     console.log('    扩展世界 = ' + (extCtx.name || '(无名)') + ' @ ' + extCtx.origin);
 
-    const selfCheck = await evIn(`(() => {
+    const selfCheck = await P.ev(`(() => {
       const m = chrome.runtime.getManifest();
-      return { id: chrome.runtime.id, version: m.version, name: m.name };
+      return { id: chrome.runtime.id, version: m.version };
     })()`, extCtx.id);
     assert.strictEqual(selfCheck.id, extId, '自验失败: 求值所在世界不是 loadUnpacked 加载的那个扩展');
     assert.strictEqual(selfCheck.version, wantVersion, `自验失败: 扩展版本应为 ${wantVersion}，实测 ${selfCheck.version}`);
     console.log('    自验通过: runtime.id 与版本一致 (' + selfCheck.version + ')');
 
-    const isoType = await evIn('typeof window.__svi', extCtx.id);
-    assert.strictEqual(isoType, 'object', '隔离世界里必须存在 window.__svi');
-    assert.strictEqual(await evIn('window.__svi.version', extCtx.id), wantVersion, '隔离世界的 __svi.version 应等于扩展版本');
+    assert.strictEqual(await P.ev('typeof window.__svi', extCtx.id), 'object', '隔离世界里必须存在 window.__svi');
+    assert.strictEqual(await P.ev('window.__svi.version', extCtx.id), wantVersion, '隔离世界的 __svi.version 应等于扩展版本');
 
-    const mainType = await evIn('typeof window.__svi'); // 不带 contextId = 页面主世界
+    const mainType = await P.ev('typeof window.__svi'); // 不带 contextId = 页面主世界
     assert.strictEqual(mainType, 'undefined', '真扩展形态下主世界不得存在 window.__svi (隔离世界生效的判据)');
-    const mainImgs = await evIn('document.querySelectorAll("img").length');
-    assert.strictEqual(mainImgs, 2, 'DOM 为两世界共享: 主世界应看得到两张图');
+    const mainImgs = await P.ev('document.querySelectorAll("img").length');
+    assert.strictEqual(mainImgs, IMG_IDS.length + 1, 'DOM 为两世界共享: 主世界应看得到全部图片');
     console.log('    主世界 typeof __svi = undefined ✓ | 主世界可见 img = ' + mainImgs);
 
-    // ---------- 场景 3：反色真实生效（属性 + computedStyle） ----------
-    console.log('[Ext] Scenario 3: 反色真实生效 (属性 + computedStyle) ...');
+    // ---------- 场景 4：反色真实生效（属性 + computedStyle） ----------
+    console.log('[Ext] Scenario 4: 反色真实生效 (属性 + computedStyle) ...');
     const INV_EXPR = `(() => {
-      const L = document.getElementById('light-img'), D = document.getElementById('dark-img');
-      const inv = (e) => e.getAttribute('data-svi-inverted') === 'true';
+      const D = document.getElementById('dark-img');
+      const lights = ${JSON.stringify(IMG_IDS)}.map((id) => document.getElementById(id));
       return {
-        lightInv: inv(L), darkInv: inv(D),
-        lightFilter: getComputedStyle(L).filter, darkFilter: getComputedStyle(D).filter,
+        lightInv: lights.map((e) => e.getAttribute('data-svi-inverted') === 'true'),
+        darkInv: D.getAttribute('data-svi-inverted') === 'true',
+        lightFilter: getComputedStyle(lights[0]).filter, darkFilter: getComputedStyle(D).filter,
         cssBytes: [...document.querySelectorAll('style')]
           .filter((s) => /data-svi-inverted/.test(s.textContent || ''))
           .reduce((n, s) => n + (s.textContent || '').length, 0),
@@ -277,19 +431,19 @@ function startServer() {
         pill: !!document.querySelector('.svi-capsule-root'),
       };
     })()`;
-    const r3 = await waitFor(async () => {
-      const v = await evIn(INV_EXPR);
-      return v && v.lightInv ? v : null;
-    }, BOOT_TIMEOUT_MS, '浅底图被判定为反色');
-    console.log('    ' + JSON.stringify(r3));
-    assert.strictEqual(r3.lightInv, true, '浅底图必须被判为反色');
-    assert.strictEqual(r3.darkInv, false, '深底图必须保持不反色');
-    assert.notStrictEqual(r3.lightFilter, 'none', '浅底图的 computedStyle.filter 不得为 none (属性写了必须真生效)');
-    assert.ok(r3.cssBytes > 40000, '主样式表必须在场 (实测 ' + r3.cssBytes + ' 字节)');
+    const r4 = await waitFor(async () => {
+      const v = await P.ev(INV_EXPR);
+      return v && v.lightInv && v.lightInv.every(Boolean) ? v : null;
+    }, BOOT_TIMEOUT_MS, '浅底图全部被判定为反色');
+    console.log('    ' + JSON.stringify(r4));
+    assert.strictEqual(r4.lightInv.every(Boolean), true, '5 张浅底图必须全部被判为反色');
+    assert.strictEqual(r4.darkInv, false, '深底图必须保持不反色');
+    assert.notStrictEqual(r4.lightFilter, 'none', '浅底图的 computedStyle.filter 不得为 none (属性写了必须真生效)');
+    assert.ok(r4.cssBytes > 40000, '主样式表必须在场 (实测 ' + r4.cssBytes + ' 字节)');
 
-    // ---------- 场景 4：chrome.storage 持久化（清掉 localStorage 后偏好仍存活，D5） ----------
-    console.log('[Ext] Scenario 4: chrome.storage 持久化 (清 localStorage 后仍存活) ...');
-    const before = await evIn(`(() => {
+    // ---------- 场景 5：chrome.storage 持久化（清掉 localStorage 后偏好仍存活，D5） ----------
+    console.log('[Ext] Scenario 5: chrome.storage 持久化 (清 localStorage 后仍存活) ...');
+    const before = await P.ev(`(() => {
       const S = window.__svi;
       return { backend: (S.Store && S.Store.backend) || null, orig: S.prefs.hoverRestore !== false };
     })()`, extCtx.id);
@@ -298,27 +452,158 @@ function startServer() {
       `扩展形态下的存储后端必须是 chrome.storage 家族，实测 ${before.backend}`);
     console.log('    存储后端 = ' + before.backend + ' (非 localStorage/GM/memory)');
 
-    // 翻转一个「可观察」偏好（hoverRestore 驱动 html.svi-hover-restore 类），走扩展自己的保存路径
-    await evIn(`(async () => {
+    await P.ev(`(async () => {
       window.__svi.prefs.hoverRestore = ${!before.orig};
       window.__svi.savePrefs();
       await new Promise((r) => setTimeout(r, 900));   // 防抖 300ms + 落盘余量
       return true;
     })()`, extCtx.id, true);
 
-    // 清掉 localStorage —— 若偏好仍能恢复，说明真源是 chrome.storage
-    await evIn('(localStorage.clear(), localStorage.length)');
-    await send('Page.reload');
-    isolatedContexts = [];
+    await P.ev('(localStorage.clear(), localStorage.length)');
+    P.resetCtxs();
+    await P.send('Page.reload');
     const extCtx2 = await pickExtWorld();
     const after = await waitFor(async () => {
-      const v = await evIn('(() => ({ hover: window.__svi.prefs.hoverRestore, cls: document.documentElement.className }))()', extCtx2.id);
+      const v = await P.ev('(() => ({ hover: window.__svi.prefs.hoverRestore, cls: document.documentElement.className }))()', extCtx2.id);
       return v && v.cls ? v : null;
     }, BOOT_TIMEOUT_MS, '重载后重新引导完成');
     console.log('    重载后: hoverRestore = ' + after.hover + ' | htmlClass = ' + after.cls);
     assert.strictEqual(after.hover, !before.orig, '清掉 localStorage 并重载后，偏好必须仍存活 (chrome.storage 为真源)');
     assert.strictEqual(after.cls.includes('svi-hover-restore'), after.hover === true,
       '重载后 html 上的 svi-hover-restore 类必须与持久化后的偏好一致');
+
+    // ---------- 场景 6：popup 端到端（版本/主机/计数 + 三条消息协议 + 内部页 unavailable） ----------
+    console.log('[Ext] Scenario 6: popup 端到端 ...');
+    const POPUP_URL = `chrome-extension://${extId}/popup.html`;
+    // 注意：popup.html 自带 `<body class="available">` 与占位 "—"，那是**作者写的初始值**；
+    // popup.js 要等快照回来才翻转类并填字段。读太早会读到未落定的中间态（踩过）。
+    const POPUP_STATE = `(() => ({
+      cls: document.body ? document.body.className : '',
+      ver: (document.getElementById('ver') || {}).textContent || '',
+      host: (document.getElementById('host') || {}).textContent || '',
+      counts: (document.getElementById('counts') || {}).textContent || '',
+    }))()`;
+    // 等 popup 快照落定：出现了 unavailable，或版本已被填上（= available 路径落定）
+    const settledPopup = (evFn, label) => waitFor(async () => {
+      const v = await evFn(POPUP_STATE);
+      if (!v) return null;
+      return (/unavailable/.test(v.cls) || /^v\d/.test(v.ver)) ? v : null;
+    }, 10000, label);
+
+    // —— 顺序说明（踩过的坑）：先验「打在真页面上的 popup」，最后才验「内部页降级」。
+    //    因为把同一个标签页导航到 popup.html 会把 fixture 页顶掉，popup 就再也看不到
+    //    带内容脚本的标签页了（实测 tabsN 会变成 1，只剩它自己）。
+
+    // 6a. 用**浏览器级** target 另开一个 popup 页，并在其脚本之前打桩 `chrome.tabs.query`：
+    //     这是唯一的测试替身 —— CDP 无法点工具栏图标，"打开 popup 时哪个标签页是活动的"只能靠它伪造。
+    //     popup 自身逻辑、三条消息、内容脚本响应全部真实。
+    const browserWsUrl = (await getJson('/json/version')).webSocketDebuggerUrl;
+    const B = await connect(browserWsUrl);
+    //     manifest 只有 storage 权限、没有 tabs 权限 → `tab.url` 拿不到，所以**不能**按 url 认标签页；
+    //     改为「谁的内容脚本能应答快照，谁就是本页」。
+    const STUB = `(() => {
+      const realQuery = chrome.tabs.query.bind(chrome.tabs);
+      chrome.tabs.query = async () => {
+        const tabs = await realQuery({});
+        const answering = [];
+        for (const t of tabs) {
+          try {
+            const r = await chrome.tabs.sendMessage(t.id, { type: 'svi-get-snapshot' });
+            if (r && r.ok) answering.push(t);
+          } catch (e) { /* 无内容脚本 */ }
+        }
+        return answering.length ? answering : tabs;
+      };
+    })()`;
+    const created = await B.send('Target.createTarget', { url: POPUP_URL });
+    const popupTargetId = created.result && created.result.targetId;
+    assert.ok(popupTargetId, 'Target.createTarget 必须返回 targetId: ' + JSON.stringify(created.error || created));
+    let popupInfo = null;
+    for (let i = 0; i < 40 && !popupInfo; i++) {
+      const list = await getJson('/json/list');
+      popupInfo = list.find((t) => t.id === popupTargetId && t.webSocketDebuggerUrl);
+      if (!popupInfo) await sleep(250);
+    }
+    assert.ok(popupInfo, '必须能附到新建的 popup target');
+    const U = await connect(popupInfo.webSocketDebuggerUrl);
+    popupWs = U.sock;
+    await U.send('Runtime.enable');
+    await U.send('Page.enable');
+    const stubbed = await U.send('Page.addScriptToEvaluateOnNewDocument', { source: STUB });
+    assert.ok(stubbed.result && stubbed.result.identifier, '打桩脚本必须被装上');
+    await U.send('Page.reload');
+
+    // 由 popup 页把消息发给**能应答的那个标签页**（真实内容脚本）并返回响应
+    const relay = (msg) => U.ev(`(async () => {
+      const tabs = await chrome.tabs.query({});
+      for (const t of tabs) {
+        try { const r = await chrome.tabs.sendMessage(t.id, ${JSON.stringify(msg)}); if (r && r.ok) return r; } catch (e) { /* 无内容脚本 */ }
+      }
+      return null;
+    })()`, undefined, true);
+
+    const popupReady = await settledPopup((e) => U.ev(e), 'popup 快照落定(打桩页)');
+    assert.ok(/(^|\s)available(\s|$)/.test(popupReady.cls),
+      '打桩后 popup 应进入 available 态，实测 className=' + popupReady.cls);
+    console.log('    available 形态: ver="' + popupReady.ver + '" host="' + popupReady.host + '" counts="' + popupReady.counts + '"');
+    assert.strictEqual(popupReady.ver, 'v' + wantVersion, 'popup 必须渲染扩展版本');
+    assert.strictEqual(popupReady.host, '127.0.0.1', 'popup 必须渲染本站主机名');
+    assert.ok(/6/.test(popupReady.counts), 'popup 计数行必须反映本站 6 张图，实测: ' + popupReady.counts);
+
+    // 6b. 三条消息协议往返 —— 由 popup 页发往真实内容脚本，并断言**真实效果**
+    const snap = await relay({ type: 'svi-get-snapshot' });
+    assert.ok(snap, 'svi-get-snapshot 必须从内容脚本拿到快照');
+    assert.strictEqual(snap.version, wantVersion, '快照版本应为 ' + wantVersion);
+    assert.strictEqual(snap.host, '127.0.0.1', '快照主机应为 127.0.0.1');
+    assert.strictEqual(snap.counts.img, IMG_IDS.length + 1, '快照应报告 ' + (IMG_IDS.length + 1) + ' 张图');
+    console.log('    svi-get-snapshot → ' + JSON.stringify({ ok: snap.ok, version: snap.version, host: snap.host, counts: snap.counts }));
+
+    const off = await relay({ type: 'svi-site-power', on: false });
+    assert.ok(off && off.ok === true && off.siteActive === false, 'svi-site-power{on:false} 应返回 {ok:true, siteActive:false}，实测 ' + JSON.stringify(off));
+    const torn = await waitFor(async () => (await P.ev('document.querySelectorAll(\'[data-svi-inverted="true"]\').length')) === 0,
+      BOOT_TIMEOUT_MS, '关站后反色被拆除');
+    assert.strictEqual(torn, true, '关站后本站不得再有被判反色的元素');
+    console.log('    svi-site-power{off} → 反色已拆除 ✓');
+
+    const on = await relay({ type: 'svi-site-power', on: true });
+    assert.ok(on && on.ok === true && on.siteActive === true, 'svi-site-power{on:true} 应返回 siteActive:true，实测 ' + JSON.stringify(on));
+    // 把 fixture 页**拉回前台**：popup 是独立标签页，它会抢走活动态，隐藏标签页里 rAF/idle 近乎停摆，
+    // 引擎的重扫就不会推进（这属于测量环境问题，不是产品行为 —— 真实使用中 popup 是浮在页面上的）。
+    await P.send('Page.bringToFront');
+    const restored = await waitFor(
+      async () => { const n = await P.ev('document.querySelectorAll(\'[data-svi-inverted="true"]\').length'); return n > 0 ? n : null; },
+      10000, '开站后反色恢复').catch(() => null);
+    if (restored === null) {
+      const diag = await P.ev(`(() => ({
+        htmlClass: document.documentElement.className,
+        imgs: [...document.images].map((i) => i.id + ':' + i.getAttribute('data-svi-inverted') + '/' + i.hasAttribute('data-svi-checked-src')),
+      }))()`);
+      console.log('    [dbg] 开站后未恢复: ' + JSON.stringify(diag));
+    }
+    assert.ok(restored !== null, 'svi-site-power{on:true} 后反色必须恢复');
+    console.log('    svi-site-power{on} → 反色已恢复 (' + restored + ' 张) ✓');
+
+    const prefRes = await relay({ type: 'svi-set-pref', key: 'imagePolicy', value: 'conservative' });
+    assert.ok(prefRes && prefRes.ok === true, 'svi-set-pref 应返回 ok:true，实测 ' + JSON.stringify(prefRes));
+    // 主世界读不到 state，改由隔离世界核实「真的落到内容脚本的偏好上」
+    // 注意：这里同样**不能** resetCtxs —— 页面没导航，会话表里就是当前上下文（踩过一次）
+    const ctxP = await pickExtWorld();
+    const applied = await P.ev('window.__svi.prefs.imagePolicy', ctxP.id);
+    assert.strictEqual(applied, 'conservative', 'svi-set-pref 必须真的落到内容脚本的偏好上，实测 ' + applied);
+    console.log('    svi-set-pref{imagePolicy:conservative} → 内容脚本偏好已更新 ✓');
+
+    await U.send('Page.removeScriptToEvaluateOnNewDocument', { identifier: stubbed.result.identifier });
+    await B.send('Target.closeTarget', { targetId: popupTargetId });
+
+    // 6c. 内部页降级（放在最后：这一步会把本页标签页顶掉）。
+    //     未打桩地把 popup.html 当普通标签页打开 —— 它的「活动标签页」就是它自己（内部页），
+    //     内容脚本不存在，因此必须渲染 `unavailable` 并保留占位值（真实行为，非模拟）。
+    await P.send('Page.navigate', { url: POPUP_URL });
+    const unavail = await settledPopup((e) => P.ev(e), 'popup 快照落定(内部页)');
+    console.log('    内部页形态: body.className = "' + unavail.cls + '" | #ver 文本 = "' + unavail.ver + '"');
+    assert.ok(/(^|\s)unavailable(\s|$)/.test(unavail.cls),
+      'popup 在无内容脚本的页面上必须渲染 unavailable 态，实测 className=' + unavail.cls);
+    assert.strictEqual(unavail.ver, '—', '内部页上 popup 不得渲染版本号（应保持占位），实测 ' + unavail.ver);
 
     console.log('\n🎉 真扩展 E2E 全部通过');
     cleanup();
