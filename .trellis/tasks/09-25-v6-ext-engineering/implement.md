@@ -79,12 +79,24 @@
 **不是**靠元素遮罩生效。机制层这条口径留待后续任务查（本片范围是「把形态纳入自动化」，
 不改扩展运行时代码）。
 
-## 阶段 4 — CI 双路径与文档（R9 / R10）⬜
+## 阶段 4 — CI 双路径与文档（R9 / R10）✅ 完成
 
-- [ ] `release.yml`：无 secret 跳过签名但**必跑**真扩展 E2E；有 secret 时签名打包 + 上传
-- [ ] `PUBLISHING.md` / `README` / `README_EN`：写出「非商店 CRX 在 Windows 默认被阻止」的事实
-      与替代路径（加载已解压 / 商店），**不得**写成「双击即可安装」
-- [ ] 五绿 + 提交（中文 message + `Co-Authored-By`）
+- [x] `release.yml`：新增 `browser-actions/setup-chrome` + 一步**必跑**的真扩展 E2E
+      （无 secret 时签名打包与商店上传照旧跳过，但 E2E 不受 secret 影响 —— 符合 R9「无 secret 不阻断」）
+- [x] `PUBLISHING.md` / `README` / `README_EN`：**已满足**（本轮复核确认，非新写）——
+      「非商店来源的 CRX 在 Windows / macOS 的桌面 Chrome 上默认被阻止安装」三处都有
+      （`PUBLISHING.md:191` / `README.md:70` / `README_EN.md:62`），并明确写「**不是**双击即装的安装包」
+      （`README.md:71`、`PUBLISHING.md:197` 还专门写了「不要把 CRX 描述成双击即可安装」这条禁令），
+      替代路径（加载已解压 / 应用商店）同样在案。故本项不再重复劳动。
+- [x] 五绿 + 提交（中文 message + `Co-Authored-By`）+ 推送
+
+**验证**：两个 workflow 的 YAML 均通过解析校验（release 15 步 / ci 6 步）；
+`node test-extension.js` 连跑三次全绿（见阶段 3）。
+
+> **本片剩余（唯一一项）**：**R2 密钥生成** —— 生成一对签名密钥并把**公钥**写进 `manifest.json`
+> 的 `key`，以获得跨路径稳定的扩展 ID 与升级链。这属 PRD 明写「需用户单独确认的一次性动作」
+> （也会改动已入库的 `manifest.json` 产物），**未执行**。在它之前本片其余交付均已完成：
+> 扩展 ID 目前由 unpacked 绝对路径派生（同一路径内可复现，跨路径不稳定），套件已按此实现。
 
 **验证**：五绿全绿。
 

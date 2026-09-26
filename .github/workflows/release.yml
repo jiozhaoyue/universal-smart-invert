@@ -40,6 +40,13 @@ jobs:
         with:
           node-version: 22
 
+      # 真扩展 E2E 需要真实浏览器（PRD R9: 无 secret 不阻断，但真扩展 E2E 必跑）
+      - name: Setup Chrome
+        id: setup-chrome
+        uses: browser-actions/setup-chrome@v1
+        with:
+          chrome-version: stable
+
       - name: Syntax check userscript
         run: node --check universal-smart-invert.user.js
 
@@ -51,6 +58,12 @@ jobs:
           node scripts/gen-icons.js
           node scripts/build-extension.js
           node scripts/pack.js
+
+      # 发版前必跑真扩展 E2E（加载真实构建产物；无浏览器时套件自行打印「未验证」并以 0 退出）
+      - name: Real-extension E2E (loads the built extension via Extensions.loadUnpacked)
+        env:
+          SVI_CHROME_PATH: ${{ steps.setup-chrome.outputs.chrome-path }}
+        run: node test-extension.js
 
       - name: Smoke assertions (manifest valid, version sync, content.js syntax)
         run: |
