@@ -387,6 +387,11 @@ global.localStorage = {
   getItem: (k) => (k in storageData ? storageData[k] : null),
   setItem: (k, v) => { storageData[k] = String(v); },
   removeItem: (k) => { delete storageData[k]; },
+  // v6.4 R2e: 补齐枚举能力 —— 真 localStorage 有 length/key(i), 而 local 后端的 keys() 正是靠它们
+  //   枚举命名空间的。桩缺了它, `loadFromBackendSync` 在 local 后端上**永远装载不到任何键**,
+  //   于是"装载时读回版本""旁路键不进镜像"这类断言在桩里根本无从验证。
+  get length() { return Object.keys(storageData).length; },
+  key(i) { const ks = Object.keys(storageData); return i >= 0 && i < ks.length ? ks[i] : null; },
 };
 global.location = { hostname: 'mail.163.com', href: 'https://mail.163.com/', protocol: 'https:' };
 const makeElStub = () => ({
@@ -798,6 +803,7 @@ function makeTestStore(mock) {
   st.mirror = new Map();     // 遮蔽原型上的共享 Map (隔离)
   st.pending = new Set();
   st._removed = new Set();
+  st._revSeen = new Map();   // v6.4 R2e: 同上 —— 版本观察表也是共享引用类型, 必须隔离
   st.__useBackend('chrome-sync', Object.create(svi.Store)._makeChromeApi.call({ PREFIX: 'svi:' }, mock));
   st.detectBackend = () => 'chrome-sync'; // 锁定后端 (Node 无全局 chrome)
   return st;
@@ -1017,6 +1023,82 @@ function makeTestStore(mock) {
       console.log('✓ v3.0 Store chunk-removal + byte-budget regression passed');
     }, 60);
   }, 300);
+}
+
+// —— 8e-5. v6.4 R2e: 跨界面同步 —— 版本旁路键 + 卸载回写仲裁 ——
+//   守护的正是 R1b 实测到的覆盖缺陷: options 写 13 → 旧页 pagehide 整份回写 8 → 新值被覆盖。
+//   刻意走**同步后端**(local) 而不是 chrome mock: 这条用例的价值在"判据对不对", 不在"异步时序"。
+//   同步路径不产生任何定时器, 因此**没有竞态也没有等待** —— 本文件里那些 chrome mock 用例的异步链
+//   会互相排队, 固定延时等法在这里已经踩过一次坑 (见配额用例上方注释), 不再重犯。
+//   chrome 异步分支的同一套判据由真扩展 E2E 场景 8 在真实浏览器里覆盖。
+{
+  const STORE = Object.create(svi.Store);
+  const st = Object.create(svi.Store);
+  st.mirror = new Map();
+  st.pending = new Set();
+  st._removed = new Set();
+  st._revSeen = new Map();
+  st.__useBackend('local', STORE._makeLocalApi.call({ PREFIX: 'svi:' }));
+  const KEY = 'syncProbe';
+  const VKEY = 'svi:' + KEY;
+  const RKEY = VKEY + '.rev';
+  const warns = [];
+  const origWarn = console.warn;
+  console.warn = (...a) => { warns.push(a.map(String).join(' ')); };
+
+  try {
+    delete storageData[VKEY];
+    delete storageData[RKEY];
+
+    // ① 写入必须同时落版本旁路键, 并把版本记入本页观察值
+    st.set(KEY, { v: 1 });
+    st.flush();
+    assert.strictEqual(storageData[VKEY], JSON.stringify({ v: 1 }), '8e-5: 值必须落盘');
+    const rev1 = Number(storageData[RKEY]);
+    assert.ok(rev1 > 0, '8e-5: 每次写入必须同时落版本旁路键, 实测 ' + JSON.stringify(storageData[RKEY]));
+    assert.strictEqual(st._revSeen.get(KEY), rev1, '8e-5: 本页的观察版本必须跟到刚写的那次');
+
+    // ② 模拟**另一个界面**写了更新的版本 (值也改了) —— 本页此刻已经过期
+    storageData[RKEY] = String(rev1 + 10000);
+    storageData[VKEY] = JSON.stringify({ v: 2 });
+
+    // ③ 卸载回写 (pagehide / 隐藏) → 必须被仲裁拦下, 不许把 {v:2} 覆盖回 {v:3}
+    warns.length = 0;
+    st.mirror.set(KEY, { v: 3 });
+    st.pending.add(KEY);
+    st.flush({ asUnload: true });
+    assert.strictEqual(storageData[VKEY], JSON.stringify({ v: 2 }),
+      '8e-5: 卸载回写在已被超越时**必须跳过** —— 否则就是"旧页覆盖新值"那个缺陷本身');
+    assert.ok(warns.some((w) => w.indexOf('卸载回写已跳过') >= 0),
+      '8e-5: 跳过必须留下可诊断的告警, 实测 ' + JSON.stringify(warns));
+
+    // ④ 对照: 常规写入**不受**仲裁影响 (镜像靠订阅保持新鲜, 这里最后写入者胜 = 等价于合并)
+    st.pending.add(KEY);
+    st.flush();
+    assert.strictEqual(storageData[VKEY], JSON.stringify({ v: 3 }), '8e-5: 常规写入不被仲裁拦下');
+    assert.ok(Number(storageData[RKEY]) > rev1, '8e-5: 常规写入必须推进版本 (否则别的界面看不到这次更新)');
+
+    // ⑤ 全新装载 (模拟新标签页 / 刷新) 必须能从旁路键读回版本, 而不是从零开始
+    const fresh = Object.create(svi.Store);
+    fresh.mirror = new Map();
+    fresh.pending = new Set();
+    fresh._removed = new Set();
+    fresh._revSeen = new Map();
+    fresh.__useBackend('local', STORE._makeLocalApi.call({ PREFIX: 'svi:' }));
+    fresh.loadFromBackendSync();
+    assert.strictEqual(fresh._revSeen.get(KEY), Number(storageData[RKEY]),
+      '8e-5: 装载时必须从 svi:<键>.rev 读回版本 (否则每次刷新都从零开始, 仲裁失效)');
+    assert.strictEqual(fresh.mirror.has(KEY + '.rev'), false, '8e-5: 版本旁路键不得进镜像 (它不是业务数据)');
+    assert.deepStrictEqual(fresh.mirror.get(KEY), { v: 3 }, '8e-5: 装载后镜像必须是真值');
+
+    console.warn = origWarn;
+    delete storageData[VKEY];
+    delete storageData[RKEY];
+    console.log('✓ v6.4 R2e 单测 passed: 版本旁路键随写入落盘 / 装载时读回版本且不入镜像 / 卸载回写仲裁跳过陈旧值并告警 / 常规写入不受影响且推进版本');
+  } catch (e) {
+    console.warn = origWarn;
+    throw e;
+  }
 }
 
 // 遗留键迁移: svi:prefs 缺失时从 universal_smart_invert_v4 读取 (legacy 键原样保留)

@@ -998,7 +998,87 @@ function startServer() {
     console.log('    收尾还原: maskBlur=' + restoredObj.maskBlur + ' maskHoverOpacity=' + restoredObj.maskHoverOpacity
       + ' shieldColors=' + (restoredObj.shieldColors || []).length + ' 项 elementRules=' + (restoredObj.elementRules || []).length + ' 项 ✓');
 
-    await B.send('Target.closeTarget', { targetId: optTargetId });   // 关掉之后不再断言（超时坑，见文件头）
+    // 注意: 设置页那个 target **先不关** —— 场景 8 要用它当「另一个界面」的写入方
+    //   (内容是扩展页才拿得到 chrome.storage)。关它放在场景 8 之后。
+
+    // ---------- 场景 8 (v6.4 R2e)：跨界面偏好同步 —— 订阅 + 版本仲裁 ----------
+    //   这条场景**如实复现**上轮记录下来的缺陷路径，并断言它已被根治：
+    //     (1) 内容脚本页正在运行（镜像里是 maskBlur=<默认值>）
+    //     (2) **设置页**（另一个界面）改一项 —— 走它自己真实的控件事件路径
+    //     (3) 内容脚本页必须**即时跟上**（不再等刷新）—— 订阅 + 版本仲裁
+    //     (4) 内容脚本页随后导航卸载（pagehide 会整份回写）→ 设置页写入的新值必须仍在
+    //   上轮实测的坏行为是 (4) 把 (2) 按回旧值。
+    //   写入刻意**走设置页 UI** 而不是直接写 chrome.storage: 真值的落盘形态是分片的
+    //   （svi:prefs.meta + #i），旁路版本键也由设置页自己盖 —— 手写一份就会绕过被测对象，
+    //   变成"测我自己写的假写入方"（本轮第一版正是这么写的, 结果新值读不出来）。
+    console.log('[Ext] Scenario 8: 跨界面偏好同步 (storage.onChanged 订阅 + 版本仲裁) ...');
+    // 取值必须落在**控件自己的范围**内 (schema: maskBlur 0~24, step 1) —— 越界会被控件钳制,
+    //   于是"写 108"实际落盘 24, 断言看起来像同步失败而其实是夹具错 (本轮第一版就是这么写的)。
+    const SYNC_BLUR = Math.min(Number(DEF.maskBlur) + 5, 24);
+    assert.notStrictEqual(SYNC_BLUR, Number(DEF.maskBlur), 'fixture 前提: 测试值必须不同于默认值, 否则断言是空真');
+    const driveOptionsBlur = async (val) => {
+      await O.send('Page.bringToFront');
+      const drove = await O.ev(`(() => {
+        const num = document.querySelector('[data-svi-key="maskBlur"] input[type=number]');
+        if (!num) return { ok: false, why: 'no-input', hasOptions: !!window.__sviOptions, keys: [...document.querySelectorAll('[data-svi-key]')].length };
+        num.value = '${val}';
+        num.dispatchEvent(new Event('input', { bubbles: true }));   // 与用户输入同一条事件路径
+        return { ok: true, v: num.value };
+      })()`);
+      if (!drove || !drove.ok) {
+        console.log('    [dbg] 设置页不可驱动: ' + JSON.stringify(drove));
+      }
+      return waitFor(async () => {
+        const raw = await readPrefsRaw();
+        if (!raw) return null;
+        let obj = null; try { obj = JSON.parse(raw); } catch (e) { return null; }
+        return Number(obj.maskBlur) === Number(val) ? obj : null;
+      }, 8000, '设置页把 maskBlur=' + val + ' 落盘');
+    };
+
+    // (1) 先挑到**活着的**那个内容脚本世界并记录它此刻持有的值（前置）
+    //   刻意**不** P.resetCtxs(): 那会清空上下文表, 而本步骤不能导航被测页（一导航就变成
+    //   "刷新即见"而不是"即时跟随"）。不导航就不会有新的 executionContextCreated 事件,
+    //   上下文表会一直是空的 → pickExtWorld 等不到世界（本轮实测踩到过）。
+    const contentCtx = await pickExtWorld();
+    const preLive = await P.ev('(() => (window.__svi && window.__svi.prefs) ? window.__svi.prefs.maskBlur : null)()', contentCtx.id);
+    assert.strictEqual(Number(preLive), Number(DEF.maskBlur),
+      'fixture 前提: 外部写入**之前**, 被测页持有的还是默认值（否则"跟随"无从证明）');
+
+    // (2) 设置页改一项 —— 此刻内容脚本页**开着**（正是上轮出问题的窗口）
+    const optBefore = await readPrefsRaw();
+    const blur0 = Number(JSON.parse(optBefore).maskBlur);
+    assert.strictEqual(blur0, Number(DEF.maskBlur), 'fixture 前提: 进场时 maskBlur 是默认值');
+    const optWrote = await driveOptionsBlur(SYNC_BLUR);
+    assert.strictEqual(Number(optWrote.maskBlur), SYNC_BLUR, 'fixture 前提: 设置页写入新值成功');
+
+    // (3) 订阅必须让开着的页面**跟上**（不再需要刷新）
+    const followedLive = await waitFor(async () => {
+      try {
+        const v = await P.ev('(() => (window.__svi && window.__svi.prefs) ? window.__svi.prefs.maskBlur : null)()', contentCtx.id);
+        return Number(v) === SYNC_BLUR ? v : null;
+      } catch (e) { return null; }
+    }, 8000, '开着的页面跟随设置页的写入').catch(() => null);
+    assert.strictEqual(Number(followedLive), SYNC_BLUR,
+      '开着的页面必须靠 storage.onChanged 订阅即时跟上另一个界面的写入（R2e 的核心能力）');
+    console.log('    设置页写 maskBlur=' + SYNC_BLUR + ' → 开着的页面即时跟随 ✓（无需刷新）');
+
+    // (4) 关键一条：内容脚本页**导航卸载**（pagehide 整份回写）→ 新值必须仍在
+    await P.send('Page.navigate', { url: 'about:blank' });
+    await sleep(1500);   // 卸载回写 = flushPrefsNow(300ms 防抖) + Store.flush(异步) + 余量
+    const survived = await readPrefsRaw();
+    assert.ok(survived, '卸载后 svi:prefs 必须仍然读得到');
+    assert.strictEqual(Number(JSON.parse(survived).maskBlur), SYNC_BLUR,
+      '内容脚本页卸载时的整份回写**不得**把设置页写入的新值按回旧值（R1b 实测缺陷的复现点）');
+    console.log('    旧页卸载回写后，设置页写入的新值仍在 ✓（上轮缺陷路径已根治）');
+
+    // 收尾: 用设置页把 maskBlur 还原成默认值（与产品同一路径）
+    const restored2 = await driveOptionsBlur(Number(DEF.maskBlur));
+    assert.strictEqual(Number(restored2.maskBlur), Number(DEF.maskBlur), '场景 8 收尾必须还原 maskBlur');
+    console.log('    收尾还原: maskBlur=' + restored2.maskBlur + ' ✓');
+
+    // 场景 8 用完设置页了 → 现在关掉它（关掉之后不再断言：见文件头的超时坑）
+    await B.send('Target.closeTarget', { targetId: optTargetId });
 
     await U.send('Page.removeScriptToEvaluateOnNewDocument', { identifier: stubbed.result.identifier });
     await B.send('Target.closeTarget', { targetId: popupTargetId });

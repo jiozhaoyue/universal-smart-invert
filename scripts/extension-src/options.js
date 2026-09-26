@@ -10,9 +10,11 @@
 //   · chrome.storage.sync 下超 CHUNK_SIZE 的值走分片：`svi:prefs.meta` = {chunks,bytes} + `svi:prefs#i`
 //   · 后端链 sync → local（内容脚本在 sync 配额受限时会整体降级到 local，故读取两处都要试）
 //
-// 跨界面同步口径（如实说明，勿夸大）：内容脚本**没有** storage.onChanged 订阅，
-//   `Store.onRemoteLoaded` 只在它自己启动装载远端命名空间时触发一次。因此本页写入后，
-//   已经打开的页面**不会**即时跟随；页面刷新 / 新开标签页装载 `svi:prefs` 时才会读到新值。
+// 跨界面同步口径（v6.4 R2e 起）：
+//   本页每次写入后盖 `svi:prefs.rev`（写入时刻的毫秒时间戳，旁路版本键）。
+//   内容脚本**订阅了** `chrome.storage.onChanged`，收到偏好变更就读版本做新旧仲裁，
+//   比它观察到的更新才采纳 —— 于是开着的页面会**即时跟随**本页的改动，而它之后那次
+//   「卸载时整份回写」写的就是新值而不是旧值（这正是 R1b 实测到的覆盖缺陷的根治点）。
 'use strict';
 
 (function () {
@@ -165,12 +167,21 @@
     writeTimer = null;
     if (!target) { setStatus('保存失败：扩展存储不可用', 'err'); return; }
     const raw = JSON.stringify(prefs);
-    if (await writeLogical(target, raw)) { setStatus('已保存', 'ok'); return; }
+    if (await writeLogical(target, raw)) { await stampRev(target); setStatus('已保存', 'ok'); return; }
     // sync 写失败（配额 / 限流）→ 再往 local 写一份兜底，但**不**改 target：
     // 下次改动仍优先写 sync，一旦恢复，主源就回到 sync（与内容脚本的 backend 链一致）。
     const local = areaList().find((a) => a.name === 'local');
-    if (local && local !== target && await writeLogical(local, raw)) { setStatus('已保存到本地存储（云同步受限）', ''); return; }
+    if (local && local !== target && await writeLogical(local, raw)) { await stampRev(local); setStatus('已保存到本地存储（云同步受限）', ''); return; }
     setStatus('保存失败（云同步受限且本地写入也失败）', 'err');
+  }
+
+  // v6.4 R2e: 盖上**版本旁路键** —— 内容脚本的跨界面同步靠它做新旧仲裁：
+  //   每次写入后把 svi:prefs.rev 设为写入时刻，开着的页面收到 onChanged 事件后会读它，
+  //   只在"比自己观察到的更新"时才采纳。没有这个键，内容脚本就无法区分
+  //   「别的界面刚写的」与「它自己刚写的（会自激）」以及「批量导入的陈旧事件」。
+  //   顺序: **值写成功之后**再盖版本 —— 反过来会让别的界面以为有新值而去读一个旧值。
+  async function stampRev(area) {
+    try { await setOne(area.area, 'prefs.rev', String(Date.now())); } catch (e) { /* ignore */ }
   }
 
   // ============================================================

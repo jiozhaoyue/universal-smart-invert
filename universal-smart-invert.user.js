@@ -345,6 +345,44 @@
     _api: null,                   // 同步后端适配器 {get, set, remove, keys}
     _indexKey: 'svi:index',       // GM 后端无枚举 API → 维护键索引
 
+    // ===== v6.4 R2e: 跨界面偏好同步 —— 版本旁路键 + 装载观察 =====
+    // 症状 (R1b 实测): options 写 13 → 旧页 pagehide 整份回写 8 → 新值被覆盖。
+    // 根因: 旧页的镜像**陈旧**(它从不知道 13), 而卸载时它无条件把内存里那份整份写回。
+    // 本层做两件事:
+    //   ① 旁路版本键 `svi:<逻辑键>.rev` (= 写入时刻毫秒时间戳)。为什么用旁路键而不是把版本塞进
+    //      值里: 值的形状是**外部契约**(options 页渲染、规则包/备份导入导出都直接读它), 加外壳会
+    //      一次性破坏兼容; 旁路键是纯加法, 老读者无视它。
+    //   ② 记录"本标签页最后观察到的版本" `_revSeen`, 供两条通道使用: 卸载路径的仲裁 (见 flush 的
+    //      opts.asUnload) 与 storage.onChanged 订阅 (见 §24 的跨界面同步接线)。
+    _revSeen: new Map(),          // 逻辑键 → 最后观察到的版本号
+
+    revKeyOf(logical) { return logical + '.rev'; },
+
+    // 下一个版本号: **严格单调** (毫秒时间戳, 但保证比本键已观察到的版本大)。
+    //   为什么不能直接用 Date.now(): 同一毫秒内的两次写入会得到相同的版本号, 于是
+    //   "远端比自己新" 这个判据为假 —— 别的界面会**忽略**这次更新 (而值其实变了)。
+    //   残留边界如实标注: 两个界面在**同一毫秒**各自首次写入同一键时, 版本号仍可能相同;
+    //   那一档由订阅侧的"按值判变更"兜住 (见 resyncLogical), 因此不会漏掉更新。
+    nextRev(logical) {
+      const now = Date.now();
+      const seen = this._revSeen.get(logical) || 0;
+      return now > seen ? now : seen + 1;
+    },
+
+    // 取远端版本 (同步后端直接读; chrome 后端由调用方 await 异步读)
+    readRevSync(logical) {
+      try {
+        const v = this._api && this._api.get ? this._api.get(this.revKeyOf(logical)) : null;
+        return Number(v) || 0;
+      } catch (e) { return 0; }
+    },
+
+    // 卸载路径的仲裁判据: 远端版本**比本页观察到的更新** → 本页已过期, 不许回写。
+    staleForUnload(logical) {
+      const seen = this._revSeen.get(logical) || 0;
+      return this.readRevSync(logical) > seen;
+    },
+
     // —— 后端探测 (一次性, boot 时; storeBackend 偏好由 applyBackendPref 在状态载入后应用) ——
     detectBackend() {
       try {
@@ -502,6 +540,7 @@
         const plain = new Set();
         for (const k of keys) {
           if (k.endsWith('.meta')) metaKeys.add(k.slice(0, -5));
+          else if (k.endsWith('.rev')) this._revSeen.set(k.slice(0, -4), Number(this._api.get(k)) || 0); // v6.4 R2e: 版本旁路键不进镜像
           else plain.add(k);
         }
         for (const logical of new Set([...metaKeys, ...plain])) {
@@ -565,7 +604,9 @@
           const plain = new Set();
           for (const k of keys) {
             if (k.endsWith('.meta')) metaKeys.add(k.slice(0, -5));
-            else plain.add(k);
+            else if (k.endsWith('.rev')) { // v6.4 R2e: 版本旁路键不进镜像
+              try { this._revSeen.set(k.slice(0, -4), Number(await this._api.get(k)) || 0); } catch (e) { /* ignore */ }
+            } else plain.add(k);
           }
           for (const logical of new Set([...metaKeys, ...plain])) {
             const raw = await this.readRawAsync(logical);
@@ -587,6 +628,33 @@
         try { this.onRemoteLoaded(); } catch (e) { /* ignore */ }
       }
       return this.backend;
+    },
+
+    // v6.4 R2e: 从一次**外部写入**(storage.onChanged) 把该逻辑键的最新值拉回镜像。
+    //   返回 true = 确实变了 (调用方据此重放页级动作态); false = 没变 / 过时事件 / 读不到。
+    //   判据分两层, 各有明确分工:
+    //     · 版本号 —— 只用来**排除过时事件** (比本页已观察到的更旧 → 丢弃);
+    //     · 值本身 —— 才是"变没变"的判据。
+    //   为什么不能只看版本号: 两个界面在同一毫秒各写一次会拿到相同版本号, 只看版本会把
+    //   后一次当成"自己的回声"而漏掉。按值比较则一定会采纳, 也不会自激 (本页自己的写入
+    //   与镜像一致 → 判为无变化)。
+    async resyncLogical(logical) {
+      try {
+        const raw = await this.readRawAsync(logical);
+        if (raw == null) return false;
+        let remoteRev = 0;
+        try { remoteRev = Number(await this._api.get(this.revKeyOf(logical))) || 0; } catch (e) { /* ignore */ }
+        const seen = this._revSeen.get(logical) || 0;
+        if (remoteRev && remoteRev < seen) return false;   // 过时事件 (例如导入旧备份触发的批量变更)
+        const cur = this.mirror.get(logical);
+        if (cur !== undefined && JSON.stringify(cur) === raw) {
+          if (remoteRev > seen) this._revSeen.set(logical, remoteRev);
+          return false;                                     // 值没变 (含本页自己写入的回声)
+        }
+        this.mirror.set(logical, JSON.parse(raw));
+        if (remoteRev > seen) this._revSeen.set(logical, remoteRev);
+        return true;
+      } catch (e) { return false; }
     },
 
     async readRawAsync(logical) {
@@ -693,7 +761,13 @@
     },
 
     // —— 落盘: 同步后端直接写; chrome 后端异步写 (含 8KB 分片 + 配额降级) ——
-    flush() {
+    //   opts.asUnload = true 表示这次落盘来自**页面卸载路径**(pagehide / visibilitychange→hidden)。
+    //   那条路径会把内存里那份偏好**整份**写回, 因此必须做版本仲裁: 若远端比本页观察到的更新
+    //   (别的界面刚写过), 本页已过期 → 跳过该键, 否则会把新值覆盖回旧值 (R1b 实测的正是这一条)。
+    //   常规写入**不做**这个判断: 镜像靠 storage.onChanged 订阅保持新鲜, 此时"最后写入者胜"
+    //   等价于合并; 而在这里跳过会让用户刚做的那次修改静默丢失。
+    flush(opts) {
+      const asUnload = !!(opts && opts.asUnload);
       clearTimeout(this.flushTimer);
       this.flushTimer = null;
       if (!this.pending.size || !this._api) return;
@@ -745,18 +819,34 @@
           }
           if (!this.mirror.has(logical)) continue;
           if (this.backend === 'chrome-sync' || this.backend === 'chrome-local') {
-            writeLogicalAsync(this, logical, this.mirror.get(logical));
+            writeLogicalAsync(this, logical, this.mirror.get(logical), asUnload);
           } else {
+            if (asUnload && this.staleForUnload(logical)) {
+              try { console.warn('[SmartInvert] 卸载回写已跳过: 远端 ' + logical + ' 比本页新 (跨界面同步仲裁)'); } catch (e) { /* ignore */ }
+              continue;
+            }
             writeLogical(logical, this.mirror.get(logical));
+            const rev = this.nextRev(logical);
+            try { this._api.set(this.revKeyOf(logical), String(rev)); } catch (e) { /* ignore */ }
+            this._revSeen.set(logical, rev);
             if (this.backend === 'gm') this._syncGmIndex();
           }
         } catch (e) { /* 单键失败不阻塞其它键 */ }
       }
 
       // chrome 异步写封装 (独立函数, 避免闭包引用混乱); 配额失败 → 降级 local
-      function writeLogicalAsync(store, logical, value) {
+      function writeLogicalAsync(store, logical, value, asUnload) {
         const raw = JSON.stringify(value);
         Promise.resolve().then(async () => {
+          // v6.4 R2e: 卸载路径先做版本仲裁 (chrome 后端只能异步读版本键)
+          if (asUnload) {
+            let remoteRev = 0;
+            try { remoteRev = Number(await store._api.get(store.revKeyOf(logical))) || 0; } catch (e) { /* ignore */ }
+            if (remoteRev > (store._revSeen.get(logical) || 0)) {
+              try { console.warn('[SmartInvert] 卸载回写已跳过: 远端 ' + logical + ' 比本页新 (跨界面同步仲裁)'); } catch (e) { /* ignore */ }
+              return;
+            }
+          }
           if (store.useChunking && raw.length > store.CHUNK_SIZE) {
             const parts = store.chunkRaw(raw);
             // 先清理旧分片 (含缩容残留), 再写新清单与分片
@@ -779,6 +869,12 @@
             const ok = await store._api.set(logical, raw);
             if (!ok) { store._degradeToLocal(logical, value); return; }
           }
+          // v6.4 R2e: 值写成功后落版本旁路键, 并记入本页观察值 —— 本页自己的写入不该被自己
+          //   (或后来者误判) 当成"远端更新"。版本写在值之后: 版本先落而值没落, 会让别的界面
+          //   以为有更新而去读一个旧值。
+          const rev = store.nextRev(logical);
+          try { await store._api.set(store.revKeyOf(logical), String(rev)); } catch (e) { /* ignore */ }
+          store._revSeen.set(logical, rev);
         }).catch(() => { /* ignore */ });
       }
 
@@ -16585,7 +16681,12 @@
 
   // chrome.storage 后端 (插件形态): 异步装载远端命名空间后重载偏好
   try {
-    Store.onRemoteLoaded = () => {
+    // v6.4 R2e: 「偏好从存储/远端到来后重放页面态」的**唯一实现点** —— 两个调用方共用:
+    //   ① Store.onRemoteLoaded (启动时远端命名空间装载完成);
+    //   ② storage.onChanged 订阅 (别的界面刚改完, 本页要跟着变)。
+    //   写成函数而不是复制一份, 是因为这两条路径的重放内容必须完全一致 —— 否则会出现
+    //   「启动时正确、被外部改动后只改了一半」这类只在特定时序下显形的缺陷。
+    const reapplyPrefsFromStore = () => {
       try {
         state = loadState();
         // v4.6: prefs 已是 getter, 永远引用活 state, 不再需要显式回写
@@ -16598,7 +16699,44 @@
         if (actionEnabled('dim')) applyPageDim(true); else applyPageDim(false);
       } catch (e) { /* ignore */ }
     };
+
+    // chrome.storage 后端 (插件形态): 异步装载远端命名空间后重载偏好
+    Store.onRemoteLoaded = reapplyPrefsFromStore;
     Store.init();
+
+      // —— v6.4 R2e: 跨界面偏好同步订阅 ——
+      //   订阅 `chrome.storage.onChanged`, 让本页跟随**别的界面**(扩展设置页 / 另一个标签页)
+      //   刚写入的偏好, 而不是等下次刷新 —— 这是 PRD 的"任一处修改后另一处刷新即见"之上的一步:
+      //   开着的页面也会立刻跟上, 于是它之后那次「整份回写」写的就是**新值**而不是旧值 ——
+      //   这正是 R1b 实测的覆盖缺陷 (options 写 13 → 旧页 pagehide 回写 8) 的根治点。
+      //   版本仲裁在 Store.resyncLogical 里: 只接受比自己观察到的更新的版本, 故自己的写入
+      //   与由它触发的事件都会被跳过, 不会自激。
+      if (typeof chrome !== 'undefined' && chrome && chrome.storage && chrome.storage.onChanged) {
+        const PREFIX_FOR_SUB = SVI_PREFIX;
+        const areaNameOf = (b) => (b === 'chrome-local' ? 'local' : 'sync');
+        let resyncTimer = null;
+        chrome.storage.onChanged.addListener((changes, areaName) => {
+          try {
+            if (!changes || areaName !== areaNameOf(Store.backend)) return;
+            // 只关心偏好这一个逻辑键: 整值 svi:prefs / 分片清单 svi:prefs.meta / 分片 svi:prefs#i / 版本 svi:prefs.rev
+            const prefPrefix = PREFIX_FOR_SUB + 'prefs';
+            let hit = false;
+            for (const k of Object.keys(changes)) {
+              if (k === prefPrefix || k.indexOf(prefPrefix + '.') === 0 || k.indexOf(prefPrefix + '#') === 0) { hit = true; break; }
+            }
+            if (!hit) return;
+            if (resyncTimer) clearTimeout(resyncTimer);
+            resyncTimer = setTimeout(async () => {
+              resyncTimer = null;
+              try {
+                if (!Store.ready) return;                        // 自己还在装载中: 启动路径会处理
+                const changed = await Store.resyncLogical('prefs');
+                if (changed) reapplyPrefsFromStore();
+              } catch (e) { /* ignore */ }
+            }, 120);                                             // 防抖: 分片写入会连发多条事件
+          } catch (e) { /* ignore */ }
+        });
+      }
   } catch (e) { /* ignore */ }
 
   // v4.0: 站点电源架构 —— 开机禁用时引擎不启动, 胶囊以"停用态"出现, 电源可热启用
@@ -16821,10 +16959,12 @@
   }, 60000);
 
   // 全量落盘 (统计 + 偏好 + Store 命名空间)
+  //   v6.4 R2e: 这条路径只有两个调用方 —— visibilitychange(hidden) 与 pagehide, 都是**卸载/隐藏**
+  //   路径, 因此传 asUnload: 它会把内存里那份偏好整份写回, 必须做版本仲裁 (见 Store.flush 注释)。
   function flushEverything() {
     try { StatsManager.flush(); } catch (e) { /* ignore */ }
     try { flushPrefsNow(); } catch (e) { /* ignore */ }
-    try { Store.flush(); } catch (e) { /* ignore */ }
+    try { Store.flush({ asUnload: true }); } catch (e) { /* ignore */ }
   }
 
   document.addEventListener('visibilitychange', () => {
