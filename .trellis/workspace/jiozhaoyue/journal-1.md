@@ -577,3 +577,73 @@ popup 端到端」，并把门禁从四绿扩为**五绿**（含 CI 与发版流
 - **误判来源**：本机 Windows 账号名 `Admin` 而用户目录是 `C:\Users\caocaobi`（账号改名，`C:\Users\Admin` 是空壳）
 - 已把关键文件备份到 `D:\Edge-backup-20260926`（278 MB）；建议停用 Edgemin（自启的内存压缩工具）后观察崩溃是否停止
 - 仍未确认：用户所说「正常打开是空的」那个窗口到底落在哪个配置/通道（需在窗口内看 `edge://version`）
+
+## Session 18: v6-4 阶段 R1 完成 —— options 页承载全部设置项（真源驱动 + 双向同步 + 清单单测）
+<!-- trellis-session: v=2 fp=r1b-options-20260926 -->
+
+**Date**: 2026-09-26
+**Task**: v6-4 UI 全量同源重构（子任务 `09-25-v6-ui-rebuild`，本轮推进 R1b）
+**Branch**: `main`
+
+### Summary
+
+从上一轮的交接点（R1a 已交付、R1b 未开始）接着做，把 **options 设置页**做完：按 `SVI_SETTINGS_SCHEMA`
+真源渲染 **10 组 / 91 项**，控件用构建期抽出的 `SviControls`、控件样式用构建期注入的**整份面板 CSS**
+（于是「三处同源」在设置页上第一次做到**真复用**而不是手写同结构）。写入走**与内容脚本 Store 同一份**
+`svi:prefs` 协议（含 `.meta`+`#i` 分片与 sync→local 回退），清单单测做 **schema ⟷ 默认值 ⟷ 面板键面
+三向核对**（例外表 27 条逐条写明理由），E2E 新增场景 7 断言**与真源逐键比对 + 双向同步**。评审门 G2 通过（带例外）。
+
+### Main Changes
+
+- **options 页**：`scripts/extension-src/options.html`（脚本顺序 schema → controls → options；新占位
+  `SVI_PANEL_CSS_INJECT`）+ `options.js`（渲染 / 点号键路径 / 去抖 300ms 落盘 / 状态行）
+- **构建**：`build-extension.js` 新增面板 CSS 抽块与 `SVI_IMG_COLOR_PRESETS`（浅色色卡）注入；
+  **缺占位即构建失败**（与 token 块同纪律）
+- **面板 CSS**：补齐 6 组「v6.4 控件词汇」样式（chip / collapsible / msg / btn / 快捷键输入）——
+  R1a 抽了控件库却没样式，这是 R2 重建的前置；对面板现有 DOM **零命中**（已核对类名）
+- **schema 修正**（R1a 机械抽取的 4 处实测缺陷）：两处 hint 是源码片段 / 站点名单两项无标签 /
+  三个动作开关键面应为 `actions.*.enabled` / 两个面积滑块补 `scale:100`；另补录两个「面板由胶囊按钮承载、
+  没有行定义」的总开关（`imageInvert` / `autoDetect`）→ 89 项变 **91 项**；回填 10 个 select 的 describe
+- **门禁**：`test.js` 新增 R1b 清单单测块（含 `chunkRaw` 与 `Store.chunkRaw` 逐片同构）；`test-extension.js`
+  新增场景 7（options 端到端，双向同步 + 收尾还原）
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `3f2a7a7` | feat(v6.4): 阶段 R1 完成 —— 扩展设置页承载全部 91 项设置（真源驱动 + 双向同步 + 清单单测） |
+
+### Testing
+
+- **五绿**：`node --check` ✓ / `test.js` ✓（4/4 连续绿；既有偶发 test.js:820 分片定时竞态本轮未复现）/
+  `test-browser.js` **33 场景** ✓ / `test-extension.js` **8 场景** ✓ / build+pack（zip **12 entries**）✓
+- **CI 的那道也跑了**：`scripts/check-panel-overflow.js` ✓（7 档宽度 × 3 种布局，无横向溢出）
+- **负向对照**：改坏副本（从 `settings-schema.js` 删掉 maskBlur 一项）→ 场景 7 立刻变红退出 1
+  （`options 页声明的项数必须等于真源项数: 90 !== 91`）—— 断言确实咬得住
+- 场景 7 实测打印：`渲染: 10 组 / 91 项 | 开关 28 滑块 45 下拉 13 文本框 2 取色器 2 色卡 4 | 存储后端 sync` ·
+  `改 maskBlur=13 → svi:prefs 已更新 (状态行: 已保存)` · `内容脚本重载后 prefs.maskBlur = 13` ·
+  `内容脚本写入 maskHoverOpacity=0.35 → options 重载后已读到` · `收尾还原 ✓`
+
+### 本轮实测到的三个真东西（都写进 implement.md 偏离 10~12）
+
+1. **控件样式只能有一个实现点** → 面板 CSS 整份构建期注入，而不是在扩展页手写第二套；
+   安全性已核对（token 块外零颜色字面量；规则全部 `.svi-*` 或 `html.svi-*` 门控，设置页不会命中）。
+2. **跨界面同步的真实机制与计划里写的不一样**：`Store.onRemoteLoaded` 只在内容脚本自己装载远端命名空间时
+   触发**一次**，它没有 `storage.onChanged` 订阅；而且在 `pagehide` / 页面隐藏时会把**内存里那份**偏好
+   **整份回写** —— 实测「options 写 13 → 导航旧页 → 旧页回写 8 → 新页读到 8」。故 E2E 的顺序必须是
+   「先让旧页卸载并等回写落盘，再写」；真正的即时同步需要在内容脚本加变更订阅 + 版本仲裁，登记为 R2 待决项。
+3. **CDP 挑隔离世界的坑**：导航后数组里可能混入已销毁的上下文，对已销毁的 contextId 求值**不报错而是永不到来**
+   （整轮拖到 20s 超时）。加固：倒序试 + 每次探测 2.5s 有界 + 丢弃的探测挂 `catch`（否则未处理的 rejection
+   会把 Node 进程打掉）。
+
+### Status
+
+[OK] **Completed**（v6-4 第二轮：R0 ✅ / R1 ✅ 并过 G2；R2 面板重建 / R3 emoji 清零 / R4 文档 未开始）
+
+### Next Steps
+
+1. **R2（内嵌面板 12 区块重建）**：换 `SviControls` 工厂；把三项自建 DOM 的设置（原色屏蔽色卡 /
+   元素规则列表 / 背景排除选择器）换成控件库工厂**并同时进 schema**（需新控件类型：色卡增删、结构化列表增删）；
+   决定是否给内容脚本加 `storage.onChanged` 订阅；**不得放宽 bench 面板断言**
+2. R3（emoji 清零，当前 27 种 / 317 实例，R1 新增文案里的 ⚠ 也计入）→ R4（README / README_EN + 四绿）
+3. 未决观察（上轮登记，本轮未动）：复访时门判可武装但 `pendingMask.armed` 实测 false —— 机制层待查
