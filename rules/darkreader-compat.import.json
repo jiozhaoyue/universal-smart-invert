@@ -1,8 +1,8 @@
 {
   "kind": "svi-rules",
   "schema": 1,
-  "version": "4.2.0",
-  "exportedAt": "2026-09-13T10:33:51.277Z",
+  "version": "5.0.0",
+  "exportedAt": "2026-09-26T07:48:19.511Z",
   "generator": "scripts/sync-darkreader.js",
   "note": "Machine-generated Dark Reader compatibility seeds (dark-sites → siteBlacklist). Import via 设置 → 数据与备份 → 导入并合并; array merge dedups, idempotent.",
   "rules": {
