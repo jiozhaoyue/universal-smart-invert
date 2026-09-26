@@ -96,7 +96,7 @@ bench 侧：`Scenario 32/33` 在修复版上通过；在 HEAD 版上的表现见
 
 **验证**：`dev/probe-github-readme.js` 实跑该行代码，主世界/隔离世界两份输出均正常返回。
 
-## 阶段 6 — 收口 ⬜
+## 阶段 6 — 收口 ✅ 完成
 
 - [x] spec 更新：`.trellis/spec/frontend/style-mount-contract.md`（契约 C1~C4 + 不变量 I1~I5 + 守护断言表），
       并登记进 `frontend/index.md`
