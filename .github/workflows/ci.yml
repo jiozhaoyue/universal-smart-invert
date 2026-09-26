@@ -81,6 +81,11 @@ jobs:
           SVI_CHROME_PATH: ${{ steps.setup-chrome.outputs.chrome-path }}
         run: node test-browser.js
 
+      - name: Real-extension E2E (loads the built extension via Extensions.loadUnpacked)
+        env:
+          SVI_CHROME_PATH: ${{ steps.setup-chrome.outputs.chrome-path }}
+        run: node test-extension.js
+
       - name: Settings panel overflow probe (7 widths x 3 layouts, zero horizontal overflow)
         env:
           SVI_CHROME_PATH: ${{ steps.setup-chrome.outputs.chrome-path }}

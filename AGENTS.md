@@ -41,7 +41,9 @@ Chrome extension DERIVED from it. Key paths:
   CDP probes (`probe-github.js`, proxy-aware via `HTTPS_PROXY`, target URL as argv)
 - `dev/` — local real-time testing assets (dev loader userscript; server is off-the-shelf)
 - `test.js` (Node unit tests, loads the real userscript via a DOM/localStorage shim and asserts
-  `window.__svi` exports) · `test-browser.js` (CDP headless-Chrome end-to-end bench)
+  `window.__svi` exports) · `test-browser.js` (CDP headless-Chrome end-to-end bench, **script-injected
+  form**) · `test-extension.js` (CDP end-to-end **real-extension form**: loads the built `extension/`
+  via `Extensions.loadUnpacked` and asserts the isolated world)
 - `dist/` — packed extension zip (gitignored). `.trellis/tasks/archive/` — per-version PRDs/design docs
 
 ## Commands (all green required before commit)
@@ -50,8 +52,17 @@ Chrome extension DERIVED from it. Key paths:
 node --check universal-smart-invert.user.js
 node test.js
 node test-browser.js                       # needs Chrome; CDP port 9222
+node test-extension.js                     # needs Chrome; CDP port 9333 + http 8791
 node scripts/build-extension.js && node scripts/pack.js
 ```
+
+Real-extension-form gotchas: Chrome / Edge **137+ ignore `--load-extension`**, so the only working
+channel is CDP `Extensions.loadUnpacked` (needs `--enable-unsafe-extension-debugging` +
+`--remote-debugging-pipe`). `test-extension.js` therefore self-verifies the load in the content
+script's world (`chrome.runtime.id` + `getManifest().version`) — never weaken that back to a bare
+"the page rendered" check. Set `SVI_EXT_DIR=<dir>` to run it against a tampered copy (that is the
+negative control proving the assertions bite); `SVI_CHROME_PATH` is then the **only** candidate, which
+is what makes the "no browser → 未验证" downgrade path reachable.
 
 Bench gotchas: uses a FIXED profile dir `.chrome-test-profile/` (gitignored) that the runner
 wipes at start; needs `--enable-unsafe-swiftshader` for WebGL scenarios; scenarios 2b/18 rely on
@@ -134,7 +145,7 @@ removed after it bound loopback-only and was unreachable via LAN/proxied browser
   `object-position`, with letterbox margins masked out. Never mount on the media element's own
   pseudo-element, and never reuse a site wrapper's `::after`.
 - **Committing without pushing is incomplete (不得只提交).** After every work commit, push to
-  `origin main` (`git push`) before the session ends — all four gate commands green first.
+  `origin main` (`git push`) before the session ends — all five gate commands green first.
 - GitHub Actions: the `secrets` context is NOT allowed in `if:` — use a `$GITHUB_ENV` gate step.
 
 ## Before editing engines
@@ -167,7 +178,7 @@ any page via CDP and dumps engine state).
 
 1. **收尾类 / 低风险 / 可逆动作自行编排并直接执行**，不为逐条征询而打断用户。包括：
    补文档与版本号同步、回填任务验收勾选、清理已归档副本与已注销 worktree 残留、
-   归档与 spec 沉淀、四绿门禁重跑、按已确认方案继续实现。
+   归档与 spec 沉淀、五绿门禁重跑、按已确认方案继续实现。
 2. 判定口径：**做错也只是返工、不造成不可逆损失** → 自主执行。
 3. **必须停下询问的例外**：① 冲突（验收标准与实测不符 / 结论矛盾 / 规则打架）；
    ② 不可逆（删改已有文件、丢弃未提交改动、重写历史）；③ 环境变更（装包、改全局配置）；
