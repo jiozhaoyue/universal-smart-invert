@@ -49,9 +49,25 @@ const SviControls = {
     },
 
     // 区块: 标题行 + 行集合 (sync 收集)
-    section(title, hint, id) {
+    //   v6.4 R2d: 第 4 个参数是**图标名**(ICONS 的键) —— 区块标题此前带 emoji, 现改为内联 SVG。
+    //   图标挂在标题 span **内部的最前**, 故 `.svi-sec-title span` 的 textContent 仍是纯标题文字
+    //   (扩展设置页与 E2E 都按这个选择器读标题, SVG 不含文本节点, 不受影响)。
+    // 区块标题行 (`.svi-sec-title` 的**唯一构造点**): 标题前可带内联 SVG 图标。
+    //   v6.4 R2d: 图标挂在标题 span **内部最前**, 故 `.svi-sec-title span` 的 textContent 仍是纯标题文字
+    //   (扩展设置页与 E2E 都按这个选择器读标题; SVG 不含文本节点, 不受影响)。
+    sectionTitle(text, iconName) {
+      const title = this.h('div', { class: 'svi-sec-title' });
+      const span = this.h('span', { text: String(text) });
+      const ic = iconName ? this.icon(iconName, '', 'svi-sec-icon') : null;
+      if (ic) span.insertBefore(ic, span.firstChild || null); // 图标放最前
+      title.appendChild(span);
+      return title;
+    },
+
+    // 区块: 标题行 + 行集合 (sync 收集); 第 4 个参数是图标名 (见 sectionTitle)
+    section(title, hint, id, iconName) {
       const el = this.h('div', { class: 'svi-modal-section', id: id || '' });
-      const secTitle = this.h('div', { class: 'svi-sec-title' }, this.h('span', { text: title }));
+      const secTitle = this.sectionTitle(title, iconName);
       if (hint) secTitle.appendChild(this.h('span', { text: hint, style: 'font-size:10px; color:var(--svi-text-dim);' }));
       el.appendChild(secTitle);
       const syncs = [];
@@ -151,10 +167,13 @@ const SviControls = {
         const chip = this.h('div', { class: 'svi-color-chip' });
         const swatch = this.h('div', {
           class: 'svi-color-chip-swatch',
-          style: 'background: ' + (item.color || '#ffffff') + (item.dark ? '; border-color: rgba(255,255,255,0.3);' : '') + ';',
+          // 色卡描边走 token (item.color 本身是数据: 它描述被处理的画面, 见 R2c 的判定)
+          style: 'background: ' + (item.color || '#ffffff') + (item.dark ? '; border-color: rgba(var(--svi-white-rgb), 0.3);' : '') + ';',
         });
         const label = this.h('span', { text: item.label });
-        const check = this.h('span', { class: 'svi-color-chip-check', text: '✓' });
+        // v6.4 R2d: 勾选标记改用内联 SVG (与其它图标同一处实现; 图标缺失时退化为空 span, 不炸)
+        const check = this.icon('check', '', 'svi-color-chip-check')
+          || this.h('span', { class: 'svi-color-chip-check' });
         chip.append(swatch, label, check);
         chip.addEventListener('click', () => onToggle(item.id));
         chips[item.id] = chip;
@@ -177,8 +196,12 @@ const SviControls = {
       for (const b of buttons) {
         const btn = this.h('button', {
           class: 'svi-mini-btn' + (b.primary ? '' : '') + (b.danger ? ' danger' : ''),
-          text: b.label,
         });
+        // v6.4 R2d: 按钮可带图标 (b.icon = ICONS 的键)。图标是 SVG 节点, 不含文本,
+        //   故 textContent 仍等于 b.label —— 既有按 textContent 找按钮的 bench 断言不受影响。
+        const ic = b.icon ? this.icon(b.icon, '', 'svi-btn-icon') : null;
+        if (ic) btn.appendChild(ic);
+        btn.appendChild(this.h('span', { text: String(b.label == null ? '' : b.label) }));
         btn.addEventListener('click', (e) => {
           e.stopPropagation();
           b.onClick(e);
@@ -518,9 +541,36 @@ const SviControls = {
 
   // 图标路径表 (静态常量; 与 icon() 同源, 是「不留 emoji 字形」的唯一图标实现点)。
   //   fill:currentColor —— 颜色随所在元素的 color 走, 故按钮态/危险态自动跟随 token。
+  //   词汇表按「面板里实际用过的 emoji」逐一对应 (v6.4 R2d), 全部 16×16 网格、与文字同高。
+  //   线画图标用 stroke + fill:none, 实心图标用 fill —— 两类都吃 currentColor。
   SviControls.ICONS = Object.freeze({
     close: '<svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true"><path d="M3.5 3.5 L12.5 12.5 M12.5 3.5 L3.5 12.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" fill="none"/></svg>',
     trash: '<svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true"><path d="M3 4.5 H13 M6.5 4.5 V3 H9.5 V4.5 M4.5 4.5 L5.2 13 H10.8 L11.5 4.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>',
+    bolt: '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M9 1.5 L3.8 9.2 H7.4 L6.9 14.5 L12.2 6.8 H8.6 Z" fill="currentColor"/></svg>',
+    // 设置/参数: 三条带旋钮的滑杆 —— 12px 下比齿轮轮廓更易辨认 (接触表实测: 齿轮读作太阳)
+    gear: '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M2 4.6 H14 M2 8 H14 M2 11.4 H14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" fill="none"/><circle cx="6" cy="4.6" r="1.9" fill="currentColor"/><circle cx="10.4" cy="8" r="1.9" fill="currentColor"/><circle cx="5" cy="11.4" r="1.9" fill="currentColor"/></svg>',
+    // 外观与画面: 调色盘 —— 挖两个偏心色孔 + 一个拇指缺口 (接触表实测: 三个对称点会读作笑脸)
+    palette: '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M8 2.1 a5.9 5.9 0 1 0 0 11.8 c1.5 0 2-1.1 1.3-1.9 -1-1.1-.2-2.6 1.1-2.6 h1.2 a2.3 2.3 0 0 0 2.3-2.3 A6 6 0 0 0 8 2.1 Z" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linejoin="round"/><circle cx="5.9" cy="6.4" r=".95" fill="currentColor"/><circle cx="9.3" cy="5.4" r=".95" fill="currentColor"/><circle cx="5.3" cy="9.6" r=".95" fill="currentColor"/></svg>',
+    image: '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><rect x="2" y="3" width="12" height="10" rx="1.4" stroke="currentColor" stroke-width="1.4" fill="none"/><path d="M3.4 11 L6.6 7.6 L9 10 L10.8 8.2 L12.8 10.4" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linejoin="round"/></svg>',
+    video: '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><rect x="1.6" y="4" width="12.8" height="8" rx="1.4" stroke="currentColor" stroke-width="1.4" fill="none"/><path d="M6.8 6.3 L9.8 8 L6.8 9.7 Z" fill="currentColor"/></svg>',
+    globe: '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.3" fill="none"/><path d="M2.1 8 H13.9 M8 2.1 C5.4 4.7 5.4 11.3 8 13.9 M8 2.1 C10.6 4.7 10.6 11.3 8 13.9" stroke="currentColor" stroke-width="1.2" fill="none"/></svg>',
+    shield: '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M8 1.7 L13.3 3.9 V8 C13.3 11.1 11 13.2 8 14.3 C5 13.2 2.7 11.1 2.7 8 V3.9 Z" stroke="currentColor" stroke-width="1.4" fill="none" stroke-linejoin="round"/></svg>',
+    monitor: '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><rect x="1.8" y="3" width="12.4" height="8.3" rx="1.2" stroke="currentColor" stroke-width="1.4" fill="none"/><path d="M6.2 13.4 H9.8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" fill="none"/></svg>',
+    save: '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M2.5 3.6 A1.1 1.1 0 0 1 3.6 2.5 H10.3 L13.5 5.7 V12.4 A1.1 1.1 0 0 1 12.4 13.5 H3.6 A1.1 1.1 0 0 1 2.5 12.4 Z" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linejoin="round"/><path d="M5.2 2.5 V6.1 H10.4 V2.5 M4.9 13.5 V9.6 H11.1 V13.5" stroke="currentColor" stroke-width="1.2" fill="none" stroke-linejoin="round"/></svg>',
+    bulb: '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M8 1.8 a4.1 4.1 0 0 1 2.5 7.3 c-.5.4-.7.9-.7 1.4 H6.2 c0-.5-.2-1-.7-1.4 A4.1 4.1 0 0 1 8 1.8 Z" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linejoin="round"/><path d="M6.3 12.7 H9.7 M7 14.3 H9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" fill="none"/></svg>',
+    pointer: '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M4 1.8 V12.4 L6.9 9.7 L8.9 14.2 L10.9 13.2 L9 8.9 L12.9 8.7 Z" stroke="currentColor" stroke-width="1.2" fill="none" stroke-linejoin="round"/></svg>',
+    target: '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.3" fill="none"/><circle cx="8" cy="8" r="2.4" stroke="currentColor" stroke-width="1.3" fill="none"/><circle cx="8" cy="8" r="1" fill="currentColor"/></svg>',
+    warn: '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M8 2.2 L14.6 13.4 H1.4 Z" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linejoin="round"/><path d="M8 6 V9.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" fill="none"/><circle cx="8" cy="11.7" r=".9" fill="currentColor"/></svg>',
+    refresh: '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M13.2 8 A5.2 5.2 0 1 1 11.5 4.1" stroke="currentColor" stroke-width="1.4" fill="none" stroke-linecap="round"/><path d="M13.7 2.4 V5.5 H10.6" stroke="currentColor" stroke-width="1.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    list: '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M5.8 4.2 H13.6 M5.8 8 H13.6 M5.8 11.8 H13.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" fill="none"/><circle cx="3" cy="4.2" r="1" fill="currentColor"/><circle cx="3" cy="8" r="1" fill="currentColor"/><circle cx="3" cy="11.8" r="1" fill="currentColor"/></svg>',
+    layers: '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M8 2.2 L14 5.6 L8 9 L2 5.6 Z" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linejoin="round"/><path d="M2.8 8.5 L8 11.5 L13.2 8.5" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    undo: '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M5.8 4.2 L2.4 7.6 L5.8 11" stroke="currentColor" stroke-width="1.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/><path d="M2.4 7.6 H9.6 a3.4 3.4 0 0 1 0 6.8 H7.6" stroke="currentColor" stroke-width="1.4" fill="none" stroke-linecap="round"/></svg>',
+    block: '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.4" fill="none"/><path d="M4.2 4.2 L11.8 11.8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" fill="none"/></svg>',
+    moon: '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M10.6 1.9 a6.3 6.3 0 1 0 3.5 11.3 A7.1 7.1 0 0 1 10.6 1.9 Z" fill="currentColor"/></svg>',
+    check: '<svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true"><path d="M3.2 8.4 L6.4 11.6 L12.8 4.6" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>',
+    power: '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M8 2.2 V7.6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" fill="none"/><path d="M4.5 4.5 a4.7 4.7 0 1 0 7 0" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" fill="none"/></svg>',
+    font: '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M3.2 13 L7.2 3.2 L11.2 13 M4.9 9.7 H9.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>',
+    clock: '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.4" fill="none"/><path d="M8 4.3 V8.2 L10.7 10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>',
   });
   window.SviControls = SviControls;
 })();

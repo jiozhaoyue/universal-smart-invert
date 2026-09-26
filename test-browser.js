@@ -923,6 +923,18 @@ async function main() {
           hasShieldSection: !!document.getElementById('svi-sec-shield'),
           hasStatsSection: !!document.getElementById('svi-sec-stats'),
           hasMediaSection: !!document.getElementById('svi-sec-media'),
+          // v6.4 R2d: 区块标题的图标必须在场 (内联 SVG), 且面板里不得再有 emoji 字形。
+          //   这条断言是 R2d 在**真实浏览器**里的落点: 单测只保证源码里没有 emoji 码位,
+          //   这里保证图标真的建出来了 (ICONS 名字打错时单测抓不到, 这里会红)。
+          sectionIconSvgs: document.querySelectorAll('.svi-sec-icon svg').length,
+          btnIconSvgs: document.querySelectorAll('.svi-btn-icon svg, .svi-close-icon svg, .svi-title-icon svg').length,
+          panelEmoji: (function () {
+            const w = document.querySelector('.svi-modal-window');
+            if (!w) return 'no-window';
+            const t = w.textContent || '';
+            const m = t.match(/[\u{1F300}-\u{1FAFF}\u{2B00}-\u{2BFF}\u{2699}\u{26A0}]/u);
+            return m ? m[0] : '';
+          })(),
           hoverRestoreClass: document.documentElement.classList.contains('svi-hover-restore')
         };
         results.statsKey = {
@@ -958,6 +970,7 @@ async function main() {
     console.log(`UI Color Chips (Presets):    ${report.ui.chipsCount} chips loaded`);
     console.log(`UI Color Picker:             ${report.ui.hasPicker ? '✓ Present' : '✗ Missing'}`);
     console.log(`UI Collapsible Accordion:    ${report.ui.hasAccordion ? '✓ Present' : '✗ Missing'}`);
+    console.log(`UI Section Icon SVGs:        ${report.ui.sectionIconSvgs} (R2d: >= 9) | button/title icons: ${report.ui.btnIconSvgs}`);
     console.log(`UI Panel Action Buttons:     ${report.ui.actionBtnCount} (Expected: 4, incl. 背景替换)`);
     console.log(`Modal Site Section:          ${report.ui.hasSiteSection ? '✓ Present' : '✗ Missing'}`);
     console.log(`Modal Shield Section:        ${report.ui.hasShieldSection ? '✓ Present' : '✗ Missing'}`);
@@ -994,6 +1007,15 @@ async function main() {
     assert.strictEqual(report.ui.hasShieldSection, true, 'Modal 原色屏蔽 section must exist');
     assert.strictEqual(report.ui.hasStatsSection, true, 'Modal 数据与反馈 section must exist');
     assert.strictEqual(report.ui.hasMediaSection, true, 'Modal 当前页媒体 section must exist (v3.1)');
+    // v6.4 R2d (真实浏览器落点): 区块标题图标必须真的建出来, 面板文字里不得再有 emoji 字形。
+    //   面板两个页签合计 12 个区块, 其中 9 个走 SviControls.section(带图标名) —— 断言 >=9 而非 ==9:
+    //   后续再给区块加图标不该让这条变红, 少一个则必须红。
+    assert.ok(report.ui.sectionIconSvgs >= 9,
+      'Modal 区块标题必须带内联 SVG 图标 (R2d), 实测 ' + report.ui.sectionIconSvgs);
+    assert.ok(report.ui.btnIconSvgs >= 4,
+      'Modal 标题 / 关闭钮 / 按钮必须带内联 SVG 图标 (R2d), 实测 ' + report.ui.btnIconSvgs);
+    assert.strictEqual(report.ui.panelEmoji, '',
+      'Modal 面板文字里不得再有 emoji 字形 (R2d 已全部改为内联 SVG), 实测 ' + JSON.stringify(report.ui.panelEmoji));
     assert.strictEqual(report.ui.hoverRestoreClass, true, 'html.svi-hover-restore must be on by default (v3.1)');
 
     // R5: stats key must exist and parse after activity (flushed via the designed export path)

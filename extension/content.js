@@ -2682,14 +2682,14 @@
           bottom: 30px;
           left: 50%;
           transform: translateX(-50%);
-          background: rgba(15, 23, 42, 0.94);
+          background: rgba(var(--svi-bg-rgb), 0.94);
           color: var(--svi-text-strong);
           padding: 7px 10px 7px 14px;
           border-radius: 20px;
           font-size: 12px;
           font-weight: 500;
-          border: 1px solid rgba(56, 189, 248, 0.35);
-          box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+          border: 1px solid var(--svi-outline);
+          box-shadow: 0 4px 16px rgba(var(--svi-black-rgb), 0.5);
           z-index: 2147483647;
           display: flex;
           align-items: center;
@@ -3279,14 +3279,14 @@
           bottom: 30px;
           left: 50%;
           transform: translateX(-50%);
-          background: rgba(15, 23, 42, 0.92);
+          background: rgba(var(--svi-bg-rgb), 0.92);
           color: var(--svi-fg);
           padding: 6px 14px;
           border-radius: 20px;
           font-size: 12px;
           font-weight: 500;
-          border: 1px solid rgba(56, 189, 248, 0.35);
-          box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+          border: 1px solid var(--svi-outline);
+          box-shadow: 0 4px 16px rgba(var(--svi-black-rgb), 0.5);
           z-index: 2147483647;
           pointer-events: none;
           transition: opacity 0.2s ease;
@@ -3896,6 +3896,17 @@
         filter: var(--svi-video-tune, none) !important;
         transition: filter 0.2s ease;
       }
+      /* v6.4 R2d: 面板根声明深色配色方案 —— 原生控件 (复选框 / 滑块 / 下拉 / 数字框) 才会按深色渲染。
+         此前只有扩展页声明了它 (options / popup 的 :root), 面板漏了, 于是**未选中的复选框在深色底上
+         渲染成一块白方块**(看起来像已选中)。刻意声明在**面板自己的根容器**上而不是 :root —— 后者
+         会连站点自身的表单控件一起改观感, 违反"不改站点"的纪律。 */
+      .svi-capsule-root,
+      .svi-modal-mask,
+      .svi-modal-window,
+      #svi-toast,
+      #svi-action-toast {
+        color-scheme: dark;
+      }
       .svi-capsule-root {
         position: fixed;
         z-index: 2147483647;
@@ -4263,6 +4274,25 @@
         justify-content: center;
         line-height: 0;
         vertical-align: -1px;
+      }
+      /* v6.4 R2d: 图标与文字的间距 —— 按所在位置给一次, 不在每个 JS 调用点塞内联 style */
+      .svi-btn-icon,
+      .svi-sec-icon,
+      .svi-title-icon {
+        margin-right: 5px;
+      }
+      /* 图标在 flex 容器里不许被压扁 (按钮/性能行/能力卡片都是 flex) */
+      .svi-btn-icon svg,
+      .svi-sec-icon svg,
+      .svi-title-icon svg,
+      .svi-close-icon svg,
+      .svi4-card-icon svg {
+        flex: 0 0 auto;
+        display: block;
+      }
+      /* 模态关闭按钮: 原来是一个叉号字形, 现在是 SVG —— 尺寸与点击区不变 */
+      .svi-close-icon {
+        pointer-events: none;
       }
       /* v6.4 R2b: 颜色列表 (SviControls.colorList) 的色卡容器与色点 */
       .svi-color-list {
@@ -8526,7 +8556,7 @@
 
     // 区域遮罩: 一次性武装拖拽 (刻意不复用 Alt+Shift+拖拽 —— 那个手势已被区域反色占用)
     armRegionMask() {
-      if (!actionEnabled('mask')) { showToast('遮罩未启用（设置 → 🧩 元素动作）'); return false; }
+      if (!actionEnabled('mask')) { showToast('遮罩未启用（设置 → 元素动作）'); return false; }
       this.regionArmed = !this.regionArmed;
       showToast(this.regionArmed ? '请在页面上拖拽框选区域（Esc 取消）' : '已取消区域遮罩');
       return this.regionArmed;
@@ -12186,7 +12216,7 @@
       { key: "imgGeneralLight", kind: "toggle", label: "全浅色通用自适应检测", hint: "任何高明度浅底图表均自动识别反色" },
       { key: "maskAware", kind: "toggle", label: "暗色遮罩感知", hint: "祖先有暗色蒙层且合成后已足够暗时不再反色图片，避免破坏原有合成观感；关闭立即回到旧行为并重扫" },
       { key: "imgPresets", kind: "chipsOf", label: "预设浅色色卡", hint: "点击启用或禁用对应浅色系" },
-      { key: "imgCustomColor", kind: "color", label: "🎯 目标色图拾色器", hint: "点击色块唤出调色盘" },
+      { key: "imgCustomColor", kind: "color", label: "目标色图拾色器", hint: "点击色块唤出调色盘" },
       { key: "imgTolerance", kind: "slider", label: "目标色容差", hint: "色图匹配置信范围", min: 10, max: 80, step: 1, unit: "" },
       { key: "imgLumCutoff", kind: "slider", label: "浅色明度线", hint: "判定浅色背景的明度底线", min: 150, max: 240, step: 1, unit: "" },
       { key: "imgAreaThreshold", kind: "slider", label: "浅色面积占比", hint: "触发反色的浅底面积比例", min: 25, max: 90, step: 1, unit: "%" },
@@ -12197,7 +12227,7 @@
       { key: "imgFxParams.keyColor", kind: "color", label: "键色反色 · 目标色", hint: "仅反色接近该颜色的像素" },
       { key: "imgFxParams.keyTol", kind: "slider", label: "键色反色 · 容差", hint: "与键色的颜色距离容差", min: 10, max: 160, step: 1, unit: "" },
       { key: "animatedDetect", kind: "toggle", label: "动图全帧谱分析", hint: "" },
-      { key: "animMixedPolicy", kind: "select", label: "混合型动图", hint: "整段动画里深浅场景都有的情况。⚠ CSS 滤镜**无法按时序切换**，所以默认保持原样；「按多数帧」只是一种近似，不是逐帧反色", options: [["keep", "保持原样", "推荐：不做半吊子的近似。"], ["majority", "按多数帧近似", "白帧占多数才反色 —— 整段会一起反，不会跟着动图切。"]] },
+      { key: "animMixedPolicy", kind: "select", label: "混合型动图", hint: "整段动画里深浅场景都有的情况。注意：CSS 滤镜无法按时序切换，所以默认保持原样；「按多数帧」只是一种近似，不是逐帧反色", options: [["keep", "保持原样", "推荐：不做半吊子的近似。"], ["majority", "按多数帧近似", "白帧占多数才反色 —— 整段会一起反，不会跟着动图切。"]] },
       { key: "animAllLightRatio", kind: "slider", label: "全浅判定门", hint: "白帧占比达到此值才算\"整段都是浅色动画\"", min: 0.6, max: 1, step: 0.05, unit: "" },
       { key: "frameSampleCap", kind: "slider", label: "谱分析帧上限", hint: "最多解多少帧（超出按等间隔抽帧，不是只解开头几帧）", min: 4, max: 200, step: 4, unit: "帧" },
     ] },
@@ -12265,8 +12295,8 @@
       { key: "siteWhitelist", kind: "text", label: "白名单域名", hint: "每行一个", rows: 3 },
     ] },
     { id: "theme", title: "动态主题调节", items: [
-      { key: "flashGuardLevel", kind: "select", label: "加载前保护（防白闪）", hint: "深色站点加载前先铺黑底消除白闪；「元素遮罩」档另加元素级 pending 遮罩（见下）。⚠ 元素级遮罩**只有扩展形态**能做到真正的\"首帧前\"—— 用户脚本在 document-end 启动，首屏元素已渲染，因此只覆盖后续动态插入的元素，首屏由黑底兜底", options: [["off", "关闭", "不做任何加载前介入。"], ["document", "文档黑底", "仅文档级黑底（与 v4.6 行为一致，默认）。"], ["media", "文档黑底 + 元素遮罩", "另对\"本站已知会反色\"时的元素做 pending 遮罩。"]] },
-      { key: "maskPending", kind: "toggle", label: "元素遮罩（pending 遮罩）", hint: "media 档下对\"本站已知会反色\"的新插入媒体先遮住（visibility:hidden），判定完成即放行。三层预算兜底：总时长 / 元素数 / 单元素超时；判定失败**立即放行原图**。按 Esc（有东西被遮住时）或点下方按钮可一次性显示全部并暂停本会话" },
+      { key: "flashGuardLevel", kind: "select", label: "加载前保护（防白闪）", hint: "深色站点加载前先铺黑底消除白闪；「元素遮罩」档另加元素级 pending 遮罩（见下）。注意：元素级遮罩只有扩展形态能做到真正的\"首帧前\"—— 用户脚本在 document-end 启动，首屏元素已渲染，因此只覆盖后续动态插入的元素，首屏由黑底兜底", options: [["off", "关闭", "不做任何加载前介入。"], ["document", "文档黑底", "仅文档级黑底（与 v4.6 行为一致，默认）。"], ["media", "文档黑底 + 元素遮罩", "另对\"本站已知会反色\"时的元素做 pending 遮罩。"]] },
+      { key: "maskPending", kind: "toggle", label: "元素遮罩（pending 遮罩）", hint: "media 档下对\"本站已知会反色\"的新插入媒体先遮住（visibility:hidden），判定完成即放行。三层预算兜底：总时长 / 元素数 / 单元素超时；判定失败立即放行原图。按 Esc（有东西被遮住时）或点下方按钮可一次性显示全部并暂停本会话" },
       { key: "maskBudgetMs", kind: "slider", label: "遮罩总时长预算", hint: "超过即全部摘罩放行（防\"页面一直白/一直黑\"）", min: 200, max: 5000, step: 100, unit: "ms" },
       { key: "maskMaxElements", kind: "slider", label: "遮罩元素数上限", hint: "同时最多遮住多少个元素（超出部分不打标）", min: 1, max: 500, step: 1, unit: "个" },
       { key: "siteInvertRate", kind: "slider", label: "本站启用门 · 历史反色率", hint: "上次在本站的反色率超过此值才启用元素遮罩（首访站点一律不遮）", min: 0.05, max: 0.95, step: 0.05, unit: "" },
@@ -12296,12 +12326,12 @@
       { key: "undoStackSize", kind: "slider", label: "撤销栈容量", hint: "可回退的最大步数（仅内存，不落盘）", min: 1, max: 100, step: 1, unit: "步" },
       { key: "actionToast", kind: "toggle", label: "操作提示条", hint: "批量处理 ≥3 个元素时弹一条带「撤销」按钮的提示（单张不弹，避免噪音）。作用域：全页 · 生效时机：立即" },
       { key: "errorSentinel", kind: "toggle", label: "误反哨兵", hint: "记录你的手动修正：同一张图 24 小时内被还原 2 次给出说明，同一类元素被还原 3 次提示可一键固化。只记录与提示，不自动写规则。作用域：本站 · 生效时机：立即" },
-      { key: "learnGrading", kind: "toggle", label: "hits 分级（强 / 弱规则）", hint: "**默认关**。开启后：命中 ≥ 强规则门 的学习规则保持现有优先级；已生效但未达强门的规则降为「弱规则」，只能覆盖像素判定、不再压过内置种子规则。开启会改变既有学习规则的行为，故默认关" },
+      { key: "learnGrading", kind: "toggle", label: "hits 分级（强 / 弱规则）", hint: "默认关。开启后：命中 ≥ 强规则门 的学习规则保持现有优先级；已生效但未达强门的规则降为「弱规则」，只能覆盖像素判定、不再压过内置种子规则。开启会改变既有学习规则的行为，故默认关" },
       { key: "learnStrongHits", kind: "slider", label: "强规则门", hint: "命中多少次算「强规则」（仅分级开启时有效）", min: 2, max: 20, step: 1, unit: "次" },
       { key: "learnDemote", kind: "toggle", label: "负反馈降级", hint: "规则命中后若你手动覆盖该元素：该规则命中数归 1；连续 2 次被覆盖则自动禁用（可在 本站规则 列表里点「恢复」）。只减少错误自动化" },
-      { key: "shapePrior", kind: "toggle", label: "形状跨站先验", hint: "最弱兜底来源（**默认关**）：某「元素长相」在 ≥N 个不同站点上结论一致时，对新站同形元素直接给出结论。位置在所有种子规则之后、像素判定之前 —— 不是「像素缺失时才生效」，此处如实标注" },
+      { key: "shapePrior", kind: "toggle", label: "形状跨站先验", hint: "最弱兜底来源（默认关）：某「元素长相」在 ≥N 个不同站点上结论一致时，对新站同形元素直接给出结论。位置在所有种子规则之后、像素判定之前 —— 不是「像素缺失时才生效」，此处如实标注" },
       { key: "shapeMinHosts", kind: "slider", label: "形状先验门", hint: "至少几个不同站点结论一致才采用", min: 2, max: 20, step: 1, unit: "站" },
-      { key: "calibrateAuto", kind: "toggle", label: "阈值自校准（自动收紧）", hint: "按你的手动修正自动收紧本站判定阈值 —— **只会收紧**（减少误反）；放松只在面板给建议、需你点按钮。可用上方「恢复本站默认阈值」撤销" },
+      { key: "calibrateAuto", kind: "toggle", label: "阈值自校准（自动收紧）", hint: "按你的手动修正自动收紧本站判定阈值 —— 只会收紧（减少误反）；放松只在面板给建议、需你点按钮。可用上方「恢复本站默认阈值」撤销" },
     ] },
     // 数据与备份: （本区块无可直接承载的偏好项）
     // 当前页媒体: （本区块无可直接承载的偏好项）
@@ -12356,9 +12386,25 @@
     },
 
     // 区块: 标题行 + 行集合 (sync 收集)
-    section(title, hint, id) {
+    //   v6.4 R2d: 第 4 个参数是**图标名**(ICONS 的键) —— 区块标题此前带 emoji, 现改为内联 SVG。
+    //   图标挂在标题 span **内部的最前**, 故 `.svi-sec-title span` 的 textContent 仍是纯标题文字
+    //   (扩展设置页与 E2E 都按这个选择器读标题, SVG 不含文本节点, 不受影响)。
+    // 区块标题行 (`.svi-sec-title` 的**唯一构造点**): 标题前可带内联 SVG 图标。
+    //   v6.4 R2d: 图标挂在标题 span **内部最前**, 故 `.svi-sec-title span` 的 textContent 仍是纯标题文字
+    //   (扩展设置页与 E2E 都按这个选择器读标题; SVG 不含文本节点, 不受影响)。
+    sectionTitle(text, iconName) {
+      const title = this.h('div', { class: 'svi-sec-title' });
+      const span = this.h('span', { text: String(text) });
+      const ic = iconName ? this.icon(iconName, '', 'svi-sec-icon') : null;
+      if (ic) span.insertBefore(ic, span.firstChild || null); // 图标放最前
+      title.appendChild(span);
+      return title;
+    },
+
+    // 区块: 标题行 + 行集合 (sync 收集); 第 4 个参数是图标名 (见 sectionTitle)
+    section(title, hint, id, iconName) {
       const el = this.h('div', { class: 'svi-modal-section', id: id || '' });
-      const secTitle = this.h('div', { class: 'svi-sec-title' }, this.h('span', { text: title }));
+      const secTitle = this.sectionTitle(title, iconName);
       if (hint) secTitle.appendChild(this.h('span', { text: hint, style: 'font-size:10px; color:var(--svi-text-dim);' }));
       el.appendChild(secTitle);
       const syncs = [];
@@ -12458,10 +12504,13 @@
         const chip = this.h('div', { class: 'svi-color-chip' });
         const swatch = this.h('div', {
           class: 'svi-color-chip-swatch',
-          style: 'background: ' + (item.color || '#ffffff') + (item.dark ? '; border-color: rgba(255,255,255,0.3);' : '') + ';',
+          // 色卡描边走 token (item.color 本身是数据: 它描述被处理的画面, 见 R2c 的判定)
+          style: 'background: ' + (item.color || '#ffffff') + (item.dark ? '; border-color: rgba(var(--svi-white-rgb), 0.3);' : '') + ';',
         });
         const label = this.h('span', { text: item.label });
-        const check = this.h('span', { class: 'svi-color-chip-check', text: '✓' });
+        // v6.4 R2d: 勾选标记改用内联 SVG (与其它图标同一处实现; 图标缺失时退化为空 span, 不炸)
+        const check = this.icon('check', '', 'svi-color-chip-check')
+          || this.h('span', { class: 'svi-color-chip-check' });
         chip.append(swatch, label, check);
         chip.addEventListener('click', () => onToggle(item.id));
         chips[item.id] = chip;
@@ -12484,8 +12533,12 @@
       for (const b of buttons) {
         const btn = this.h('button', {
           class: 'svi-mini-btn' + (b.primary ? '' : '') + (b.danger ? ' danger' : ''),
-          text: b.label,
         });
+        // v6.4 R2d: 按钮可带图标 (b.icon = ICONS 的键)。图标是 SVG 节点, 不含文本,
+        //   故 textContent 仍等于 b.label —— 既有按 textContent 找按钮的 bench 断言不受影响。
+        const ic = b.icon ? this.icon(b.icon, '', 'svi-btn-icon') : null;
+        if (ic) btn.appendChild(ic);
+        btn.appendChild(this.h('span', { text: String(b.label == null ? '' : b.label) }));
         btn.addEventListener('click', (e) => {
           e.stopPropagation();
           b.onClick(e);
@@ -12825,9 +12878,36 @@
 
   // 图标路径表 (静态常量; 与 icon() 同源, 是「不留 emoji 字形」的唯一图标实现点)。
   //   fill:currentColor —— 颜色随所在元素的 color 走, 故按钮态/危险态自动跟随 token。
+  //   词汇表按「面板里实际用过的 emoji」逐一对应 (v6.4 R2d), 全部 16×16 网格、与文字同高。
+  //   线画图标用 stroke + fill:none, 实心图标用 fill —— 两类都吃 currentColor。
   SviControls.ICONS = Object.freeze({
     close: '<svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true"><path d="M3.5 3.5 L12.5 12.5 M12.5 3.5 L3.5 12.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" fill="none"/></svg>',
     trash: '<svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true"><path d="M3 4.5 H13 M6.5 4.5 V3 H9.5 V4.5 M4.5 4.5 L5.2 13 H10.8 L11.5 4.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>',
+    bolt: '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M9 1.5 L3.8 9.2 H7.4 L6.9 14.5 L12.2 6.8 H8.6 Z" fill="currentColor"/></svg>',
+    // 设置/参数: 三条带旋钮的滑杆 —— 12px 下比齿轮轮廓更易辨认 (接触表实测: 齿轮读作太阳)
+    gear: '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M2 4.6 H14 M2 8 H14 M2 11.4 H14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" fill="none"/><circle cx="6" cy="4.6" r="1.9" fill="currentColor"/><circle cx="10.4" cy="8" r="1.9" fill="currentColor"/><circle cx="5" cy="11.4" r="1.9" fill="currentColor"/></svg>',
+    // 外观与画面: 调色盘 —— 挖两个偏心色孔 + 一个拇指缺口 (接触表实测: 三个对称点会读作笑脸)
+    palette: '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M8 2.1 a5.9 5.9 0 1 0 0 11.8 c1.5 0 2-1.1 1.3-1.9 -1-1.1-.2-2.6 1.1-2.6 h1.2 a2.3 2.3 0 0 0 2.3-2.3 A6 6 0 0 0 8 2.1 Z" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linejoin="round"/><circle cx="5.9" cy="6.4" r=".95" fill="currentColor"/><circle cx="9.3" cy="5.4" r=".95" fill="currentColor"/><circle cx="5.3" cy="9.6" r=".95" fill="currentColor"/></svg>',
+    image: '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><rect x="2" y="3" width="12" height="10" rx="1.4" stroke="currentColor" stroke-width="1.4" fill="none"/><path d="M3.4 11 L6.6 7.6 L9 10 L10.8 8.2 L12.8 10.4" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linejoin="round"/></svg>',
+    video: '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><rect x="1.6" y="4" width="12.8" height="8" rx="1.4" stroke="currentColor" stroke-width="1.4" fill="none"/><path d="M6.8 6.3 L9.8 8 L6.8 9.7 Z" fill="currentColor"/></svg>',
+    globe: '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.3" fill="none"/><path d="M2.1 8 H13.9 M8 2.1 C5.4 4.7 5.4 11.3 8 13.9 M8 2.1 C10.6 4.7 10.6 11.3 8 13.9" stroke="currentColor" stroke-width="1.2" fill="none"/></svg>',
+    shield: '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M8 1.7 L13.3 3.9 V8 C13.3 11.1 11 13.2 8 14.3 C5 13.2 2.7 11.1 2.7 8 V3.9 Z" stroke="currentColor" stroke-width="1.4" fill="none" stroke-linejoin="round"/></svg>',
+    monitor: '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><rect x="1.8" y="3" width="12.4" height="8.3" rx="1.2" stroke="currentColor" stroke-width="1.4" fill="none"/><path d="M6.2 13.4 H9.8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" fill="none"/></svg>',
+    save: '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M2.5 3.6 A1.1 1.1 0 0 1 3.6 2.5 H10.3 L13.5 5.7 V12.4 A1.1 1.1 0 0 1 12.4 13.5 H3.6 A1.1 1.1 0 0 1 2.5 12.4 Z" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linejoin="round"/><path d="M5.2 2.5 V6.1 H10.4 V2.5 M4.9 13.5 V9.6 H11.1 V13.5" stroke="currentColor" stroke-width="1.2" fill="none" stroke-linejoin="round"/></svg>',
+    bulb: '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M8 1.8 a4.1 4.1 0 0 1 2.5 7.3 c-.5.4-.7.9-.7 1.4 H6.2 c0-.5-.2-1-.7-1.4 A4.1 4.1 0 0 1 8 1.8 Z" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linejoin="round"/><path d="M6.3 12.7 H9.7 M7 14.3 H9" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" fill="none"/></svg>',
+    pointer: '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M4 1.8 V12.4 L6.9 9.7 L8.9 14.2 L10.9 13.2 L9 8.9 L12.9 8.7 Z" stroke="currentColor" stroke-width="1.2" fill="none" stroke-linejoin="round"/></svg>',
+    target: '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.3" fill="none"/><circle cx="8" cy="8" r="2.4" stroke="currentColor" stroke-width="1.3" fill="none"/><circle cx="8" cy="8" r="1" fill="currentColor"/></svg>',
+    warn: '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M8 2.2 L14.6 13.4 H1.4 Z" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linejoin="round"/><path d="M8 6 V9.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" fill="none"/><circle cx="8" cy="11.7" r=".9" fill="currentColor"/></svg>',
+    refresh: '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M13.2 8 A5.2 5.2 0 1 1 11.5 4.1" stroke="currentColor" stroke-width="1.4" fill="none" stroke-linecap="round"/><path d="M13.7 2.4 V5.5 H10.6" stroke="currentColor" stroke-width="1.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    list: '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M5.8 4.2 H13.6 M5.8 8 H13.6 M5.8 11.8 H13.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" fill="none"/><circle cx="3" cy="4.2" r="1" fill="currentColor"/><circle cx="3" cy="8" r="1" fill="currentColor"/><circle cx="3" cy="11.8" r="1" fill="currentColor"/></svg>',
+    layers: '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M8 2.2 L14 5.6 L8 9 L2 5.6 Z" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linejoin="round"/><path d="M2.8 8.5 L8 11.5 L13.2 8.5" stroke="currentColor" stroke-width="1.3" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    undo: '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M5.8 4.2 L2.4 7.6 L5.8 11" stroke="currentColor" stroke-width="1.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/><path d="M2.4 7.6 H9.6 a3.4 3.4 0 0 1 0 6.8 H7.6" stroke="currentColor" stroke-width="1.4" fill="none" stroke-linecap="round"/></svg>',
+    block: '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.4" fill="none"/><path d="M4.2 4.2 L11.8 11.8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" fill="none"/></svg>',
+    moon: '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M10.6 1.9 a6.3 6.3 0 1 0 3.5 11.3 A7.1 7.1 0 0 1 10.6 1.9 Z" fill="currentColor"/></svg>',
+    check: '<svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true"><path d="M3.2 8.4 L6.4 11.6 L12.8 4.6" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>',
+    power: '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M8 2.2 V7.6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" fill="none"/><path d="M4.5 4.5 a4.7 4.7 0 1 0 7 0" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" fill="none"/></svg>',
+    font: '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M3.2 13 L7.2 3.2 L11.2 13 M4.9 9.7 H9.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>',
+    clock: '<svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.4" fill="none"/><path d="M8 4.3 V8.2 L10.7 10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>',
   });
   /* v6.4-CONTROLS-END */
 
@@ -12906,7 +12986,8 @@
       // v4.0: 停用态徽标 (站点电源关闭时胶囊折叠为此, 点击即热恢复)
       this.offBadge = document.createElement('button');
       this.offBadge.className = 'svi-off-badge';
-      this.offBadge.textContent = '⏻ 已停用 · 点击恢复';
+      this.offBadge.appendChild(SviControls.icon('power', '', 'svi-btn-icon'));
+      this.offBadge.appendChild(SviControls.h('span', { text: '已停用 · 点击恢复' }));
       this.offBadge.title = '本站反色已停用，点击立即恢复';
       this.offBadge.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -13008,7 +13089,9 @@
       // 行3: 打开详细参数设置页面按钮
       const modalBtn = document.createElement('button');
       modalBtn.className = 'svi-open-modal-btn';
-      modalBtn.textContent = '⚙️ 打开设置面板';
+      // v6.4 R2d: 图标 + 文字 (与其它按钮同一种构造)
+      modalBtn.appendChild(SviControls.icon('gear', '', 'svi-btn-icon'));
+      modalBtn.appendChild(SviControls.h('span', { text: '打开设置面板' }));
       modalBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         this.openSettingsModal();
@@ -13050,7 +13133,7 @@
 
     // ==========================================
     // 高级设置模态窗口 (全部区块经 ui 组件库构建; v3.3 信息架构重排)
-    // 顺序: 🎨外观与画面 → 🖼️图片反色 → 🎬视频 → 🌐站点与规则 → 🛡️颜色保护 → 🖥️当前页媒体 → 💾数据与备份 → 💡操作技巧
+    // 顺序: 外观与画面 → 图片反色 → 视频 → 站点与规则 → 颜色保护 → 当前页媒体 → 数据与备份 → 操作技巧
     // ==========================================
     buildSettingsModal() {
       this.modalMask = document.createElement('div');
@@ -13063,10 +13146,20 @@
       // 模态弹窗 Header
       const header = document.createElement('div');
       header.className = 'svi-modal-header';
+      // v6.4 R2d: 静态骨架里不再有 emoji (骨架仍是常量字符串, 无插值); 图标建好后用 DOM 挂上 ——
+      //   图标必须只有一处实现 (SviControls.icon), 不能在模板串里手写 <svg>。
       header.innerHTML = `
-        <div class="svi-modal-title"><span>⚡ 智能反色</span></div>
-        <button class="svi-modal-close" title="关闭">✕</button>
+        <div class="svi-modal-title"><span>智能反色</span></div>
+        <button class="svi-modal-close" title="关闭"></button>
       `;
+      try {
+        const tSpan = header.querySelector('.svi-modal-title span');
+        const tIcon = SviControls.icon('bolt', '', 'svi-title-icon');
+        if (tSpan && tIcon) tSpan.insertBefore(tIcon, tSpan.firstChild);
+        const cBtn = header.querySelector('.svi-modal-close');
+        const cIcon = SviControls.icon('close', '', 'svi-close-icon');
+        if (cBtn && cIcon) cBtn.appendChild(cIcon);
+      } catch (e) { /* ignore */ }
       // v4.6 版本自检 (R-H4): 面板显著显示运行中脚本的版本号, 供用户与发布页比对排查旧版问题。
       // 不做远程版本检查 (禁止自动网络遥测), 仅本地展示。
       try {
@@ -13131,7 +13224,7 @@
       globalPanel.appendChild(this.buildImageSection());
       globalPanel.appendChild(this.buildRegionSection()); // v6.6: 区域反色 (自动部分反色内核 v6-1/2/3)
       globalPanel.appendChild(this.buildVideoSection());
-      globalPanel.appendChild(this.buildActionsSection()); // v5.0: 🧩 元素动作
+      globalPanel.appendChild(this.buildActionsSection()); // v5.0: 元素动作
       globalPanel.appendChild(this.buildReadabilitySection());
       globalPanel.appendChild(this.buildDynamicThemeSection());
       globalPanel.appendChild(this.buildSiteListsSection());
@@ -13151,7 +13244,8 @@
 
       this.modalPerf = document.createElement('div');
       this.modalPerf.className = 'svi-modal-perf';
-      this.modalPerf.textContent = '⚡ 探测单次耗时: ~0.003ms';
+      this.modalPerf.appendChild(SviControls.icon('bolt', '', 'svi-btn-icon'));
+      this.modalPerf.appendChild(SviControls.h('span', { text: '探测单次耗时: ~0.003ms' }));
 
       const actions = document.createElement('div');
       actions.className = 'svi-footer-actions';
@@ -13261,10 +13355,10 @@
     }
 
     // ==========================================
-    // v3.3 模态区块: 🎨 外观与画面 (预设 + 悬停还原 + 画面滤镜 + 过渡)
+    // v3.3 模态区块: 外观与画面 (预设 + 悬停还原 + 画面滤镜 + 过渡)
     // ==========================================
     buildAppearanceSection() {
-      const sec = SviControls.section('🎨 外观与画面', '整体反色风格与观感微调', 'svi-sec-appearance');
+      const sec = SviControls.section('外观与画面', '整体反色风格与观感微调', 'svi-sec-appearance', 'palette');
 
       const presetChipRow = SviControls.chipRow(
         Object.values(PRESETS).map((p) => ({
@@ -13321,10 +13415,10 @@
     }
 
     // ==========================================
-    // v3.3 模态区块: 🖼️ 图片反色 (策略 + 浅色检测 + 色图 + 特效参数)
+    // v3.3 模态区块: 图片反色 (策略 + 浅色检测 + 色图 + 特效参数)
     // ==========================================
     buildImageSection() {
-      const sec = SviControls.section('🖼️ 图片反色', '决定哪些图片反色以及反色方式', 'svi-sec-image');
+      const sec = SviControls.section('图片反色', '决定哪些图片反色以及反色方式', 'svi-sec-image', 'image');
 
       // 智能图片策略 (v3.3 选项净化: 短名 + 动态说明)
       const policyRow = SviControls.selectRow('智能图片策略', '手动 Alt+点击 与学习规则始终优先',
@@ -13382,7 +13476,7 @@
       sec.add(colorChipRow);
       this.rowSyncs.push(() => colorChipRow.sync());
 
-      const customPicker = SviControls.pickerRow('🎯 目标色图拾色器', '点击色块唤出调色盘',
+      const customPicker = SviControls.pickerRow('目标色图拾色器', '点击色块唤出调色盘',
         () => state.imgCustomColor || '#ffffff',
         (hex) => {
           state.imgCustomColor = hex;
@@ -13481,7 +13575,7 @@
       this.rowSyncs.push(() => animRow.sync());
 
       const mixedRow = SviControls.selectRow('混合型动图',
-        '整段动画里深浅场景都有的情况。⚠ CSS 滤镜**无法按时序切换**，所以默认保持原样；「按多数帧」只是一种近似，不是逐帧反色',
+        '整段动画里深浅场景都有的情况。注意：CSS 滤镜无法按时序切换，所以默认保持原样；「按多数帧」只是一种近似，不是逐帧反色',
         [
           { v: 'keep', label: '保持原样', describe: '推荐：不做半吊子的近似。' },
           { v: 'majority', label: '按多数帧近似', describe: '白帧占多数才反色 —— 整段会一起反，不会跟着动图切。' },
@@ -13731,10 +13825,10 @@
     }
 
     // ==========================================
-    // v3.3 模态区块: 🎬 视频 (特效引擎 + 智能算法 + 画面调节 + 时间线记忆)
+    // v3.3 模态区块: 视频 (特效引擎 + 智能算法 + 画面调节 + 时间线记忆)
     // ==========================================
     buildVideoSection() {
-      const sec = SviControls.section('🎬 视频', '视频反色引擎与画面调节', 'svi-sec-video');
+      const sec = SviControls.section('视频', '视频反色引擎与画面调节', 'svi-sec-video', 'video');
 
       // 视频特效引擎 (显卡加速不可用时隐藏选项, 自动走标准滤镜路径)
       const vfx = (window.__svi && window.__svi.engines) ? window.__svi.engines.videoFx : null;
@@ -13861,17 +13955,15 @@
     }
 
     // ==========================================
-    // v3.3 模态区块: 💡 操作技巧
+    // v3.3 模态区块: 操作技巧
     // ==========================================
     buildTipsBlock() {
       const sec = document.createElement('div');
       sec.className = 'svi-modal-section';
       sec.id = 'svi-sec-tips';
 
-      const secTitle = document.createElement('div');
-      secTitle.className = 'svi-sec-title';
-      secTitle.innerHTML = `<span>💡 操作技巧</span>`;
-      sec.appendChild(secTitle);
+      // v6.4 R2d: 标题走 SviControls.sectionTitle (唯一构造点), 不再手写 innerHTML
+      sec.appendChild(SviControls.sectionTitle('操作技巧', 'bulb'));
 
       const tips = [
         ['Alt + 鼠标左键', '在网页任意图片或矢量图上点击，可单独强制反色或复原，选择会被记住。'],
@@ -13958,15 +14050,15 @@
     }
 
     // ==========================================
-    // v3.3 模态区块: 💾 数据与备份 (规则文件 / 全量备份 / 本地统计, 合并原「存储」+「数据与反馈」)
+    // v3.3 模态区块: 数据与备份 (规则文件 / 全量备份 / 本地统计, 合并原「存储」+「数据与反馈」)
     // ==========================================
     // ==========================================
-    // v5.0 模态区块: 🧩 元素动作 (动作开关矩阵, 任务 v5-1 R6 / AC-2)
+    // v5.0 模态区块: 元素动作 (动作开关矩阵, 任务 v5-1 R6 / AC-2)
     //   每个动作一行: 总开关 + 作用域与生效时机写在提示文案里 + 参数入口。
     //   开关的**读取**一律经 actionEnabled(); 此处只负责写入, 不自行推断启用状态。
     // ==========================================
     buildActionsSection() {
-      const sec = SviControls.section('🧩 元素动作', '把插件从「反色器」扩成页面媒体治理层；会改动页面观感的新动作默认关闭', 'svi-sec-actions');
+      const sec = SviControls.section('元素动作', '把插件从「反色器」扩成页面媒体治理层；会改动页面观感的新动作默认关闭', 'svi-sec-actions', 'pointer');
 
       const refresh = () => {
         try { syncMaskVars(); } catch (e) { /* ignore */ }
@@ -14079,7 +14171,7 @@
 
       // —— peek: 悬停复原 (与既有「悬停显示原图」同一偏好, 单一真源) ——
       const peekRow = SviControls.toggleRow('悬停复原 (peek)',
-        '通用门：被遮罩的元素与图片反色在鼠标移入时临时还原。与「🖼️ 图片反色 · 悬停显示原图」是同一个开关。作用域：全页 · 生效时机：立即',
+        '通用门：被遮罩的元素与图片反色在鼠标移入时临时还原。与「图片反色 · 悬停显示原图」是同一个开关。作用域：全页 · 生效时机：立即',
         () => actionEnabled('peek'),
         (on) => {
           state.hoverRestore = !!on; // 单一真源: 既有偏好键名与语义不变
@@ -14162,7 +14254,7 @@
       sec.add(this.dataLoopDiag);
 
       const gradingRow = SviControls.toggleRow('hits 分级（强 / 弱规则）',
-        '**默认关**。开启后：命中 ≥ 强规则门 的学习规则保持现有优先级；已生效但未达强门的规则降为「弱规则」，只能覆盖像素判定、不再压过内置种子规则。开启会改变既有学习规则的行为，故默认关',
+        '默认关。开启后：命中 ≥ 强规则门 的学习规则保持现有优先级；已生效但未达强门的规则降为「弱规则」，只能覆盖像素判定、不再压过内置种子规则。开启会改变既有学习规则的行为，故默认关',
         () => state.learnGrading === true,
         (on) => {
           state.learnGrading = !!on;
@@ -14189,7 +14281,7 @@
       this.rowSyncs.push(() => demoteRow.sync());
 
       const shapeRow = SviControls.toggleRow('形状跨站先验',
-        '最弱兜底来源（**默认关**）：某「元素长相」在 ≥N 个不同站点上结论一致时，对新站同形元素直接给出结论。位置在所有种子规则之后、像素判定之前 —— 不是「像素缺失时才生效」，此处如实标注',
+        '最弱兜底来源（默认关）：某「元素长相」在 ≥N 个不同站点上结论一致时，对新站同形元素直接给出结论。位置在所有种子规则之后、像素判定之前 —— 不是「像素缺失时才生效」，此处如实标注',
         () => state.shapePrior === true,
         (on) => {
           state.shapePrior = !!on;
@@ -14219,7 +14311,7 @@
       ]));
 
       const calibRow = SviControls.toggleRow('阈值自校准（自动收紧）',
-        '按你的手动修正自动收紧本站判定阈值 —— **只会收紧**（减少误反）；放松只在面板给建议、需你点按钮。可用上方「恢复本站默认阈值」撤销',
+        '按你的手动修正自动收紧本站判定阈值 —— 只会收紧（减少误反）；放松只在面板给建议、需你点按钮。可用上方「恢复本站默认阈值」撤销',
         () => state.calibrateAuto !== false,
         (on) => { state.calibrateAuto = !!on; savePrefs(); showToast(on ? '已开启自动收紧' : '已关闭自动收紧（仅展示建议）'); });
       sec.add(calibRow);
@@ -14321,7 +14413,7 @@
         const head = document.createElement('div');
         head.className = 'svi-hint-line';
         head.textContent = (state.shapePrior === true)
-          ? ('形状先验表（**已启用** · 门槛 ' + state.shapeMinHosts + ' 站）：')
+          ? ('形状先验表（已启用 · 门槛 ' + state.shapeMinHosts + ' 站）：')
           : ('形状先验表（未启用，仅记录 —— 开关在上方）：');
         this.shapeBox.appendChild(head);
         const shapes = shapeStore.list().sort((a, b) => (b.invert + b.keep) - (a.invert + a.keep)).slice(0, 12);
@@ -14381,10 +14473,7 @@
       sec.className = 'svi-modal-section';
       sec.id = 'svi-sec-stats';
 
-      const secTitle = document.createElement('div');
-      secTitle.className = 'svi-sec-title';
-      secTitle.innerHTML = `<span>💾 数据与备份</span>`;
-      sec.appendChild(secTitle);
+      sec.appendChild(SviControls.sectionTitle('数据与备份', 'save'));
 
       // 存储后端徽章行
       this.storageBadgeLine = document.createElement('div');
@@ -14837,16 +14926,18 @@
     }
 
     // ==========================================
-    // v2.0 模态区块: 🌐 站点与规则 (v3.3: 并入元素级规则与学习规则子块)
+    // v2.0 模态区块: 站点与规则 (v3.3: 并入元素级规则与学习规则子块)
     // ==========================================
     buildSiteSection() {
       const sec = document.createElement('div');
       sec.className = 'svi-modal-section';
       sec.id = 'svi-sec-site';
 
-      const secTitle = document.createElement('div');
-      secTitle.className = 'svi-sec-title';
-      secTitle.innerHTML = `<span>🌐 本站能力</span><span id="svi-site-host" style="font-size:10px; color:var(--svi-text-dim);"></span>`;
+      const secTitle = SviControls.sectionTitle('本站能力', 'globe');
+      const siteHostSpan = document.createElement('span');
+      siteHostSpan.id = 'svi-site-host';
+      siteHostSpan.style.cssText = 'font-size:10px; color:var(--svi-text-dim);';
+      secTitle.appendChild(siteHostSpan);
       sec.appendChild(secTitle);
 
       const host = profileKey();
@@ -14971,7 +15062,7 @@
 
       // 重扫本页背景按钮
       const rescanBtns = SviControls.btnRow([{
-        label: '🔄 重扫本页背景',
+        icon: 'refresh', label: '重扫本页背景',
         onClick: () => {
           const engine = window.__svi && window.__svi.engines ? window.__svi.engines.bgReplace : null;
           if (engine && engine.active) {
@@ -15008,10 +15099,12 @@
           this.ruleSummary.textContent = '';
           const b = document.createElement('b');
           b.textContent = r.name;
+          // v6.4 R2d: 文本片段走 h('span', {text}) 而不是 createTextNode —— 面板侧的文本拼装
+          //   统一到同一个构造点 (createTextNode 只在 h 内部出现一次), 少一类桩差异。
           this.ruleSummary.append(
-            document.createTextNode('内置规则: '),
+            SviControls.h('span', { text: '内置规则: ' }),
             b,
-            document.createTextNode(` · 保护选择器 ${r.protect.length} · 强制反色 ${r.forceInvert.length} · 背景图选择器 ${r.bgImageSelectors.length}${ovNote}`)
+            SviControls.h('span', { text: ` · 保护选择器 ${r.protect.length} · 强制反色 ${r.forceInvert.length} · 背景图选择器 ${r.bgImageSelectors.length}${ovNote}` })
           );
         } else {
           this.ruleSummary.textContent = `内置规则: 无 (通用智能检测)${ovNote}`;
@@ -15020,7 +15113,7 @@
     }
 
     // ==========================================
-    // v2.0 模态区块: 🛡️ 原色屏蔽 (经 ui 组件库重建)
+    // v2.0 模态区块: 原色屏蔽 (经 SviControls 控件库重建)
     // ==========================================
     buildShieldSection() {
       const sec = SviControls.section('原色屏蔽', '这些颜色永不转换', 'svi-sec-shield');
@@ -15047,23 +15140,23 @@
     }
 
     // ==========================================
-    // v3.1 R3 模态区块: 🖥️ 当前页媒体 (列出/反色/定位被遮挡无法点击的媒体)
+    // v3.1 R3 模态区块: 当前页媒体 (列出/反色/定位被遮挡无法点击的媒体)
     // 列表按需采集 (点击按钮触发, 启动零开销); 行内数据一律 textContent (XSS 加固)
     // ==========================================
     buildMediaSection() {
-      const sec = SviControls.section('🖼️ 当前页媒体 / 已处理', '排查被改动的媒体，并逐项还原或固化规则', 'svi-sec-media');
+      const sec = SviControls.section('当前页媒体 / 已处理', '排查被改动的媒体，并逐项还原或固化规则', 'svi-sec-media', 'layers');
       this.mediaShownCount = 200;
       this.mediaView = this.mediaView || 'processed'; // v5.2: 默认「已处理」视图
 
       // v5.2 双视图切换 (「全部媒体」= v3.1 原行为, 原样保留不回归)
       sec.add(SviControls.btnRow([
-        { label: '📋 已处理', onClick: () => { this.mediaView = 'processed'; this.mediaShownCount = 200; this.refreshMediaSection(); } },
-        { label: '🗂 全部媒体', onClick: () => { this.mediaView = 'all'; this.mediaShownCount = 200; this.refreshMediaSection(); } },
+        { icon: 'list', label: '已处理', onClick: () => { this.mediaView = 'processed'; this.mediaShownCount = 200; this.refreshMediaSection(); } },
+        { icon: 'layers', label: '全部媒体', onClick: () => { this.mediaView = 'all'; this.mediaShownCount = 200; this.refreshMediaSection(); } },
       ]));
 
       sec.add(SviControls.btnRow([
         {
-          label: '🔄 采集/刷新列表',
+          icon: 'refresh', label: '采集/刷新列表',
           onClick: () => {
             this.mediaShownCount = 200;
             this.refreshMediaSection();
@@ -15071,7 +15164,7 @@
           },
         },
         {
-          label: '↩ 全部还原',
+          icon: 'undo', label: '全部还原',
           onClick: () => {
             // v5.2: 撤销栈内全部回退 (不触碰手动结论 —— undoEntry 经仲裁, 手动仍占优)
             const n = undoLast(undoMax());
@@ -15080,7 +15173,7 @@
           },
         },
         {
-          label: '🚫 本站不自动反色图片',
+          icon: 'block', label: '本站不自动反色图片',
           onClick: () => {
             const ov = (state.siteOverrides = state.siteOverrides || {});
             const key = profileKey();
@@ -15103,7 +15196,7 @@
       // 首次构建只渲染空态 (惰性采集, 避免启动时全页样式扫描)
       const empty = document.createElement('div');
       empty.className = 'svi-hint-line';
-      empty.textContent = '尚未刷新 —— 点上方「🔄 采集/刷新列表」列出内容。'
+      empty.textContent = '尚未刷新 —— 点上方「采集/刷新列表」列出内容。'
         + '「已处理」= 脚本本次会话改过什么（含原因与一键固化）；「全部媒体」= 页面上有什么。';
       this.mediaListBox.appendChild(empty);
       return sec.el;
@@ -15501,7 +15594,9 @@
       }
 
       if (this.modalPerf && sm.detector && sm.detector.lastDurationMs > 0) {
-        this.modalPerf.textContent = `⚡ 探测单次耗时: ~${sm.detector.lastDurationMs.toFixed(3)}ms (极致无感)`;
+        this.modalPerf.textContent = '';
+      this.modalPerf.appendChild(SviControls.icon('bolt', '', 'svi-btn-icon'));
+      this.modalPerf.appendChild(SviControls.h('span', { text: `探测单次耗时: ~${sm.detector.lastDurationMs.toFixed(3)}ms (极致无感)` }));
       }
     }
 
@@ -15613,9 +15708,9 @@
 
     buildCapabilityCards() {
       const defs = [
-        { key: 'imageInvert', icon: '🖼️', name: '图片反色' },
-        { key: 'videoInvert', icon: '🎬', name: '视频反色' },
-        { key: 'bgReplace', icon: '🌙', name: '背景替换' },
+        { key: 'imageInvert', icon: 'image', name: '图片反色' },
+        { key: 'videoInvert', icon: 'video', name: '视频反色' },
+        { key: 'bgReplace', icon: 'moon', name: '背景替换' },
       ];
       const grid = document.createElement('div');
       grid.className = 'svi4-cards';
@@ -15624,9 +15719,8 @@
         const card = document.createElement('button');
         card.className = 'svi4-card';
         card.title = '点击切换: 跟随全局 → 本站强制开 → 本站强制关 (热生效)';
-        const icon = document.createElement('span');
-        icon.className = 'svi4-card-icon';
-        icon.textContent = d.icon;
+        // v6.4 R2d: 图标走同一处实现 (SviControls.icon); 图标名不认识时退化为纯文字卡片
+        const icon = SviControls.icon(d.icon, '', 'svi4-card-icon') || document.createElement('span');
         const name = document.createElement('span');
         name.className = 'svi4-card-name';
         name.textContent = d.name;
@@ -15709,10 +15803,7 @@
       sec.className = 'svi-modal-section';
       sec.id = 'svi-sec-readability';
 
-      const secTitle = document.createElement('div');
-      secTitle.className = 'svi-sec-title';
-      secTitle.innerHTML = `<span>🔤 字体与可读性</span>`;
-      sec.appendChild(secTitle);
+      sec.appendChild(SviControls.sectionTitle('字体与可读性', 'font'));
 
       const fontRow = SviControls.toggleRow('字体覆盖', '全站强制使用所选字体，代码块与图标不受影响',
         () => state.fontOverride === true,
@@ -15759,17 +15850,14 @@
       sec.className = 'svi-modal-section';
       sec.id = 'svi-sec-dynamic';
 
-      const secTitle = document.createElement('div');
-      secTitle.className = 'svi-sec-title';
-      secTitle.innerHTML = `<span>🌙 动态主题调节</span>`;
-      sec.appendChild(secTitle);
+      sec.appendChild(SviControls.sectionTitle('动态主题调节', 'moon'));
 
       sec.appendChild(SviControls.infoLine('作用于背景替换引擎的生成配色 (非滤镜路径)；仅当本站卡片开启「背景替换」时可见效果，变更立即重扫生效。').row);
 
       // v5.5: 布尔 → 三档选择器 (旧值已由 loadState 无损迁移)
       const fgRow = SviControls.selectRow('加载前保护（防白闪）',
         '深色站点加载前先铺黑底消除白闪；「元素遮罩」档另加元素级 pending 遮罩（见下）。'
-        + '⚠ 元素级遮罩**只有扩展形态**能做到真正的"首帧前"—— 用户脚本在 document-end 启动，'
+        + '注意：元素级遮罩只有扩展形态能做到真正的"首帧前"—— 用户脚本在 document-end 启动，'
         + '首屏元素已渲染，因此只覆盖后续动态插入的元素，首屏由黑底兜底',
         [
           { v: 'off', label: '关闭', describe: '不做任何加载前介入。' },
@@ -15803,7 +15891,7 @@
 
       const pendRow = SviControls.toggleRow('元素遮罩（pending 遮罩）',
         'media 档下对"本站已知会反色"的新插入媒体先遮住（visibility:hidden），判定完成即放行。'
-        + '三层预算兜底：总时长 / 元素数 / 单元素超时；判定失败**立即放行原图**。'
+        + '三层预算兜底：总时长 / 元素数 / 单元素超时；判定失败立即放行原图。'
         + '按 Esc（有东西被遮住时）或点下方按钮可一次性显示全部并暂停本会话',
         () => state.maskPending !== false,
         (on) => {
@@ -15904,10 +15992,7 @@
       sec.className = 'svi-modal-section';
       sec.id = 'svi-sec-scheduler';
 
-      const secTitle = document.createElement('div');
-      secTitle.className = 'svi-sec-title';
-      secTitle.innerHTML = `<span>⏰ 定时模式</span>`;
-      sec.appendChild(secTitle);
+      sec.appendChild(SviControls.sectionTitle('定时模式', 'clock'));
 
       const hours = [];
       for (let h = 0; h < 24; h++) hours.push({ v: String(h), label: h + ' 时', describe: '' });
@@ -15954,10 +16039,7 @@
       sec.className = 'svi-modal-section';
       sec.id = 'svi-sec-lists';
 
-      const secTitle = document.createElement('div');
-      secTitle.className = 'svi-sec-title';
-      secTitle.innerHTML = `<span>📜 站点名单</span>`;
-      sec.appendChild(secTitle);
+      sec.appendChild(SviControls.sectionTitle('站点名单', 'list'));
 
       const modeRow = SviControls.selectRow('站点管理模式', '控制脚本在哪些站点生效',
         [
@@ -16045,7 +16127,7 @@
         } else if (e.altKey && !e.shiftKey && (e.key === 'm' || e.key === 'M')) {
           // v5.0: Alt+M = 给「最近悬停元素」加/取消遮罩 (元素遮罩的元素取法见 hoverTarget 跟踪)
           e.preventDefault();
-          if (!actionEnabled('mask')) { showToast('遮罩未启用（设置 → 🧩 元素动作）'); return; }
+          if (!actionEnabled('mask')) { showToast('遮罩未启用（设置 → 元素动作）'); return; }
           if (!this.hoverTarget) { showToast('请先把鼠标移到目标元素上，再按 Alt+M'); return; }
           this.toggleMask(this.hoverTarget);
         } else if (e.altKey && e.shiftKey && (e.key === 'z' || e.key === 'Z')) {
@@ -16055,7 +16137,7 @@
         } else if (e.altKey && !e.shiftKey && (e.key === 'z' || e.key === 'Z')) {
           // v5.2: Alt+Z = 撤销最近一次自动结论 (逐个回退, 可连按)
           e.preventDefault();
-          if (state.undoEnabled === false) { showToast('撤销已关闭（设置 → 🧩 元素动作）'); return; }
+          if (state.undoEnabled === false) { showToast('撤销已关闭（设置 → 元素动作）'); return; }
           const done = undoLast(1);
           showToast(done ? ('已撤销 1 项 · 还可撤销 ' + undoStack.items.length + ' 项') : '没有可撤销的记录');
         }

@@ -75,6 +75,17 @@
         filter: var(--svi-video-tune, none) !important;
         transition: filter 0.2s ease;
       }
+      /* v6.4 R2d: 面板根声明深色配色方案 —— 原生控件 (复选框 / 滑块 / 下拉 / 数字框) 才会按深色渲染。
+         此前只有扩展页声明了它 (options / popup 的 :root), 面板漏了, 于是**未选中的复选框在深色底上
+         渲染成一块白方块**(看起来像已选中)。刻意声明在**面板自己的根容器**上而不是 :root —— 后者
+         会连站点自身的表单控件一起改观感, 违反"不改站点"的纪律。 */
+      .svi-capsule-root,
+      .svi-modal-mask,
+      .svi-modal-window,
+      #svi-toast,
+      #svi-action-toast {
+        color-scheme: dark;
+      }
       .svi-capsule-root {
         position: fixed;
         z-index: 2147483647;
@@ -442,6 +453,25 @@
         justify-content: center;
         line-height: 0;
         vertical-align: -1px;
+      }
+      /* v6.4 R2d: 图标与文字的间距 —— 按所在位置给一次, 不在每个 JS 调用点塞内联 style */
+      .svi-btn-icon,
+      .svi-sec-icon,
+      .svi-title-icon {
+        margin-right: 5px;
+      }
+      /* 图标在 flex 容器里不许被压扁 (按钮/性能行/能力卡片都是 flex) */
+      .svi-btn-icon svg,
+      .svi-sec-icon svg,
+      .svi-title-icon svg,
+      .svi-close-icon svg,
+      .svi4-card-icon svg {
+        flex: 0 0 auto;
+        display: block;
+      }
+      /* 模态关闭按钮: 原来是一个叉号字形, 现在是 SVG —— 尺寸与点击区不变 */
+      .svi-close-icon {
+        pointer-events: none;
       }
       /* v6.4 R2b: 颜色列表 (SviControls.colorList) 的色卡容器与色点 */
       .svi-color-list {

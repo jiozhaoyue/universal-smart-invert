@@ -394,6 +394,11 @@ const makeElStub = () => ({
   classList: { toggle() {}, add() {}, remove() {}, contains() { return false; } },
   setAttribute() {}, getAttribute() { return null; }, removeAttribute() {},
   appendChild() {}, append() {}, addEventListener() {},
+  insertBefore() {}, removeChild() {},
+  // v6.4 R2d: 面板改用 document.createTextNode 拼「图标 + 文字」的按钮/标题
+  //   （无 innerHTML 插值纪律下的正解）。桩必须跟得上 —— 否则单测挂掉的原因会是
+  //   「桩缺 API」而不是「代码有问题」，那是最容易误导人的一种红。
+  createTextNode(t) { return { nodeType: 3, textContent: String(t) }; },
   querySelectorAll() { return []; }, querySelector() { return null; },
   closest() { return null; }, matches() { return false; }, contains() { return false; },
   isConnected: true, parentNode: null, remove() {},
@@ -404,6 +409,9 @@ global.document = {
   body: null,
   hidden: false,
   createElement: () => makeElStub(),
+  // v6.4 R2d: 面板用 createTextNode 拼「图标 + 文字」（无 innerHTML 插值时它是正解）。
+  //   桩缺这个 API, 会让单测红在「桩跟不上」而不是「代码有问题」—— 那是最误导人的一种红。
+  createTextNode: (t) => ({ nodeType: 3, textContent: String(t) }),
   addEventListener() {},
   removeEventListener() {},
   querySelectorAll() { return []; },
@@ -4899,6 +4907,73 @@ setTimeout(() => {
     assert.ok(chip, 'R2c: 反色预设色卡示意色应保持字面量（它是数据）—— 若真改成 token 了请同步改本节');
     assert.ok(/这两个色值是\*\*数据\*\*不是主题/.test(src),
       'R2c: 允许保留的色字面量必须在代码里写明「为什么不是主题色」');
+
+    // (d) R2c 补漏 (实测教训): **内联样式整块里的 rgba 字面量**也要逐处判定。
+    //     上面 (a)(b) 抓的是 #hex; 交互提示条与 toast 的整块配色用的是 `rgba(15,23,42,…)` —
+    //     上一轮扫描以 #hex 为模式, 于是这两处旧配色(rgba(15,23,42) 板岩底 + rgba(56,189,248) 旧青)
+    //     完整地漏了过去, 直到面板截图才被眼睛发现。这条断言把该漏法堵死: 面板可见样式里
+    //     只允许「var(--svi-*) 引用」与「三个已列明的不可 token 化例外」。
+    {
+      // 判定口径: 只看**样式赋值语境**（CSS 属性名 + 冒号）的 rgba, 且排除 token 块自身。
+      //   这样「判白比较 `styleBg === 'rgb(255, 255, 255)'`」这类**数据**不会被误判,
+      //   而 `background: rgba(15,23,42,…)` / `border-color: rgba(255,255,255,.3)` 这类**主题**必被抓。
+      const tokenStart = src.indexOf('/* v6.4-TOKENS-START */');
+      const tokenEnd = src.indexOf('/* v6.4-TOKENS-END */');
+      assert.ok(tokenStart > 0 && tokenEnd > tokenStart, 'R2c: 必须能定位 token 块');
+      const CSS_PROP = /(^|[\s'";])(background|background-color|border|border-color|border-top|border-bottom|box-shadow|outline|color|fill|stroke)\s*:/;
+      const bad = [];
+      // 逐行扫描必须是 **O(n)**: 先前写成「每行重新 split 整份源码」把同步执行时间推过了
+      //   Store 配额用例的定时窗口, 那个用例当场变成必挂 (与 test.js:955 注释里记的历史故障同型)。
+      //   一次 split + 累加偏移即可, 顺带让本块快上千倍。
+      let offset = 0;
+      for (const line of src.split('\n')) {
+        const lineStart = offset;
+        offset += line.length + 1;
+        const st = line.trim();
+        if (st.startsWith('//') || st.startsWith('*') || st.startsWith('/*')) continue; // 注释不算
+        if (lineStart >= tokenStart && lineStart <= tokenEnd) continue;                 // token 定义本身就是字面量
+        if (!CSS_PROP.test(line)) continue;
+        const m = /rgba?\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}/.exec(line);
+        if (!m) continue;
+        if (line.indexOf('rgba(var(--svi-') >= 0) continue;                             // 正常形: 由 token 三元组派生
+        bad.push(st.slice(0, 90));
+      }
+      assert.deepStrictEqual(bad, [],
+        'R2c: 样式赋值里的 rgba 必须走 token (实测漏过 toast/提示条/色卡描边), 实测 ' + JSON.stringify(bad));
+    }
+  }
+
+  // ---- 7. R2d: 面板可见文案里不得再有 emoji 字形, 图标一律内联 SVG ----
+  //   为什么要扫「面板区间」而不是全文件: v6.4 的重建范围就是面板; 其余区间的 emoji 属 R3 的一整批
+  //   (R3 会把码位白名单一次写清并全量清零)。这里先把**面板区间**钉死, 防止重建后又被塞回 emoji。
+  {
+    const start = src.indexOf('class UIController {');
+    assert.ok(start > 0, 'R2d: 必须能定位 UIController 类体起点');
+    const panel = src.slice(start, src.indexOf('\n  // ===== v4.5: 工具栏弹出面板消息通道', start));
+    assert.ok(panel.length > 20000, 'R2d: 面板区间抽取结果过小, 抽取规则可能已失效');
+    // 图标类码位区间 (排除: 箭头/数学符号等排版符号, 它们出现在注释与算式里且不是图标字形)
+    const EMOJI = /[\u{1F300}-\u{1FAFF}\u{2B00}-\u{2BFF}\u{2699}\u{26A0}\u{2714}\u{2795}\u{20E3}\u{FE0F}]/u;
+    const hits = [];
+    for (const line of panel.split('\n')) {
+      const m = EMOJI.exec(line);
+      if (m) hits.push(m[0] + ' ← ' + line.trim().slice(0, 80));
+    }
+    assert.deepStrictEqual(hits, [],
+      'R2d: 面板区间不得再有 emoji 字形 (改用 SviControls.icon 的内联 SVG), 实测 ' + JSON.stringify(hits));
+
+    // 图标必须只有一处实现 (SviControls.icon + ICONS 表), 不许在别处手写 <svg>。
+    //   排除 `// ==UserScript==` 元数据头的 @icon —— 它是一份**独立的 SVG 文档**（经 data: URI 交给
+    //   管理器渲染），拿不到页面的 CSS 变量, 因此不可能"走 token"; 它的配色靠人工与 token 保持同步。
+    const headerBlock = /\/\/ ==UserScript==[\s\S]*?\/\/ ==\/UserScript==/.exec(src);
+    assert.ok(headerBlock, 'R2d: 必须能定位元数据头');
+    const body = src.replace(headerBlock[0], '');
+    const inlineSvg = (body.match(/<svg /g) || []).length;
+    const tableSvg = (body.match(/'<svg /g) || []).length;
+    assert.strictEqual(inlineSvg, tableSvg,
+      'R2d: 全文件的 <svg> 字面量必须全部来自 ICONS 表 (不许在别处手写图标), 实测 ' + inlineSvg + ' vs ' + tableSvg);
+    assert.ok(tableSvg >= 20, 'R2d: 图标表规模应覆盖面板用过的字形, 实测 ' + tableSvg);
+    assert.ok(/aria-hidden/.test(src) && /fill="currentColor"|stroke="currentColor"/.test(src),
+      'R2d: 图标必须 currentColor 着色且对读屏隐藏');
   }
 
   console.log('✓ v6.4 控件库单测 passed: 词汇表 20 项齐全 / 构造与 {row,sync} 协议正确 / 每个工厂只有一处实现(收口) / ui 垫片已删除且零残留调用点 / 内联色策略(仅防闪光黑底例外) / R2c 色字面量逐注入点判定(遮罩与区域着色走 token)');
