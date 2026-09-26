@@ -2114,7 +2114,10 @@ setTimeout(() => {
   for (const id of Object.keys(MASK_PRESETS)) {
     const p = MASK_PRESETS[id];
     assert.strictEqual(p.id, id, id + ': preset.id 自洽');
-    assert.ok(/^#[0-9a-f]{6}$/i.test(p.color), id + ': 颜色为 #rrggbb');
+    // v6.4 R2c: 遮罩色由「写死 #rrggbb」改为「引用 token 变量」——
+    //   它经 syncMaskVars 写成 --svi-mask-<id>-color, CSS 再消费一层 var()（嵌套 var() 合法）。
+    //   断言随之改为「必须是 var(--svi-*) 引用」, 而不是放宽掉这一条。
+    assert.ok(/^var\(--svi-[a-z-]+\)$/.test(p.color), id + ': 颜色必须引用 token 变量, 实测 ' + p.color);
     assert.ok(p.opacity >= 0 && p.opacity <= 1, id + ': 不透明度在 [0,1]');
     assert.ok(p.hoverOpacity >= 0 && p.hoverOpacity <= 1, id + ': 悬停不透明度在 [0,1]');
     assert.ok(typeof p.blur === 'number' && p.blur >= 0, id + ': blur 非负');
@@ -4869,7 +4872,36 @@ setTimeout(() => {
       'R1: 内联样式里的颜色必须走 token (唯一例外是防闪光黑底), got ' + JSON.stringify(inline));
   }
 
-  console.log('✓ v6.4 控件库单测 passed: 词汇表 20 项齐全 / 构造与 {row,sync} 协议正确 / 每个工厂只有一处实现(收口) / ui 垫片已删除且零残留调用点 / 内联色策略(仅防闪光黑底例外)');
+  // ---- 6. R2c: 面板 UI 里的颜色字面量, 逐处判定「主题(必须走 token)」还是「数据(允许字面量)」----
+  //   第 5 条只覆盖「内联 style 字符串里的 color/background: #hex」这一种写法, 覆盖面很窄:
+  //   把 #hex 存进 JS 对象再经 setProperty / setAttribute 注入的写法它抓不到。本节按**已知注入点**
+  //   逐处点名核对, 而不是全文件扫 —— 全文件扫会被大量"数据色"（色卡取值 / 判白比较 / 默认存储值）
+  //   淹成噪声, 最后只能靠放宽维持绿。
+  {
+    // (a) 遮罩预设色: 主题 → 必须引用 token (此前写死 #0f172a, 与 DR 深青调已不同源)
+    const mp = /const MASK_PRESETS = \{([\s\S]*?)\n  \};/.exec(src);
+    assert.ok(mp, 'R2c: 必须能定位 MASK_PRESETS');
+    assert.strictEqual(/#[0-9a-fA-F]{3,8}/.test(mp[1]), false,
+      'R2c: 遮罩预设色不得写死 #hex (它是面板观感的一部分, 换主题就该跟着变)');
+    assert.ok(/color: 'var\(--svi-/.test(mp[1]), 'R2c: 遮罩预设色必须引用 token 变量');
+
+    // (b) 区域纠正可视化层的着色: 主题 → 必须走 token, 且与同层图例同一套
+    //     （SVG 表现属性不接受 var(), 因此必须落在 style 属性上 —— 这条断言同时守住这个坑）
+    assert.ok(/红=反色/.test(src), 'R2c: 必须能定位区域纠正图例');
+    assert.strictEqual(/setAttribute\('fill', cells\[/.test(src), false,
+      'R2c: 区域着色的 fill 不得走表现属性 (那里 var() 会被当非法颜色丢掉), 必须走 style');
+    assert.ok(/setAttribute\('style', 'fill:' \+ \(cells\[[\s\S]{0,40}var\(--svi-error-bright\)[\s\S]{0,20}var\(--svi-fg\)/.test(src),
+      'R2c: 区域着色必须用 token (红=--svi-error-bright / 蓝=--svi-fg)');
+
+    // (c) 反色预设的色卡示意色: **数据**（描述被处理画面会变成什么底色, 不描述面板自身观感）→ 允许字面量,
+    //     但必须在注释里写明为什么不是主题色, 否则下一个读代码的人会把它当成又一处漂移。
+    const chip = /color: p\.id === 'amoled' \? '#000000' : '#1e293b'/.exec(src);
+    assert.ok(chip, 'R2c: 反色预设色卡示意色应保持字面量（它是数据）—— 若真改成 token 了请同步改本节');
+    assert.ok(/这两个色值是\*\*数据\*\*不是主题/.test(src),
+      'R2c: 允许保留的色字面量必须在代码里写明「为什么不是主题色」');
+  }
+
+  console.log('✓ v6.4 控件库单测 passed: 词汇表 20 项齐全 / 构造与 {row,sync} 协议正确 / 每个工厂只有一处实现(收口) / ui 垫片已删除且零残留调用点 / 内联色策略(仅防闪光黑底例外) / R2c 色字面量逐注入点判定(遮罩与区域着色走 token)');
 })();
 
 // ============================================================

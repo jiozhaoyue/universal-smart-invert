@@ -2171,10 +2171,13 @@
 
   // 遮罩风格预设 (唯一定义处) —— v5-5 加载前 pending 遮罩必须复用本表, 不得另行定义。
   //   on/off 语义见 arbitrate 注释; CSS 由 injectStyles 内的 :root 变量 + [data-svi-masked] 规则消费。
+  //   v6.4 R2c: 遮罩色改走 token —— 它此前写死 `#0f172a`(旧配色时代的深板岩), 换到 DR 深青调后
+  //   与面板/模态的底色已经不同源了(实测漂移), 故改为引用 --svi-bg-deep。
+  //   注: 值经 syncMaskVars 写成 `--svi-mask-<id>-color`, CSS 再消费一层 var() —— 嵌套 var() 合法。
   const MASK_PRESETS = {
-    solid: { id: 'solid', name: '全遮挡', color: '#0f172a', opacity: 1.0, blur: 0, hoverOpacity: 0.15 },
-    dim: { id: 'dim', name: '暗色半透明', color: '#0f172a', opacity: 0.75, blur: 0, hoverOpacity: 0.15 },
-    frost: { id: 'frost', name: '毛玻璃', color: '#0f172a', opacity: 0.35, blur: 8, hoverOpacity: 0.05 },
+    solid: { id: 'solid', name: '全遮挡', color: 'var(--svi-bg-deep)', opacity: 1.0, blur: 0, hoverOpacity: 0.15 },
+    dim: { id: 'dim', name: '暗色半透明', color: 'var(--svi-bg-deep)', opacity: 0.75, blur: 0, hoverOpacity: 0.15 },
+    frost: { id: 'frost', name: '毛玻璃', color: 'var(--svi-bg-deep)', opacity: 0.35, blur: 8, hoverOpacity: 0.05 },
   };
 
   function isMaskStyle(id) {
@@ -11855,7 +11858,9 @@
           r.setAttribute('y', String(y));
           r.setAttribute('width', '1');
           r.setAttribute('height', '1');
-          r.setAttribute('fill', cells[y * n + x] ? '#ef4444' : '#3b82f6');
+          // v6.4 R2c: 着色走 token, 与同层图例（rgba(var(--svi-bg-rgb),…)/var(--svi-text-strong)）同一套。
+          //   SVG 的**表现属性**不接受 var()（fill="var(...)" 会被当非法颜色丢弃），故走 style 属性 —— 那里可用 var()。
+          r.setAttribute('style', 'fill:' + (cells[y * n + x] ? 'var(--svi-error-bright)' : 'var(--svi-fg)'));
           r.setAttribute('fill-opacity', '0.28');
           svg.appendChild(r);
         }
@@ -13265,6 +13270,9 @@
         Object.values(PRESETS).map((p) => ({
           id: p.id,
           label: p.name,
+          // v6.4 R2c 判定: 这两个色值是**数据**不是主题 —— 它们是"反色预设会把页面压成什么底色"的示意,
+          //   与 IMG_COLOR_PRESETS 同类（描述被处理的画面, 不描述面板自身观感）。刻意不换成 token:
+          //   换成 token 会让色卡与实际效果不符（amoled 就是纯黑）。见 test.js 的 R2c 白名单。
           color: p.id === 'amoled' ? '#000000' : '#1e293b',
           dark: true,
         })),
