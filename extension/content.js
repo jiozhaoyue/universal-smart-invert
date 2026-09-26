@@ -12609,25 +12609,11 @@
   };
   /* v6.4-CONTROLS-END */
 
-  // v6.4 兼容垫片: 旧 `ui` 名字保留为**转发** —— 控件的 DOM 构造只有 SviControls 一处实现,
-  //   不再存在第二套行渲染 (重建层会把调用点直接改成 SviControls.*, 那时再删掉这个垫片)。
-  const ui = {
-    h: function () { return SviControls.h.apply(SviControls, arguments); },
-    labelBox: function () { return SviControls.labelBox.apply(SviControls, arguments); },
-    section: function () { return SviControls.section.apply(SviControls, arguments); },
-    toggleRow: function () { return SviControls.toggleRow.apply(SviControls, arguments); },
-    sliderRow: function () { return SviControls.sliderRow.apply(SviControls, arguments); },
-    selectRow: function () { return SviControls.selectRow.apply(SviControls, arguments); },
-    chipRow: function () { return SviControls.chipRow.apply(SviControls, arguments); },
-    btnRow: function () { return SviControls.btnRow.apply(SviControls, arguments); },
-    textRow: function () { return SviControls.textRow.apply(SviControls, arguments); },
-    infoLine: function () { return SviControls.infoLine.apply(SviControls, arguments); },
-    pickerRow: function () { return SviControls.pickerRow.apply(SviControls, arguments); },
-  };
-
+  // v6.4 R2a: 旧 `ui` 转发垫片已删除 —— 面板 118 处调用点直接走 SviControls.*,
+  //   控件的 DOM 构造全文件只有这一处实现 (单测断言 `ui.*` 调用点为 0, 防垫片复活)。
 
   // ==========================================
-  // 23. 极简悬浮胶囊 UI 控制器与高级设置页 (全部区块经 ui 组件库构建)
+  // 23. 极简悬浮胶囊 UI 控制器与高级设置页 (全部区块经 SviControls 控件库构建)
   // ==========================================
   class UIController {
     constructor() {
@@ -13055,9 +13041,9 @@
     // v3.3 模态区块: 🎨 外观与画面 (预设 + 悬停还原 + 画面滤镜 + 过渡)
     // ==========================================
     buildAppearanceSection() {
-      const sec = ui.section('🎨 外观与画面', '整体反色风格与观感微调', 'svi-sec-appearance');
+      const sec = SviControls.section('🎨 外观与画面', '整体反色风格与观感微调', 'svi-sec-appearance');
 
-      const presetChipRow = ui.chipRow(
+      const presetChipRow = SviControls.chipRow(
         Object.values(PRESETS).map((p) => ({
           id: p.id,
           label: p.name,
@@ -13070,7 +13056,7 @@
       sec.add(presetChipRow);
       this.rowSyncs.push(() => presetChipRow.sync());
 
-      const hoverRow = ui.toggleRow('悬停显示原图', '悬停已反色图片时临时显示原图，移出后恢复反色视图',
+      const hoverRow = SviControls.toggleRow('悬停显示原图', '悬停已反色图片时临时显示原图，移出后恢复反色视图',
         () => state.hoverRestore !== false,
         (v) => {
           state.hoverRestore = v;
@@ -13081,23 +13067,23 @@
       this.rowSyncs.push(() => hoverRow.sync());
 
       // 画面滤镜微调 (原折叠抽屉并入, 反色预设选「自定义」时逐项生效)
-      const bRow = ui.sliderRow('画面亮度', '反色后的暗化微调', () => state.brightness, (n) => {
+      const bRow = SviControls.sliderRow('画面亮度', '反色后的暗化微调', () => state.brightness, (n) => {
         state.brightness = n;
         this.stateMachine.onCustomParamChange();
       }, 0.50, 1.50, 0.01, '');
-      const cRow = ui.sliderRow('画面对比度', '文字线条锐利度', () => state.contrast, (n) => {
+      const cRow = SviControls.sliderRow('画面对比度', '文字线条锐利度', () => state.contrast, (n) => {
         state.contrast = n;
         this.stateMachine.onCustomParamChange();
       }, 0.50, 1.50, 0.01, '');
-      const sRow = ui.sliderRow('色彩饱和度', '消除或保留颜色', () => state.saturate, (n) => {
+      const sRow = SviControls.sliderRow('色彩饱和度', '消除或保留颜色', () => state.saturate, (n) => {
         state.saturate = n;
         this.stateMachine.onCustomParamChange();
       }, 0.00, 2.00, 0.01, '');
-      const hRow = ui.sliderRow('色相旋转', '校正颜色谱系', () => state.hueRotate, (n) => {
+      const hRow = SviControls.sliderRow('色相旋转', '校正颜色谱系', () => state.hueRotate, (n) => {
         state.hueRotate = n;
         this.stateMachine.onCustomParamChange();
       }, 0, 360, 1, '°');
-      const transRow = ui.sliderRow('过渡动画时长', '设为 0 毫秒即直接切换无渐变', () => state.transitionMs, (n) => {
+      const transRow = SviControls.sliderRow('过渡动画时长', '设为 0 毫秒即直接切换无渐变', () => state.transitionMs, (n) => {
         state.transitionMs = n;
         this.stateMachine.onUpdateTransition(n);
       }, 0, 1000, 10, '毫秒');
@@ -13112,10 +13098,10 @@
     // v3.3 模态区块: 🖼️ 图片反色 (策略 + 浅色检测 + 色图 + 特效参数)
     // ==========================================
     buildImageSection() {
-      const sec = ui.section('🖼️ 图片反色', '决定哪些图片反色以及反色方式', 'svi-sec-image');
+      const sec = SviControls.section('🖼️ 图片反色', '决定哪些图片反色以及反色方式', 'svi-sec-image');
 
       // 智能图片策略 (v3.3 选项净化: 短名 + 动态说明)
-      const policyRow = ui.selectRow('智能图片策略', '手动 Alt+点击 与学习规则始终优先',
+      const policyRow = SviControls.selectRow('智能图片策略', '手动 Alt+点击 与学习规则始终优先',
         [
           { v: 'balanced', label: '平衡', describe: '默认。正文与大图反色，封面网格与页面骨架跳过。' },
           { v: 'conservative', label: '保守', describe: '仅正文上下文与不小于 200 像素的大图参与。' },
@@ -13130,7 +13116,7 @@
       sec.add(policyRow);
       this.rowSyncs.push(() => policyRow.sync());
 
-      const generalLightRow = ui.toggleRow('全浅色通用自适应检测', '任何高明度浅底图表均自动识别反色',
+      const generalLightRow = SviControls.toggleRow('全浅色通用自适应检测', '任何高明度浅底图表均自动识别反色',
         () => state.imgGeneralLight !== false,
         (v) => {
           state.imgGeneralLight = v;
@@ -13142,7 +13128,7 @@
 
       // v4.6: 暗色遮罩上下文感知 (任务 v4.6-4)。变更即全量重扫 (对齐元素规则编辑契约:
       // savePrefs → clearCacheAndRescan + 背景图 sweep), 关闭即完全回到旧行为 (回滚点 R2)
-      const maskAwareRow = ui.toggleRow('暗色遮罩感知', '祖先有暗色蒙层且合成后已足够暗时不再反色图片，避免破坏原有合成观感；关闭立即回到旧行为并重扫',
+      const maskAwareRow = SviControls.toggleRow('暗色遮罩感知', '祖先有暗色蒙层且合成后已足够暗时不再反色图片，避免破坏原有合成观感；关闭立即回到旧行为并重扫',
         () => state.maskAware !== false,
         (v) => {
           state.maskAware = v;
@@ -13156,8 +13142,8 @@
       sec.add(maskAwareRow);
       this.rowSyncs.push(() => maskAwareRow.sync());
 
-      sec.add(ui.infoLine('预设浅色色卡，点击启用或禁用对应浅色系：'));
-      const colorChipRow = ui.chipRow(
+      sec.add(SviControls.infoLine('预设浅色色卡，点击启用或禁用对应浅色系：'));
+      const colorChipRow = SviControls.chipRow(
         IMG_COLOR_PRESETS.map((cp) => ({ id: cp.id, label: cp.name, color: cp.color })),
         (id) => !!(state.imgPresets && state.imgPresets[id]),
         (id) => {
@@ -13170,7 +13156,7 @@
       sec.add(colorChipRow);
       this.rowSyncs.push(() => colorChipRow.sync());
 
-      const customPicker = ui.pickerRow('🎯 目标色图拾色器', '点击色块唤出调色盘',
+      const customPicker = SviControls.pickerRow('🎯 目标色图拾色器', '点击色块唤出调色盘',
         () => state.imgCustomColor || '#ffffff',
         (hex) => {
           state.imgCustomColor = hex;
@@ -13181,22 +13167,22 @@
       this.rowSyncs.push(() => customPicker.sync());
 
       // 浅色检测阈值精调 (原折叠抽屉并入)
-      const imgTolRow = ui.sliderRow('目标色容差', '色图匹配置信范围', () => state.imgTolerance, (n) => {
+      const imgTolRow = SviControls.sliderRow('目标色容差', '色图匹配置信范围', () => state.imgTolerance, (n) => {
         state.imgTolerance = n;
         savePrefs();
         window.__svi_image_engine?.clearCacheAndRescan();
       }, 10, 80, 1, '');
-      const imgLumRow = ui.sliderRow('浅色明度线', '判定浅色背景的明度底线', () => state.imgLumCutoff, (n) => {
+      const imgLumRow = SviControls.sliderRow('浅色明度线', '判定浅色背景的明度底线', () => state.imgLumCutoff, (n) => {
         state.imgLumCutoff = n;
         savePrefs();
         window.__svi_image_engine?.clearCacheAndRescan();
       }, 150, 240, 1, '');
-      const imgAreaRow = ui.sliderRow('浅色面积占比', '触发反色的浅底面积比例', () => state.imgAreaThreshold, (n) => {
+      const imgAreaRow = SviControls.sliderRow('浅色面积占比', '触发反色的浅底面积比例', () => state.imgAreaThreshold, (n) => {
         state.imgAreaThreshold = n;
         savePrefs();
         window.__svi_image_engine?.clearCacheAndRescan();
       }, 25, 90, 1, '%');
-      const minSizeRow = ui.sliderRow('正文图最小尺寸', '小于此长宽的图标不反色', () => state.minImgSize, (n) => {
+      const minSizeRow = SviControls.sliderRow('正文图最小尺寸', '小于此长宽的图标不反色', () => state.minImgSize, (n) => {
         state.minImgSize = n;
         savePrefs();
         window.__svi_image_engine?.clearCacheAndRescan();
@@ -13207,7 +13193,7 @@
       });
 
       // 图片特效模式与参数 (v3.3 选项净化: 短名 + 动态说明)
-      const imgFxModeRow = ui.selectRow('图片特效模式', '部分反色与特效的呈现方式',
+      const imgFxModeRow = SviControls.selectRow('图片特效模式', '部分反色与特效的呈现方式',
         IMG_FX_MODES,
         () => state.imgFxMode,
         (v) => {
@@ -13218,7 +13204,7 @@
       sec.add(imgFxModeRow);
       this.rowSyncs.push(() => imgFxModeRow.sync());
 
-      const lumRow = ui.sliderRow('亮度反色 · 明度线', '仅反色高于该明度的像素', () => state.imgFxParams.lumCutoff, (n) => {
+      const lumRow = SviControls.sliderRow('亮度反色 · 明度线', '仅反色高于该明度的像素', () => state.imgFxParams.lumCutoff, (n) => {
         state.imgFxParams.lumCutoff = n;
         savePrefs();
         window.__svi_image_engine?.clearCacheAndRescan();
@@ -13226,7 +13212,7 @@
       sec.add(lumRow);
       this.rowSyncs.push(() => lumRow.sync());
 
-      const satRow = ui.sliderRow('亮度反色 · 饱和上限', '低于该饱和度的像素才参与', () => state.imgFxParams.satCutoff, (n) => {
+      const satRow = SviControls.sliderRow('亮度反色 · 饱和上限', '低于该饱和度的像素才参与', () => state.imgFxParams.satCutoff, (n) => {
         state.imgFxParams.satCutoff = n;
         savePrefs();
         window.__svi_image_engine?.clearCacheAndRescan();
@@ -13234,7 +13220,7 @@
       sec.add(satRow);
       this.rowSyncs.push(() => satRow.sync());
 
-      const keyPicker = ui.pickerRow('键色反色 · 目标色', '仅反色接近该颜色的像素',
+      const keyPicker = SviControls.pickerRow('键色反色 · 目标色', '仅反色接近该颜色的像素',
         () => state.imgFxParams.keyColor || '#ffffff',
         (hex) => {
           state.imgFxParams.keyColor = hex;
@@ -13244,7 +13230,7 @@
       sec.add(keyPicker);
       this.rowSyncs.push(() => keyPicker.sync());
 
-      const tolRow = ui.sliderRow('键色反色 · 容差', '与键色的颜色距离容差', () => state.imgFxParams.keyTol, (n) => {
+      const tolRow = SviControls.sliderRow('键色反色 · 容差', '与键色的颜色距离容差', () => state.imgFxParams.keyTol, (n) => {
         state.imgFxParams.keyTol = n;
         savePrefs();
         window.__svi_image_engine?.clearCacheAndRescan();
@@ -13252,14 +13238,14 @@
       sec.add(tolRow);
       this.rowSyncs.push(() => tolRow.sync());
 
-      sec.add(ui.infoLine('特效以替换图方式呈现：悬停查看原图，Alt+点击临时还原，Alt+Shift+拖拽框选区域。'));
+      sec.add(SviControls.infoLine('特效以替换图方式呈现：悬停查看原图，Alt+点击临时还原，Alt+Shift+拖拽框选区域。'));
 
       // ===== v5.4 动图全帧谱 (GIF / 动画 WebP / APNG / AVIF) =====
       const animSupported = (typeof ImageDecoder === 'function');
       if (!animSupported) {
-        sec.add(ui.infoLine('本浏览环境不支持 ImageDecoder，动图将按静态图判定（取当前显示的那一帧）。'));
+        sec.add(SviControls.infoLine('本浏览环境不支持 ImageDecoder，动图将按静态图判定（取当前显示的那一帧）。'));
       }
-      const animRow = ui.toggleRow('动图全帧谱分析',
+      const animRow = SviControls.toggleRow('动图全帧谱分析',
         '对 GIF / 动画 WebP / APNG 解出全部（抽样）帧算亮度谱，再判断整段动画该不该反色。'
         + '此前动图只按一帧判死，换景后会一直错。'
         + (animSupported ? '' : '（当前环境不支持，此项无效）'),
@@ -13268,7 +13254,7 @@
       sec.add(animRow);
       this.rowSyncs.push(() => animRow.sync());
 
-      const mixedRow = ui.selectRow('混合型动图',
+      const mixedRow = SviControls.selectRow('混合型动图',
         '整段动画里深浅场景都有的情况。⚠ CSS 滤镜**无法按时序切换**，所以默认保持原样；「按多数帧」只是一种近似，不是逐帧反色',
         [
           { v: 'keep', label: '保持原样', describe: '推荐：不做半吊子的近似。' },
@@ -13279,13 +13265,13 @@
       sec.add(mixedRow);
       this.rowSyncs.push(() => mixedRow.sync());
 
-      const animRatioRow = ui.sliderRow('全浅判定门', '白帧占比达到此值才算"整段都是浅色动画"',
+      const animRatioRow = SviControls.sliderRow('全浅判定门', '白帧占比达到此值才算"整段都是浅色动画"',
         () => state.animAllLightRatio, (v) => { state.animAllLightRatio = v; savePrefs(); },
         0.6, 1, 0.05, '');
       sec.add(animRatioRow);
       this.rowSyncs.push(() => animRatioRow.sync());
 
-      const animCapRow = ui.sliderRow('谱分析帧上限', '最多解多少帧（超出按等间隔抽帧，不是只解开头几帧）',
+      const animCapRow = SviControls.sliderRow('谱分析帧上限', '最多解多少帧（超出按等间隔抽帧，不是只解开头几帧）',
         () => state.frameSampleCap, (v) => { state.frameSampleCap = Math.round(v); savePrefs(); },
         4, 200, 4, '帧');
       sec.add(animCapRow);
@@ -13522,13 +13508,13 @@
     // v3.3 模态区块: 🎬 视频 (特效引擎 + 智能算法 + 画面调节 + 时间线记忆)
     // ==========================================
     buildVideoSection() {
-      const sec = ui.section('🎬 视频', '视频反色引擎与画面调节', 'svi-sec-video');
+      const sec = SviControls.section('🎬 视频', '视频反色引擎与画面调节', 'svi-sec-video');
 
       // 视频特效引擎 (显卡加速不可用时隐藏选项, 自动走标准滤镜路径)
       const vfx = (window.__svi && window.__svi.engines) ? window.__svi.engines.videoFx : null;
       const gpuOk = !vfx || vfx.available;
       if (gpuOk) {
-        const vfxModeRow = ui.selectRow('视频特效引擎', '决定视频反色的呈现路径',
+        const vfxModeRow = SviControls.selectRow('视频特效引擎', '决定视频反色的呈现路径',
           [
             { v: 'off', label: '关闭', describe: '走标准滤镜路径，兼容性最好。' },
             { v: 'full', label: '完整反色', describe: '显卡加速逐帧呈现完整反色。' },
@@ -13547,23 +13533,23 @@
         sec.add(vfxModeRow);
         this.rowSyncs.push(() => vfxModeRow.sync());
       } else {
-        sec.add(ui.infoLine('当前环境不支持显卡加速，视频特效引擎已停用，将走标准滤镜路径。'));
+        sec.add(SviControls.infoLine('当前环境不支持显卡加速，视频特效引擎已停用，将走标准滤镜路径。'));
       }
 
       // 视频智能算法与防抖 (原折叠抽屉并入)
-      const intervalRow = ui.sliderRow('检测采样周期', '后台探测频次，支持逐帧检测时自动逐帧', () => state.sampleIntervalMs, (n) => {
+      const intervalRow = SviControls.sliderRow('检测采样周期', '后台探测频次，支持逐帧检测时自动逐帧', () => state.sampleIntervalMs, (n) => {
         state.sampleIntervalMs = n;
         this.stateMachine.onUpdateInterval(n);
       }, 50, 2000, 25, '毫秒');
-      const whiteRow = ui.sliderRow('白底面积占比', '触发视频反色的面积阈值', () => state.whiteThreshold, (n) => {
+      const whiteRow = SviControls.sliderRow('白底面积占比', '触发视频反色的面积阈值', () => state.whiteThreshold, (n) => {
         state.whiteThreshold = n;
         savePrefs();
       }, 30, 95, 1, '%');
-      const lumRow = ui.sliderRow('明度判定线', '判定为白底的亮度下限', () => state.lumThreshold, (n) => {
+      const lumRow = SviControls.sliderRow('明度判定线', '判定为白底的亮度下限', () => state.lumThreshold, (n) => {
         state.lumThreshold = n;
         savePrefs();
       }, 160, 250, 1, '');
-      const hystRow = ui.sliderRow('退出防抖延迟', '离开白底画面时的缓冲确认时长', () => state.exitHysteresisMs, (n) => {
+      const hystRow = SviControls.sliderRow('退出防抖延迟', '离开白底画面时的缓冲确认时长', () => state.exitHysteresisMs, (n) => {
         state.exitHysteresisMs = n;
         savePrefs();
       }, 200, 5000, 100, '毫秒');
@@ -13575,27 +13561,27 @@
       // v3.2 视频画面调节 (独立于反色, 可组合)
       const tuneChanged = () => { savePrefs(); applyVideoTune(); };
       const tuneRows = [
-        ui.toggleRow('启用画面调节', '对所有视频生效：调亮度对比度饱和度暖色黑白，关闭时零开销',
+        SviControls.toggleRow('启用画面调节', '对所有视频生效：调亮度对比度饱和度暖色黑白，关闭时零开销',
           () => state.videoTune && state.videoTune.enabled === true,
           (v) => { state.videoTune.enabled = v; tuneChanged(); }),
-        ui.sliderRow('画面调节 · 亮度', '降低亮度护眼，1 为原样',
+        SviControls.sliderRow('画面调节 · 亮度', '降低亮度护眼，1 为原样',
           () => state.videoTune.brightness, (v) => { state.videoTune.brightness = v; tuneChanged(); },
           0.3, 1.7, 0.01, ''),
-        ui.sliderRow('画面调节 · 对比度', '画面明暗反差',
+        SviControls.sliderRow('画面调节 · 对比度', '画面明暗反差',
           () => state.videoTune.contrast, (v) => { state.videoTune.contrast = v; tuneChanged(); },
           0.3, 1.7, 0.01, ''),
-        ui.sliderRow('画面调节 · 饱和度', '色彩浓淡，0 为黑白感',
+        SviControls.sliderRow('画面调节 · 饱和度', '色彩浓淡，0 为黑白感',
           () => state.videoTune.saturate, (v) => { state.videoTune.saturate = v; tuneChanged(); },
           0, 2, 0.01, ''),
-        ui.sliderRow('画面调节 · 暖色', '暖黄夜读色调',
+        SviControls.sliderRow('画面调节 · 暖色', '暖黄夜读色调',
           () => state.videoTune.warmth, (v) => { state.videoTune.warmth = v; tuneChanged(); },
           0, 1, 0.05, ''),
-        ui.sliderRow('画面调节 · 黑白', '去色程度',
+        SviControls.sliderRow('画面调节 · 黑白', '去色程度',
           () => state.videoTune.grayscale, (v) => { state.videoTune.grayscale = v; tuneChanged(); },
           0, 1, 0.05, ''),
       ];
       for (const r of tuneRows) sec.add(r);
-      sec.add(ui.btnRow([
+      sec.add(SviControls.btnRow([
         { label: '护眼', onClick: () => { Object.assign(state.videoTune, { enabled: true, brightness: 0.85, contrast: 1, saturate: 1, warmth: 0.15, grayscale: 0 }); tuneChanged(); this.modalControls && this.modalControls.syncAll(); } },
         { label: '夜间', onClick: () => { Object.assign(state.videoTune, { enabled: true, brightness: 0.7, contrast: 1, saturate: 0.9, warmth: 0.25, grayscale: 0 }); tuneChanged(); this.modalControls && this.modalControls.syncAll(); } },
         { label: '鲜艳', onClick: () => { Object.assign(state.videoTune, { enabled: true, brightness: 1, contrast: 1.05, saturate: 1.35, warmth: 0, grayscale: 0 }); tuneChanged(); this.modalControls && this.modalControls.syncAll(); } },
@@ -13604,7 +13590,7 @@
       for (const r of tuneRows) this.rowSyncs.push(() => r.sync());
 
       // 时间线记忆 (v3.3 选项净化: 短名 + 动态说明)
-      const timelineRow = ui.selectRow('时间线记忆', '反色片段按视频指纹记忆，重放时提前布防',
+      const timelineRow = SviControls.selectRow('时间线记忆', '反色片段按视频指纹记忆，重放时提前布防',
         [
           { v: 'off', label: '关闭', describe: '不做时间线记忆。' },
           { v: 'reference', label: '参考', describe: '自动提前布防，手动操作始终优先。' },
@@ -13619,26 +13605,26 @@
       this.rowSyncs.push(() => timelineRow.sync());
 
       // ===== v5.4 帧序列判定 (提前切换 + 转场白闪门) =====
-      const seqRow = ui.toggleRow('帧序列判定',
+      const seqRow = SviControls.toggleRow('帧序列判定',
         '用最近几帧的滑动窗做判定：① 转场白闪不再误触发反色；② 明确在涨的跨阈帧提前一帧切换（感知上"场景一变颜色就对了"）。关闭则回到单帧判定',
         () => state.frameSequence !== false,
         (on) => { state.frameSequence = !!on; savePrefs(); showToast(on ? '帧序列判定已开启' : '帧序列判定已关闭（回到单帧判定）'); });
       sec.add(seqRow);
       this.rowSyncs.push(() => seqRow.sync());
 
-      const seqWinRow = ui.sliderRow('序列窗帧数', '窗口越大越稳、反应越慢（至少 3 帧才启用两个门）',
+      const seqWinRow = SviControls.sliderRow('序列窗帧数', '窗口越大越稳、反应越慢（至少 3 帧才启用两个门）',
         () => state.frameWindow, (v) => { state.frameWindow = Math.round(v); savePrefs(); },
         2, 8, 1, '帧');
       sec.add(seqWinRow);
       this.rowSyncs.push(() => seqWinRow.sync());
 
-      const sceneDeltaRow = ui.sliderRow('场景跃变门', '相邻帧白占比变化超过此值才算"场景变了"（提前切换的依据）',
+      const sceneDeltaRow = SviControls.sliderRow('场景跃变门', '相邻帧白占比变化超过此值才算"场景变了"（提前切换的依据）',
         () => state.sceneDelta, (v) => { state.sceneDelta = v; savePrefs(); },
         0.1, 0.9, 0.05, '');
       sec.add(sceneDeltaRow);
       this.rowSyncs.push(() => sceneDeltaRow.sync());
 
-      const flashRow = ui.toggleRow('转场白闪不切换',
+      const flashRow = SviControls.toggleRow('转场白闪不切换',
         '转场常有一两帧接近纯白：窗口内白帧占比不足时判为闪光，不触发反色（避免一闪一闪）',
         () => state.flashWhiteSkip !== false,
         (on) => { state.flashWhiteSkip = !!on; savePrefs(); showToast(on ? '转场白闪门已开启' : '转场白闪门已关闭'); });
@@ -13754,7 +13740,7 @@
     //   开关的**读取**一律经 actionEnabled(); 此处只负责写入, 不自行推断启用状态。
     // ==========================================
     buildActionsSection() {
-      const sec = ui.section('🧩 元素动作', '把插件从「反色器」扩成页面媒体治理层；会改动页面观感的新动作默认关闭', 'svi-sec-actions');
+      const sec = SviControls.section('🧩 元素动作', '把插件从「反色器」扩成页面媒体治理层；会改动页面观感的新动作默认关闭', 'svi-sec-actions');
 
       const refresh = () => {
         try { syncMaskVars(); } catch (e) { /* ignore */ }
@@ -13780,7 +13766,7 @@
       };
 
       // —— hide: 元素屏蔽 ——
-      const hideRow = ui.toggleRow('元素屏蔽 (hide)',
+      const hideRow = SviControls.toggleRow('元素屏蔽 (hide)',
         'Alt+Shift+点击 屏蔽该元素：首次=临时（仅本会话），再点=恢复，第三次=永久（写规则）。Alt+Shift+Z 一键恢复本页临时屏蔽。作用域：元素 · 生效时机：立即',
         () => actionEnabled('hide'),
         (on) => {
@@ -13794,7 +13780,7 @@
       this.rowSyncs.push(() => hideRow.sync());
 
       // —— mask: 遮罩 ——
-      const maskRow = ui.toggleRow('遮罩 (mask)',
+      const maskRow = SviControls.toggleRow('遮罩 (mask)',
         'Alt+M 给鼠标所在元素加/取消遮罩；鼠标移入自动揭开，Shift+移入永久解除。作用域：元素 · 生效时机：立即',
         () => actionEnabled('mask'),
         (on) => {
@@ -13810,7 +13796,7 @@
       sec.add(maskRow);
       this.rowSyncs.push(() => maskRow.sync());
 
-      const maskStyleRow = ui.selectRow('遮罩风格', '新加的遮罩使用的预设（已加的遮罩不受影响）',
+      const maskStyleRow = SviControls.selectRow('遮罩风格', '新加的遮罩使用的预设（已加的遮罩不受影响）',
         [
           { v: 'dim', label: '暗色半透明', describe: '压暗但保留轮廓 —— 「暂时不想看」。' },
           { v: 'solid', label: '全遮挡', describe: '完全盖住 —— 屏蔽干扰区。' },
@@ -13821,21 +13807,21 @@
       sec.add(maskStyleRow);
       this.rowSyncs.push(() => maskStyleRow.sync());
 
-      const hoverOpRow = ui.sliderRow('悬停揭开程度', '鼠标移到遮罩上时剩下的不透明度：越小揭开越彻底（0 = 完全揭开）',
+      const hoverOpRow = SviControls.sliderRow('悬停揭开程度', '鼠标移到遮罩上时剩下的不透明度：越小揭开越彻底（0 = 完全揭开）',
         () => state.maskHoverOpacity,
         (v) => { state.maskHoverOpacity = v; savePrefs(); syncMaskVars(); },
         0, 1, 0.05, '');
       sec.add(hoverOpRow);
       this.rowSyncs.push(() => hoverOpRow.sync());
 
-      const blurRow = ui.sliderRow('毛玻璃模糊半径', '仅「毛玻璃」风格生效',
+      const blurRow = SviControls.sliderRow('毛玻璃模糊半径', '仅「毛玻璃」风格生效',
         () => state.maskBlur,
         (v) => { state.maskBlur = v; savePrefs(); syncMaskVars(); },
         0, 24, 1, 'px');
       sec.add(blurRow);
       this.rowSyncs.push(() => blurRow.sync());
 
-      sec.add(ui.btnRow([
+      sec.add(SviControls.btnRow([
         { label: '区域遮罩（拖拽）', onClick: () => { this.armRegionMask(); refresh(); } },
         { label: '清除全部遮罩', onClick: () => {
             teardown('mask');
@@ -13845,7 +13831,7 @@
       ]));
 
       // —— dim: 全页压暗 ——
-      const dimRow = ui.toggleRow('全页压暗 (dim)',
+      const dimRow = SviControls.toggleRow('全页压暗 (dim)',
         '整页盖一层压暗蒙层（比反色温和，不改内容颜色，不拦点击）。作用域：全页 · 生效时机：立即',
         () => actionEnabled('dim'),
         (on) => {
@@ -13858,7 +13844,7 @@
       sec.add(dimRow);
       this.rowSyncs.push(() => dimRow.sync());
 
-      const dimOpRow = ui.sliderRow('压暗不透明度', '0 = 不压暗，0.9 = 接近全黑（移入鼠标可临时揭开）',
+      const dimOpRow = SviControls.sliderRow('压暗不透明度', '0 = 不压暗，0.9 = 接近全黑（移入鼠标可临时揭开）',
         () => state.pageDimOpacity,
         (v) => { state.pageDimOpacity = v; savePrefs(); syncMaskVars(); },
         0, 0.9, 0.05, '');
@@ -13866,7 +13852,7 @@
       this.rowSyncs.push(() => dimOpRow.sync());
 
       // —— peek: 悬停复原 (与既有「悬停显示原图」同一偏好, 单一真源) ——
-      const peekRow = ui.toggleRow('悬停复原 (peek)',
+      const peekRow = SviControls.toggleRow('悬停复原 (peek)',
         '通用门：被遮罩的元素与图片反色在鼠标移入时临时还原。与「🖼️ 图片反色 · 悬停显示原图」是同一个开关。作用域：全页 · 生效时机：立即',
         () => actionEnabled('peek'),
         (on) => {
@@ -13881,7 +13867,7 @@
       this.rowSyncs.push(() => peekRow.sync());
 
       // —— 安全模式 ——
-      sec.add(ui.btnRow([
+      sec.add(SviControls.btnRow([
         { label: '安全模式（只留反色）', onClick: () => {
             state.actions.hide.enabled = false;
             state.actions.mask.enabled = false;
@@ -13898,7 +13884,7 @@
       ]));
 
       // —— v5.2 复查与撤销 ——
-      const undoRow = ui.toggleRow('撤销 (Alt+Z)',
+      const undoRow = SviControls.toggleRow('撤销 (Alt+Z)',
         '把脚本自动做出的结论入「撤销栈」，Alt+Z 逐个回退；批量处理时给一个带「撤销」按钮的提示。仅内存、只记自动结论（手动点击与元素规则不入栈）。作用域：全页 · 生效时机：立即',
         () => state.undoEnabled !== false,
         (on) => {
@@ -13911,14 +13897,14 @@
       sec.add(undoRow);
       this.rowSyncs.push(() => undoRow.sync());
 
-      const undoSizeRow = ui.sliderRow('撤销栈容量', '可回退的最大步数（仅内存，不落盘）',
+      const undoSizeRow = SviControls.sliderRow('撤销栈容量', '可回退的最大步数（仅内存，不落盘）',
         () => state.undoStackSize,
         (v) => { state.undoStackSize = Math.round(v); savePrefs(); },
         1, 100, 1, '步');
       sec.add(undoSizeRow);
       this.rowSyncs.push(() => undoSizeRow.sync());
 
-      const toastRow = ui.toggleRow('操作提示条',
+      const toastRow = SviControls.toggleRow('操作提示条',
         '批量处理 ≥3 个元素时弹一条带「撤销」按钮的提示（单张不弹，避免噪音）。作用域：全页 · 生效时机：立即',
         () => state.actionToast !== false,
         (on) => {
@@ -13930,7 +13916,7 @@
       sec.add(toastRow);
       this.rowSyncs.push(() => toastRow.sync());
 
-      const sentinelRow = ui.toggleRow('误反哨兵',
+      const sentinelRow = SviControls.toggleRow('误反哨兵',
         '记录你的手动修正：同一张图 24 小时内被还原 2 次给出说明，同一类元素被还原 3 次提示可一键固化。只记录与提示，不自动写规则。作用域：本站 · 生效时机：立即',
         () => state.errorSentinel !== false,
         (on) => {
@@ -13943,13 +13929,13 @@
 
       // —— v5.3 数据闭环：判定来源分布 / hits 分级 / 负反馈 / 形状先验 / 阈值校准 ——
       const dist = sourceDistribution(processedLog.items);
-      this.dataLoopDiag = ui.infoLine('本页判定来源：' + (dist.total
+      this.dataLoopDiag = SviControls.infoLine('本页判定来源：' + (dist.total
         ? (dist.total + ' 项 · ' + Object.keys(dist.byReason)
           .map((k) => (REASON_ZH[k] || k) + '×' + dist.byReason[k]).join(' / '))
         : '本页尚未处理任何元素'));
       sec.add(this.dataLoopDiag);
 
-      const gradingRow = ui.toggleRow('hits 分级（强 / 弱规则）',
+      const gradingRow = SviControls.toggleRow('hits 分级（强 / 弱规则）',
         '**默认关**。开启后：命中 ≥ 强规则门 的学习规则保持现有优先级；已生效但未达强门的规则降为「弱规则」，只能覆盖像素判定、不再压过内置种子规则。开启会改变既有学习规则的行为，故默认关',
         () => state.learnGrading === true,
         (on) => {
@@ -13962,21 +13948,21 @@
       sec.add(gradingRow);
       this.rowSyncs.push(() => gradingRow.sync());
 
-      const strongRow = ui.sliderRow('强规则门', '命中多少次算「强规则」（仅分级开启时有效）',
+      const strongRow = SviControls.sliderRow('强规则门', '命中多少次算「强规则」（仅分级开启时有效）',
         () => state.learnStrongHits,
         (v) => { state.learnStrongHits = Math.round(v); savePrefs(); },
         2, 20, 1, '次');
       sec.add(strongRow);
       this.rowSyncs.push(() => strongRow.sync());
 
-      const demoteRow = ui.toggleRow('负反馈降级',
+      const demoteRow = SviControls.toggleRow('负反馈降级',
         '规则命中后若你手动覆盖该元素：该规则命中数归 1；连续 2 次被覆盖则自动禁用（可在 本站规则 列表里点「恢复」）。只减少错误自动化',
         () => state.learnDemote !== false,
         (on) => { state.learnDemote = !!on; savePrefs(); showToast(on ? '负反馈降级已开启' : '负反馈降级已关闭'); });
       sec.add(demoteRow);
       this.rowSyncs.push(() => demoteRow.sync());
 
-      const shapeRow = ui.toggleRow('形状跨站先验',
+      const shapeRow = SviControls.toggleRow('形状跨站先验',
         '最弱兜底来源（**默认关**）：某「元素长相」在 ≥N 个不同站点上结论一致时，对新站同形元素直接给出结论。位置在所有种子规则之后、像素判定之前 —— 不是「像素缺失时才生效」，此处如实标注',
         () => state.shapePrior === true,
         (on) => {
@@ -13989,16 +13975,16 @@
       sec.add(shapeRow);
       this.rowSyncs.push(() => shapeRow.sync());
 
-      const shapeMinRow = ui.sliderRow('形状先验门', '至少几个不同站点结论一致才采用',
+      const shapeMinRow = SviControls.sliderRow('形状先验门', '至少几个不同站点结论一致才采用',
         () => state.shapeMinHosts,
         (v) => { state.shapeMinHosts = Math.round(v); savePrefs(); },
         2, 20, 1, '站');
       sec.add(shapeMinRow);
       this.rowSyncs.push(() => shapeMinRow.sync());
 
-      this.calibDiag = ui.infoLine(this.calibText());
+      this.calibDiag = SviControls.infoLine(this.calibText());
       sec.add(this.calibDiag);
-      sec.add(ui.btnRow([
+      sec.add(SviControls.btnRow([
         { label: '应用校准建议', onClick: () => this.applyCalibration() },
         { label: '恢复本站默认阈值', onClick: () => {
             if (calibrate.reset(profileKey())) { showToast('已恢复本站默认阈值'); refresh(); }
@@ -14006,7 +13992,7 @@
           } },
       ]));
 
-      const calibRow = ui.toggleRow('阈值自校准（自动收紧）',
+      const calibRow = SviControls.toggleRow('阈值自校准（自动收紧）',
         '按你的手动修正自动收紧本站判定阈值 —— **只会收紧**（减少误反）；放松只在面板给建议、需你点按钮。可用上方「恢复本站默认阈值」撤销',
         () => state.calibrateAuto !== false,
         (on) => { state.calibrateAuto = !!on; savePrefs(); showToast(on ? '已开启自动收紧' : '已关闭自动收紧（仅展示建议）'); });
@@ -14014,13 +14000,13 @@
       this.rowSyncs.push(() => calibRow.sync());
 
       // v5.3: 全站维度累积 + 形状先验表
-      this.siteDistDiag = ui.infoLine(this.siteDistText());
+      this.siteDistDiag = SviControls.infoLine(this.siteDistText());
       sec.add(this.siteDistDiag);
       this.shapeBox = document.createElement('div');
       sec.el.appendChild(this.shapeBox);
       this.refreshShapeTable();
 
-      this.actionsDiag = ui.infoLine('当前启用动作：' + enabledActions().join(' / '));
+      this.actionsDiag = SviControls.infoLine('当前启用动作：' + enabledActions().join(' / '));
       sec.add(this.actionsDiag);
 
       return sec.el;
@@ -14180,18 +14166,18 @@
       sec.appendChild(this.storageBadgeLine);
 
       // —— 规则文件 ——
-      sec.appendChild(ui.infoLine('规则文件：站点名单、本站设置、元素规则、学习规则与屏蔽色，可在任意页面之间传递。').row);
-      sec.appendChild(ui.btnRow([
+      sec.appendChild(SviControls.infoLine('规则文件：站点名单、本站设置、元素规则、学习规则与屏蔽色，可在任意页面之间传递。').row);
+      sec.appendChild(SviControls.btnRow([
         { label: '导出规则文件', onClick: () => this.exportRulesFile() },
         { label: '导入并合并', onClick: () => this.importRulesFile(false) },
         { label: '导入并替换', onClick: () => this.importRulesFile(true) },
       ]).row);
       // v4.5: 分发通道 —— 链接拉取合并 (内联输入行; 内容脚本环境的 prompt/confirm 对话框
       // 不可依赖, 且合并本身幂等去重, 直接执行) + 仅学习成果的可分享小包
-      sec.appendChild(ui.infoLine('规则分发：填入 svi-rules 规则包链接拉取合并（重复条目自动去重，可重复导入）；学习成果包只含修正特征与命中数，可安全分享。').row);
+      sec.appendChild(SviControls.infoLine('规则分发：填入 svi-rules 规则包链接拉取合并（重复条目自动去重，可重复导入）；学习成果包只含修正特征与命中数，可安全分享。').row);
       const packRow = document.createElement('div');
       // v4.6 R5: 手动导入通道明示 (需联网; 脚本自身绝不在启动/扫描路径自动联网)
-      sec.appendChild(ui.infoLine('以下为手动导入通道：需联网拉取，仅在你点击按钮时执行；脚本不会在启动或扫描时自动联网。').row);
+      sec.appendChild(SviControls.infoLine('以下为手动导入通道：需联网拉取，仅在你点击按钮时执行；脚本不会在启动或扫描时自动联网。').row);
       packRow.className = 'svi-er-form';
       const packInput = document.createElement('input');
       packInput.type = 'text';
@@ -14209,13 +14195,13 @@
       packRow.appendChild(packInput);
       packRow.appendChild(packBtn);
       sec.appendChild(packRow);
-      sec.appendChild(ui.btnRow([
+      sec.appendChild(SviControls.btnRow([
         { label: '导出学习成果', onClick: () => this.exportLearnedPack() },
       ]).row);
 
       // —— 全量备份 ——
-      sec.appendChild(ui.infoLine('全量备份：全部偏好与本地数据的完整存档。').row);
-      sec.appendChild(ui.btnRow([
+      sec.appendChild(SviControls.infoLine('全量备份：全部偏好与本地数据的完整存档。').row);
+      sec.appendChild(SviControls.btnRow([
         { label: '导出备份', onClick: () => this.exportStorageJson() },
         { label: '导入备份', onClick: () => this.importStorageJson() },
         {
@@ -14246,7 +14232,7 @@
       this.statsGrid.className = 'svi-stats-grid';
       sec.appendChild(this.statsGrid);
 
-      sec.appendChild(ui.btnRow([
+      sec.appendChild(SviControls.btnRow([
         { label: '复制统计', onClick: () => this.copyStatsJson() },
         { label: '下载统计', onClick: () => this.downloadStatsJson() },
         {
@@ -14263,10 +14249,10 @@
       ]).row);
 
       // file:// 访问提示 (一次性, 按需显示)
-      this.fileHintLine = ui.infoLine('');
+      this.fileHintLine = SviControls.infoLine('');
       sec.appendChild(this.fileHintLine.row);
 
-      sec.appendChild(ui.infoLine('数据仅保存在浏览器本地并支持云同步通道，绝不自动上传；导出完全由你手动触发。').row);
+      sec.appendChild(SviControls.infoLine('数据仅保存在浏览器本地并支持云同步通道，绝不自动上传；导出完全由你手动触发。').row);
 
       this.refreshDataSection();
       return sec;
@@ -14645,7 +14631,7 @@
       sec.appendChild(this.buildCapabilityCards());
 
       // 本站图片特效模式 (跟随全局或单独指定; 「跟随全局」删除覆盖键)
-      const siteFxRow = ui.selectRow('本站图片特效', '仅作用于当前站点的图片特效模式',
+      const siteFxRow = SviControls.selectRow('本站图片特效', '仅作用于当前站点的图片特效模式',
         [{ v: '', label: '跟随全局', describe: '使用图片反色区块中设置的全局特效模式。' }].concat(
           IMG_FX_MODES.map((m) => ({ v: m.v, label: m.label, describe: m.describe + '仅本站生效。' }))
         ),
@@ -14667,7 +14653,7 @@
       erTitle.className = 'svi-sub-title';
       erTitle.textContent = '元素级规则';
       sec.appendChild(erTitle);
-      sec.appendChild(ui.infoLine('按元素特征强制反色或保持原色，优先于自动判断与学习规则。').row);
+      sec.appendChild(SviControls.infoLine('按元素特征强制反色或保持原色，优先于自动判断与学习规则。').row);
 
       this.elementRulesBox = document.createElement('div');
       sec.appendChild(this.elementRulesBox);
@@ -14731,7 +14717,7 @@
       learnTitle.textContent = '学习规则';
       sec.appendChild(learnTitle);
 
-      const seedRow = ui.toggleRow('内置种子规则', '内置站点规则库作为兜底层，学习规则优先于它',
+      const seedRow = SviControls.toggleRow('内置种子规则', '内置站点规则库作为兜底层，学习规则优先于它',
         () => state.rulesEnabled !== false,
         (v) => {
           state.rulesEnabled = v;
@@ -14740,19 +14726,19 @@
       sec.appendChild(seedRow.row);
       this.siteRowSyncs.push(seedRow.sync);
 
-      const learnRow = ui.sliderRow('学习命中阈值', '同一特征手动修正达此次数后自动生效', () => state.learnHits, (n) => {
+      const learnRow = SviControls.sliderRow('学习命中阈值', '同一特征手动修正达此次数后自动生效', () => state.learnHits, (n) => {
         state.learnHits = Math.round(n);
         savePrefs();
       }, 2, 6, 1, '次');
       sec.appendChild(learnRow.row);
       this.siteRowSyncs.push(learnRow.sync);
 
-      sec.appendChild(ui.infoLine('本站已学习规则（Alt+点击修正积累）：').row);
+      sec.appendChild(SviControls.infoLine('本站已学习规则（Alt+点击修正积累）：').row);
 
       this.smartRulesBox = document.createElement('div');
       sec.appendChild(this.smartRulesBox);
 
-      this.smartHint = ui.infoLine('');
+      this.smartHint = SviControls.infoLine('');
       sec.appendChild(this.smartHint.row);
       this.refreshSmartSection();
 
@@ -14762,7 +14748,7 @@
       sec.appendChild(this.ruleSummary);
 
       // 重扫本页背景按钮
-      const rescanBtns = ui.btnRow([{
+      const rescanBtns = SviControls.btnRow([{
         label: '🔄 重扫本页背景',
         onClick: () => {
           const engine = window.__svi && window.__svi.engines ? window.__svi.engines.bgReplace : null;
@@ -14862,7 +14848,7 @@
       secTitle.innerHTML = `<span>🛡️ 原色屏蔽</span>`;
       sec.appendChild(secTitle);
 
-      const hint = ui.infoLine('加入屏蔽列表的原始颜色永不转换，背景替换与图片反色都会跳过，适合保护品牌色与警示色。');
+      const hint = SviControls.infoLine('加入屏蔽列表的原始颜色永不转换，背景替换与图片反色都会跳过，适合保护品牌色与警示色。');
       sec.appendChild(hint.row);
 
       this.shieldChipsBox = document.createElement('div');
@@ -14948,17 +14934,17 @@
     // 列表按需采集 (点击按钮触发, 启动零开销); 行内数据一律 textContent (XSS 加固)
     // ==========================================
     buildMediaSection() {
-      const sec = ui.section('🖼️ 当前页媒体 / 已处理', '排查被改动的媒体，并逐项还原或固化规则', 'svi-sec-media');
+      const sec = SviControls.section('🖼️ 当前页媒体 / 已处理', '排查被改动的媒体，并逐项还原或固化规则', 'svi-sec-media');
       this.mediaShownCount = 200;
       this.mediaView = this.mediaView || 'processed'; // v5.2: 默认「已处理」视图
 
       // v5.2 双视图切换 (「全部媒体」= v3.1 原行为, 原样保留不回归)
-      sec.add(ui.btnRow([
+      sec.add(SviControls.btnRow([
         { label: '📋 已处理', onClick: () => { this.mediaView = 'processed'; this.mediaShownCount = 200; this.refreshMediaSection(); } },
         { label: '🗂 全部媒体', onClick: () => { this.mediaView = 'all'; this.mediaShownCount = 200; this.refreshMediaSection(); } },
       ]));
 
-      sec.add(ui.btnRow([
+      sec.add(SviControls.btnRow([
         {
           label: '🔄 采集/刷新列表',
           onClick: () => {
@@ -14994,7 +14980,7 @@
       this.mediaListBox = document.createElement('div');
       sec.el.appendChild(this.mediaListBox);
 
-      this.mediaSummary = ui.infoLine('');
+      this.mediaSummary = SviControls.infoLine('');
       sec.add(this.mediaSummary);
 
       // 首次构建只渲染空态 (惰性采集, 避免启动时全页样式扫描)
@@ -15611,7 +15597,7 @@
       secTitle.innerHTML = `<span>🔤 字体与可读性</span>`;
       sec.appendChild(secTitle);
 
-      const fontRow = ui.toggleRow('字体覆盖', '全站强制使用所选字体，代码块与图标不受影响',
+      const fontRow = SviControls.toggleRow('字体覆盖', '全站强制使用所选字体，代码块与图标不受影响',
         () => state.fontOverride === true,
         (v) => {
           state.fontOverride = v;
@@ -15621,7 +15607,7 @@
       sec.appendChild(fontRow.row);
       this.rowSyncs.push(fontRow.sync);
 
-      const famRow = ui.selectRow('字体风格', '字体覆盖开启时使用的字体族',
+      const famRow = SviControls.selectRow('字体风格', '字体覆盖开启时使用的字体族',
         [
           { v: 'sans', label: '无衬线', describe: '系统默认无衬线，界面最清晰。' },
           { v: 'serif', label: '衬线', describe: '宋体质感，适合长文阅读。' },
@@ -15637,7 +15623,7 @@
       sec.appendChild(famRow.row);
       this.rowSyncs.push(famRow.sync);
 
-      const strokeRow = ui.sliderRow('文字描边', '给正文文字加细描边提升对比，0 为关闭',
+      const strokeRow = SviControls.sliderRow('文字描边', '给正文文字加细描边提升对比，0 为关闭',
         () => state.textStroke,
         (n) => {
           state.textStroke = n;
@@ -15661,10 +15647,10 @@
       secTitle.innerHTML = `<span>🌙 动态主题调节</span>`;
       sec.appendChild(secTitle);
 
-      sec.appendChild(ui.infoLine('作用于背景替换引擎的生成配色 (非滤镜路径)；仅当本站卡片开启「背景替换」时可见效果，变更立即重扫生效。').row);
+      sec.appendChild(SviControls.infoLine('作用于背景替换引擎的生成配色 (非滤镜路径)；仅当本站卡片开启「背景替换」时可见效果，变更立即重扫生效。').row);
 
       // v5.5: 布尔 → 三档选择器 (旧值已由 loadState 无损迁移)
-      const fgRow = ui.selectRow('加载前保护（防白闪）',
+      const fgRow = SviControls.selectRow('加载前保护（防白闪）',
         '深色站点加载前先铺黑底消除白闪；「元素遮罩」档另加元素级 pending 遮罩（见下）。'
         + '⚠ 元素级遮罩**只有扩展形态**能做到真正的"首帧前"—— 用户脚本在 document-end 启动，'
         + '首屏元素已渲染，因此只覆盖后续动态插入的元素，首屏由黑底兜底',
@@ -15692,13 +15678,13 @@
       // 不能用 sec.add(), 全模态窗口会构建失败 (初版踩过, bench 场景 1 立刻抓到)
       // ===== v5.5 元素遮罩 (仅 media 档生效) =====
       const gateInfo = (() => { try { return pendingMaskGate(); } catch (e) { return { armed: false, reason: '不可用' }; } })();
-      this.pendingDiag = ui.infoLine('本站元素遮罩：'
+      this.pendingDiag = SviControls.infoLine('本站元素遮罩：'
         + (state.flashGuardLevel === 'media'
           ? (gateInfo.armed ? ('已启用（' + gateInfo.reason + '）') : ('未启用（' + gateInfo.reason + '）'))
           : '未启用（当前档位不是「文档黑底 + 元素遮罩」）'));
       sec.appendChild(this.pendingDiag.row);
 
-      const pendRow = ui.toggleRow('元素遮罩（pending 遮罩）',
+      const pendRow = SviControls.toggleRow('元素遮罩（pending 遮罩）',
         'media 档下对"本站已知会反色"的新插入媒体先遮住（visibility:hidden），判定完成即放行。'
         + '三层预算兜底：总时长 / 元素数 / 单元素超时；判定失败**立即放行原图**。'
         + '按 Esc（有东西被遮住时）或点下方按钮可一次性显示全部并暂停本会话',
@@ -15713,25 +15699,25 @@
       sec.appendChild(pendRow.row);
       this.rowSyncs.push(() => pendRow.sync());
 
-      const maskBudgetRow = ui.sliderRow('遮罩总时长预算', '超过即全部摘罩放行（防"页面一直白/一直黑"）',
+      const maskBudgetRow = SviControls.sliderRow('遮罩总时长预算', '超过即全部摘罩放行（防"页面一直白/一直黑"）',
         () => state.maskBudgetMs, (v) => { state.maskBudgetMs = Math.round(v); savePrefs(); },
         200, 5000, 100, 'ms');
       sec.appendChild(maskBudgetRow.row);
       this.rowSyncs.push(() => maskBudgetRow.sync());
 
-      const maskMaxRow = ui.sliderRow('遮罩元素数上限', '同时最多遮住多少个元素（超出部分不打标）',
+      const maskMaxRow = SviControls.sliderRow('遮罩元素数上限', '同时最多遮住多少个元素（超出部分不打标）',
         () => state.maskMaxElements, (v) => { state.maskMaxElements = Math.round(v); savePrefs(); },
         1, 500, 1, '个');
       sec.appendChild(maskMaxRow.row);
       this.rowSyncs.push(() => maskMaxRow.sync());
 
-      const rateRow = ui.sliderRow('本站启用门 · 历史反色率', '上次在本站的反色率超过此值才启用元素遮罩（首访站点一律不遮）',
+      const rateRow = SviControls.sliderRow('本站启用门 · 历史反色率', '上次在本站的反色率超过此值才启用元素遮罩（首访站点一律不遮）',
         () => state.siteInvertRate, (v) => { state.siteInvertRate = v; savePrefs(); },
         0.05, 0.95, 0.05, '');
       sec.appendChild(rateRow.row);
       this.rowSyncs.push(() => rateRow.sync());
 
-      sec.appendChild(ui.btnRow([
+      sec.appendChild(SviControls.btnRow([
         { label: '立即显示全部（并暂停本会话）', onClick: () => {
             pendingMask.escape();
             this.refreshPendingDiag();
@@ -15746,7 +15732,7 @@
             this.refreshPendingDiag();
           } },
       ]).row);
-      this.maskStatsDiag = ui.infoLine('');
+      this.maskStatsDiag = SviControls.infoLine('');
       sec.appendChild(this.maskStatsDiag.row);
       this.refreshPendingDiag();
 
@@ -15757,7 +15743,7 @@
         } catch (e) { /* ignore */ }
       };
 
-      const toneRow = ui.selectRow('色调', '背景与边框的主题基调',
+      const toneRow = SviControls.selectRow('色调', '背景与边框的主题基调',
         [
           { v: 'pure-black', label: '纯黑', describe: '默认基调，纯黑背景，对比最强。' },
           { v: 'dark-gray', label: '深灰', describe: '纯黑抬升为深灰底，长时间阅读更柔和。' },
@@ -15772,7 +15758,7 @@
       sec.appendChild(toneRow.row);
       this.rowSyncs.push(toneRow.sync);
 
-      const brightRow = ui.sliderRow('页面亮度', '动态主题生成配色的整体亮度倍率',
+      const brightRow = SviControls.sliderRow('页面亮度', '动态主题生成配色的整体亮度倍率',
         () => state.bgBrightness,
         (n) => {
           state.bgBrightness = n;
@@ -15782,7 +15768,7 @@
       sec.appendChild(brightRow.row);
       this.rowSyncs.push(brightRow.sync);
 
-      const contrastRow = ui.sliderRow('页面对比度', '动态主题生成配色的整体对比度倍率',
+      const contrastRow = SviControls.sliderRow('页面对比度', '动态主题生成配色的整体对比度倍率',
         () => state.bgContrast,
         (n) => {
           state.bgContrast = n;
@@ -15809,7 +15795,7 @@
       const hours = [];
       for (let h = 0; h < 24; h++) hours.push({ v: String(h), label: h + ' 时', describe: '' });
 
-      const schedRow = ui.toggleRow('定时启停', '仅在设定时段自动启用反色，时段外自动停用 (每分钟热切换)',
+      const schedRow = SviControls.toggleRow('定时启停', '仅在设定时段自动启用反色，时段外自动停用 (每分钟热切换)',
         () => state.scheduleEnabled === true,
         (v) => {
           state.scheduleEnabled = v;
@@ -15820,7 +15806,7 @@
       sec.appendChild(schedRow.row);
       this.rowSyncs.push(schedRow.sync);
 
-      const startRow = ui.selectRow('开始时刻', '进入启用时段的小时',
+      const startRow = SviControls.selectRow('开始时刻', '进入启用时段的小时',
         hours, () => String(Math.round(Number(state.scheduleStart) || 0)),
         (v) => {
           state.scheduleStart = Math.round(Number(v)) || 0;
@@ -15831,7 +15817,7 @@
       sec.appendChild(startRow.row);
       this.rowSyncs.push(startRow.sync);
 
-      const endRow = ui.selectRow('结束时刻', '退出启用时段的小时 (可跨零点)',
+      const endRow = SviControls.selectRow('结束时刻', '退出启用时段的小时 (可跨零点)',
         hours, () => String(Math.round(Number(state.scheduleEnd) || 0)),
         (v) => {
           state.scheduleEnd = Math.round(Number(v)) || 0;
@@ -15856,7 +15842,7 @@
       secTitle.innerHTML = `<span>📜 站点名单</span>`;
       sec.appendChild(secTitle);
 
-      const modeRow = ui.selectRow('站点管理模式', '控制脚本在哪些站点生效',
+      const modeRow = SviControls.selectRow('站点管理模式', '控制脚本在哪些站点生效',
         [
           { v: 'all', label: '全部启用', describe: '所有站点默认启用。' },
           { v: 'blacklist', label: '黑名单', describe: '名单内站点停用，其余站点启用。' },
@@ -15873,7 +15859,7 @@
       this.modeSelect = modeRow.select;
       this.siteRowSyncs.push(modeRow.sync);
 
-      const blackRow = ui.textRow(null, null, () => (state.siteBlacklist || []).join('\n'), 3, (val) => {
+      const blackRow = SviControls.textRow(null, null, () => (state.siteBlacklist || []).join('\n'), 3, (val) => {
         const lines = val.split(/\n+/).map((s) => s.trim()).filter(Boolean);
         state.siteBlacklist = lines;
         savePrefs();
@@ -15884,7 +15870,7 @@
       this.blacklistTa = blackRow.ta;
       this.siteRowSyncs.push(blackRow.sync);
 
-      const whiteRow = ui.textRow(null, null, () => (state.siteWhitelist || []).join('\n'), 3, (val) => {
+      const whiteRow = SviControls.textRow(null, null, () => (state.siteWhitelist || []).join('\n'), 3, (val) => {
         const lines = val.split(/\n+/).map((s) => s.trim()).filter(Boolean);
         state.siteWhitelist = lines;
         savePrefs();
@@ -16350,7 +16336,9 @@
     RuleLearner: ruleLearner,
     TimelineLearner: timelineLearner,
     ShadowDomRegistry,
-    uiBuilders: ui,
+    // v6.4 R2a: 由 SviControls 直接承载 (旧 `ui` 转发垫片已删除); 键名保留不改 —— 它是调试句柄,
+    //   改名对使用方是破坏性变更, 而语义未变 (原本就是转发到同一个实现点)。
+    uiBuilders: SviControls,
     profileKey,
     hash32,
     getMediaSrc,

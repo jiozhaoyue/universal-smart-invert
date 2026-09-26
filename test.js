@@ -4833,14 +4833,15 @@ setTimeout(() => {
     }
   }
 
-  // ---- 4. 旧 `ui` 只是转发垫片: 它自己不得构造任何节点 ----
+  // ---- 4. 旧 `ui` 转发垫片必须已删除, 且调用点一律直连 SviControls (R2a) ----
+  //   垫片的存在意义只是「搬家时不改 118 处调用点」；重建层切换完成后它必须消失，
+  //   否则「控件 DOM 构造只有一个实现点」这条纪律就只剩一句话，随时可能长出第二套。
   {
-    const m = /const ui = \{([\s\S]*?)\n  \};/.exec(src);
-    assert.ok(m, 'R2: 必须存在 ui 兼容垫片');
-    const body = m[1];
-    assert.strictEqual(body.indexOf('createElement'), -1, 'R2: ui 垫片不得自己 createElement');
-    assert.strictEqual(body.indexOf('appendChild'), -1, 'R2: ui 垫片不得自己 appendChild');
-    assert.ok(body.indexOf('SviControls.') >= 0, 'R2: ui 垫片必须转发到 SviControls');
+    assert.strictEqual(/const ui = \{/.test(src), false,
+      'R2a: ui 转发垫片必须已删除 (它会让第二套行渲染有处可藏)');
+    const calls = src.match(/(?<![\w.$])ui\.[a-zA-Z]+\(/g) || [];
+    assert.deepStrictEqual(calls, [],
+      'R2a: 面板调用点必须直连 SviControls.*, 残留 ' + JSON.stringify(calls));
   }
 
   // ---- 5. 内联样式里的颜色必须走 token (唯一例外: 防闪光黑底) ----
@@ -4850,7 +4851,7 @@ setTimeout(() => {
       'R1: 内联样式里的颜色必须走 token (唯一例外是防闪光黑底), got ' + JSON.stringify(inline));
   }
 
-  console.log('✓ v6.4 控件库单测 passed: 词汇表 20 项齐全 / 构造与 {row,sync} 协议正确 / 每个工厂只有一处实现(收口) / ui 垫片零节点构造 / 内联色策略(仅防闪光黑底例外)');
+  console.log('✓ v6.4 控件库单测 passed: 词汇表 20 项齐全 / 构造与 {row,sync} 协议正确 / 每个工厂只有一处实现(收口) / ui 垫片已删除且零残留调用点 / 内联色策略(仅防闪光黑底例外)');
 })();
 
 // ============================================================
