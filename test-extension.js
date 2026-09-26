@@ -269,8 +269,14 @@ function startServer() {
         if (g.method === 'Runtime.executionContextCreated') ctxs.push(g.params.context);
       };
       await new Promise((res, rej) => { sock.onopen = res; sock.onerror = () => rej(new Error('WebSocket 连接失败')); });
-      const send = (method, params = {}) => new Promise((res) => {
-        const i = ++seq; pend.set(i, res);
+      const send = (method, params = {}) => new Promise((res, rej) => {
+        const i = ++seq;
+        // 带超时：目标一旦被关掉/导航走，响应永不到来，没有超时就会**永久挂住**
+        // （踩过一次：把断言写在 Target.closeTarget 之后，整轮跑了十分钟才被人为掐掉）
+        const timer = setTimeout(() => {
+          if (pend.has(i)) { pend.delete(i); rej(new Error('CDP 超时 (' + method + ')：目标可能已关闭或已导航')); }
+        }, 20000);
+        pend.set(i, (g) => { clearTimeout(timer); res(g); });
         sock.send(JSON.stringify({ id: i, method, params }));
       });
       const ev = async (expr, ctxId, awaitPromise = false) => {
@@ -591,6 +597,70 @@ function startServer() {
     const applied = await P.ev('window.__svi.prefs.imagePolicy', ctxP.id);
     assert.strictEqual(applied, 'conservative', 'svi-set-pref 必须真的落到内容脚本的偏好上，实测 ' + applied);
     console.log('    svi-set-pref{imagePolicy:conservative} → 内容脚本偏好已更新 ✓');
+
+    // 6d. v6.4 R3：三页签可切换（反色 / 本站 / 更多 —— 对齐 Dark Reader 的信息架构）
+    const tabsInfo = await U.ev(`(() => {
+      const names = ['filter', 'sites', 'more'];
+      const vis = () => names.filter((n) => !document.getElementById('panel-' + n).hidden);
+      const out = { buttons: names.map((n) => !!document.getElementById('tab-btn-' + n)), before: vis() };
+      document.getElementById('tab-btn-sites').click();
+      out.afterSites = vis();
+      out.sitesSel = document.getElementById('tab-btn-sites').getAttribute('aria-selected');
+      document.getElementById('tab-btn-more').click();
+      out.afterMore = vis();
+      document.getElementById('tab-btn-filter').click();
+      out.afterFilter = vis();
+      return out;
+    })()`);
+    console.log('    页签: ' + JSON.stringify(tabsInfo));
+    assert.deepStrictEqual(tabsInfo.buttons, [true, true, true], 'popup 必须有 反色/本站/更多 三个页签');
+    assert.deepStrictEqual(tabsInfo.before, ['filter'], '默认应停在「反色」页签，且同时只显示一个面板');
+    assert.deepStrictEqual(tabsInfo.afterSites, ['sites'], '点「本站」应切到站点面板');
+    assert.strictEqual(tabsInfo.sitesSel, 'true', '被选中的页签 aria-selected 必须为 true');
+    assert.deepStrictEqual(tabsInfo.afterMore, ['more'], '点「更多」应切到更多面板');
+    assert.deepStrictEqual(tabsInfo.afterFilter, ['filter'], '点回「反色」应切回');
+
+    // 6e. v6.4 R3：站点名单只读摘要渲染（用「本站」页签的字段，与快照新增字段对齐）
+    const siteInfo = await U.ev(`(() => ({
+      mode: document.getElementById('site-mode').textContent,
+      counts: document.getElementById('site-counts').textContent,
+      overridden: document.getElementById('overridden').textContent,
+      preview: document.getElementById('list-preview').textContent,
+      verMore: document.getElementById('ver-more').textContent,
+    }))()`);
+    console.log('    站点名单: ' + JSON.stringify(siteInfo));
+    assert.strictEqual(siteInfo.mode, '全部启用', '默认站点管理模式应渲染为「全部启用」');
+    assert.ok(/黑名单 0 · 白名单 0/.test(siteInfo.counts), '名单条目行应报告黑/白名单条数，实测 ' + siteInfo.counts);
+    assert.strictEqual(siteInfo.overridden, '0 个站点', '初始应无本站覆盖，实测 ' + siteInfo.overridden);
+    assert.ok(siteInfo.preview && siteInfo.preview.length > 0, '名单摘要行不应为空');
+    assert.strictEqual(siteInfo.verMore, 'v' + wantVersion, '「更多」页签也应渲染版本');
+
+    // 6e2. 「更多」页签的三个入口必须在场，且设置页 URL 可解析
+    //（只断言存在与可解析，不点「打开设置页」—— 它会 window.close() 掉本页，后续断言就没了）
+    const moreInfo = await U.ev(`(() => ({
+      btns: ['open-settings', 'open-options', 'reset-site'].map((id) => !!document.getElementById(id)),
+      optionsUrl: chrome.runtime.getURL('options.html'),
+    }))()`);
+    assert.deepStrictEqual(moreInfo.btns, [true, true, true], '「更多」页签必须有 设置面板/设置页/清除覆盖 三个入口');
+    assert.ok(/options\.html$/.test(moreInfo.optionsUrl), 'options.html 的扩展 URL 必须可解析，实测 ' + moreInfo.optionsUrl);
+
+    // 6f. v6.4 R3：新增协议 svi-site-reset —— 先用面板自己的三态循环造出本站覆盖，再断言真被清掉
+    const ctxW = await pickExtWorld();
+    const seeded = await P.ev(`(() => {
+      window.__svi.ui.cycleTriState('imageInvert');
+      return Object.keys(window.__svi.prefs.siteOverrides || {});
+    })()`, ctxW.id);
+    assert.deepStrictEqual(seeded, ['127.0.0.1'], '必须先在扩展里造出本站覆盖，实测 ' + JSON.stringify(seeded));
+    const snapBefore = await relay({ type: 'svi-get-snapshot' });
+    assert.strictEqual(snapBefore.overriddenSites, 1, '快照应报告 1 个有覆盖的站点，实测 ' + snapBefore.overriddenSites);
+    const resetRes = await relay({ type: 'svi-site-reset' });
+    assert.ok(resetRes && resetRes.ok === true && resetRes.cleared === true,
+      'svi-site-reset 应返回 {ok:true, cleared:true}，实测 ' + JSON.stringify(resetRes));
+    const leftOver = await P.ev('Object.keys(window.__svi.prefs.siteOverrides || {}).length', ctxW.id);
+    assert.strictEqual(leftOver, 0, '清除后本站覆盖必须为空，实测 ' + leftOver);
+    const snapAfter = await relay({ type: 'svi-get-snapshot' });
+    assert.strictEqual(snapAfter.overriddenSites, 0, '清除后快照的覆盖站点数应归零');
+    console.log('    svi-site-reset → 本站覆盖已清空 ✓');
 
     await U.send('Page.removeScriptToEvaluateOnNewDocument', { identifier: stubbed.result.identifier });
     await B.send('Target.closeTarget', { targetId: popupTargetId });

@@ -80,9 +80,27 @@
 `regionCorrect` 关时点入口按钮正确提示「先打开「区域纠正模式」开关」；
 回滚按钮把 0.123 复位到 0.03；**零页面异常**。
 
-## 阶段 R0 — popup 三 tab ⬜
-- [ ] `Filter` / `Site list` / `More` 三 tab；复用 `SviControls` 与 token（直调 `SviControls.*`）
-- [ ] 保持既有三条消息协议（`svi-get-snapshot` / `svi-site-power` / `svi-set-pref`）不破
+## 阶段 R0 — popup 三 tab ✅ 完成
+
+- [x] `Filter` / `Site list` / `More` 三 tab；复用 token（直调 `SviControls.*` 的**扩展页替代物**：
+      扩展页拿不到用户脚本里的控件库实例，故本页签用与控件库同名的 class/结构 + token 变量手写，
+      同源由 token 与结构语义保证 —— 见偏离 6）
+- [x] 保持既有三条消息协议（`svi-get-snapshot` / `svi-site-power` / `svi-set-pref`）不破：
+      快照只**新增**只读字段（`siteMode` / `blacklistCount` / `whitelistCount` / `overriddenSites` /
+      `listPreview`），既有字段逐字段不动；`test-extension.js` 的三条协议往返断言原样全绿
+- [x] 三页签内容：反色（预设 / 图片策略 / 特效模式 / 图片反色 / 悬停复原）·
+      本站（本站开关 + 站点名单摘要 + 本站计数）· 更多（页面内设置面板入口 / 扩展设置页入口 /
+      清除本站覆盖 / 版本）
+- [x] 新增第四条协议 `svi-site-reset`（清除本站覆盖）+ 用户脚本侧具名方法
+      `uiController.resetSiteOverrides()`；语义与面板「三态循环回继承」时是**同一处状态操作**（偏离 6）
+
+**验证**：`node test-extension.js` → 7 场景全绿；新增断言实测：
+页签 `{buttons:[true,true,true], before:['filter'], afterSites:['sites'], sitesSel:'true', afterMore:['more'], afterFilter:['filter']}`；
+站点名单 `{mode:'全部启用', counts:'黑名单 0 · 白名单 0', overridden:'0 个站点'}`；
+`svi-site-reset` 前造覆盖 → 快照 `overriddenSites:1` → 清除后 `1 → 0` 且 `prefs.siteOverrides` 为空。
+
+> **跨阶段待闭环**：PRD R3 的 AC 还包含「popup 内每一项在 options 页有对应项且双向同步」——
+> 这一条依赖 R1（options 承载全量设置项），在**评审门 G2** 一并判。本轮只闭环 popup 侧。
 
 ## 阶段 R1 — 独立 options 页内容 ⬜
 - [ ] 承载面板全部设置项；与内嵌面板共用控件库与偏好键
@@ -167,3 +185,27 @@ UI 重建必须在它们定型之后做）」—— 只是没料到那批设置�
 代价如实说明：静态抽取只能证明「被引用」，不能严格证明「有一个控件绑着它」。
 它的价值在于**任何新增偏好键若忘了上 UI，测试立刻变红** —— 那正是本条验收要防的事。
 更严的口径（真·绑定性断言）需要先给行工厂加键参数，属后续可做的加固，不在本轮范围。
+
+**偏离 6（第二轮 · 阶段 R0）— popup 的三处「复用」在扩展页里有硬边界，如实说明。**
+
+PRD R3 要求 popup「复用 `SviControls` 与 token」。实际有两处做不到按字面执行，理由如下：
+
+1. **控件库实例跨不过进程边界**：`SviControls` 活在用户脚本（内容脚本 / 隔离世界）里，扩展 popup 是
+   独立扩展页，拿不到那个实例；而「单文件真源」约束又禁止再写一份 JS 模块。故 popup 页的部分采用
+   与控件库**同名的 class 与结构** + token 变量手写，同源由「同一套 token + 同一套结构语义」保证
+   （token 逐字节一致性仍由 `test.js` 把关）。真正的控件库复用发生在**页面内面板**（R2）里。
+2. **面板里没有现成的「清除本站覆盖」handler**：面板只在三态项循环回「继承」时顺带
+   `delete state.siteOverrides[host]`（`cycleTriState` 内联）。为使 popup 的「更多」页签有这项能力、
+   又不让语义分叉，把它抽成具名方法 `uiController.resetSiteOverrides()`，内部就是**同一处状态操作**
+   （delete + `savePrefs` + `evaluateSitePower` + 重扫 + 刷新），并在消息通道新增第四条协议
+   `svi-site-reset` 调用它。既有三条协议**只做加法**：快照响应新增 5 个只读字段，老字段逐字段不动，
+   套件里三条协议的往返断言原样全绿。
+
+**偏离 7（第二轮 · 阶段 R0）— 自动化上的两个坑（对后续所有 E2E 都适用）。**
+
+1. **断言写在 `Target.closeTarget` 之后 = 永久挂住**：目标一关，CDP 响应永不到来，而我的客户端当时
+   没有超时 —— 整轮跑了十分钟才被人为掐掉，日志停在最后一条成功打印上，看起来像「某步很慢」。
+   已给 CDP 客户端加 20s 超时并带上「目标可能已关闭或已导航」的提示。
+2. **残留进程占端口**：上一轮被掐断时，node 子进程与它启的临时配置 Chrome 仍活着，占住 http 端口
+   8791，下一轮直接 `EADDRINUSE` 起不来。清理时**只按 PID 精确杀自己启的那两个**（node + 它的
+   `--user-data-dir=<临时目录>` Chrome），不碰用户自己的浏览器。

@@ -68,6 +68,7 @@
       color: var(--svi-text-strong);
       font: 13px/1.5 system-ui, "Segoe UI", "Microsoft YaHei", sans-serif;
     }
+    /* —— 页头 —— */
     header {
       display: flex; align-items: center; gap: 8px;
       padding: 12px 14px 8px;
@@ -82,15 +83,28 @@
       margin-left: auto; font-size: 10px; color: var(--svi-text-dim);
       border: 1px solid var(--svi-ctl-hover); border-radius: 8px; padding: 1px 7px;
     }
-    #host-row {
-      display: flex; align-items: center; gap: 6px;
-      padding: 0 14px 10px; color: var(--svi-text-dim); font-size: 12px;
+    /* —— 页签栏（v6.4 R3：反色 / 本站 / 更多，对齐 Dark Reader 的三页签信息架构） —— */
+    nav.tabs {
+      display: flex; gap: 4px; padding: 0 10px 8px;
+      border-bottom: 1px solid var(--svi-ctl-hover);
     }
-    #host { color: var(--svi-fg); font-weight: 600; max-width: 200px;
-            overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .tab {
+      flex: 1; padding: 6px 0; text-align: center; font-size: 12px; cursor: pointer;
+      color: var(--svi-text-dim); border: 1px solid transparent; border-radius: 9px;
+      background: none; font-family: inherit;
+    }
+    .tab:hover { color: var(--svi-text-strong); }
+    .tab[aria-selected="true"] {
+      color: var(--svi-fg); border-color: var(--svi-fg);
+      background: rgba(var(--svi-fg-rgb), 0.1);
+    }
+    .panel { padding: 10px 14px 4px; }
+    .panel[hidden] { display: none; }
+    .sec-title { font-size: 10px; letter-spacing: 1px; color: var(--svi-text-dim); margin: 4px 0 6px; }
+    /* —— 本站开关卡 —— */
     .power-row {
       display: flex; align-items: center; justify-content: space-between;
-      margin: 0 10px; padding: 10px 12px;
+      margin: 0 0 8px; padding: 10px 12px;
       background: var(--svi-bg); border: 1px solid var(--svi-ctl-hover); border-radius: 12px;
     }
     .power-row.off { border-color: rgba(var(--svi-error-rgb), 0.33); }
@@ -108,15 +122,7 @@
     }
     .switch input:checked + .knob { background: var(--svi-fg); }
     .switch input:checked + .knob::after { transform: translateX(18px); }
-    section { padding: 10px 14px 4px; }
-    .sec-title { font-size: 10px; letter-spacing: 1px; color: var(--svi-text-dim); margin-bottom: 6px; }
-    .chips { display: flex; gap: 8px; }
-    .chip {
-      flex: 1; padding: 8px 0; text-align: center; font-size: 12px;
-      background: var(--svi-bg); border: 1px solid var(--svi-ctl-hover); border-radius: 10px;
-      cursor: pointer; color: var(--svi-text-strong);
-    }
-    .chip.on { border-color: var(--svi-fg); color: var(--svi-fg); background: rgba(var(--svi-fg-rgb), 0.1); }
+    /* —— 行与控件 —— */
     .row {
       display: flex; align-items: center; justify-content: space-between;
       padding: 7px 0; gap: 10px;
@@ -126,27 +132,45 @@
       background: var(--svi-bg); color: var(--svi-text-strong); border: 1px solid var(--svi-ctl-hover);
       border-radius: 8px; padding: 4px 8px; font-size: 12px; max-width: 150px;
     }
-    .mini { display: flex; align-items: center; justify-content: space-between;
-            padding: 7px 0; }
+    .mini { display: flex; align-items: center; justify-content: space-between; padding: 7px 0; }
     .mini label { color: var(--svi-text-strong); font-size: 12px; }
     .mini input { accent-color: var(--svi-fg); width: 15px; height: 15px; }
-    #counts {
-      padding: 6px 14px; font-size: 11px; color: var(--svi-text-dim);
+    .chips { display: flex; gap: 8px; }
+    .chip {
+      flex: 1; padding: 8px 0; text-align: center; font-size: 12px;
+      background: var(--svi-bg); border: 1px solid var(--svi-ctl-hover); border-radius: 10px;
+      cursor: pointer; color: var(--svi-text-strong);
     }
-    footer { padding: 8px 14px 14px; }
+    .chip.on { border-color: var(--svi-fg); color: var(--svi-fg); background: rgba(var(--svi-fg-rgb), 0.1); }
+    /* —— 只读信息行（本站 / 更多 页签） —— */
+    #host-row { display: flex; align-items: center; gap: 6px; color: var(--svi-text-dim); font-size: 12px; }
+    #host {
+      color: var(--svi-fg); font-weight: 600; max-width: 190px;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .kv { display: flex; justify-content: space-between; gap: 8px; padding: 5px 0; font-size: 12px; }
+    .kv .k { color: var(--svi-text-dim); }
+    .kv .v { color: var(--svi-text-strong); text-align: right; }
+    #counts { padding: 6px 0; font-size: 11px; color: var(--svi-text-dim); }
+    #list-preview {
+      font-size: 11px; color: var(--svi-text-dim); line-height: 1.6;
+      background: var(--svi-bg); border: 1px dashed var(--svi-ctl-active); border-radius: 10px;
+      padding: 8px 10px; margin-top: 4px; word-break: break-all;
+    }
+    footer { padding: 8px 0 12px; display: flex; flex-direction: column; gap: 6px; }
     button {
-      width: 100%; padding: 9px 0; font-size: 12px;
+      width: 100%; padding: 9px 0; font-size: 12px; font-family: inherit;
       background: var(--svi-bg); color: var(--svi-text-strong); border: 1px solid var(--svi-ctl-hover);
       border-radius: 10px; cursor: pointer;
     }
     button:hover { border-color: var(--svi-fg); }
+    button.danger:hover { border-color: rgba(var(--svi-error-rgb), 0.6); color: var(--svi-error); }
     #unavailable {
       margin: 6px 14px 14px; padding: 14px; text-align: center;
       color: var(--svi-text-dim); font-size: 12px; background: var(--svi-bg);
       border: 1px dashed var(--svi-ctl-active); border-radius: 12px;
     }
-    body.unavailable #host-row, body.unavailable .power-row,
-    body.unavailable section, body.unavailable #counts, body.unavailable footer { display: none; }
+    body.unavailable nav.tabs, body.unavailable .panel { display: none; }
     body.available #unavailable { display: none; }
   </style>
 </head>
@@ -156,13 +180,17 @@
     <h1>智能反色</h1>
     <span class="ver" id="ver">—</span>
   </header>
-  <div id="host-row">当前站点：<b id="host">—</b></div>
-  <div class="power-row" id="power-row">
-    <span class="label"><b>本站反色</b><span>停用后本页完全不受影响</span></span>
-    <span class="switch"><input type="checkbox" id="power" aria-label="本站反色开关"><span class="knob"></span></span>
-  </div>
+
+  <nav class="tabs" role="tablist">
+    <button class="tab" id="tab-btn-filter" role="tab" data-tab="filter" aria-selected="true">反色</button>
+    <button class="tab" id="tab-btn-sites" role="tab" data-tab="sites" aria-selected="false">本站</button>
+    <button class="tab" id="tab-btn-more" role="tab" data-tab="more" aria-selected="false">更多</button>
+  </nav>
+
   <div id="unavailable">本页不可用（浏览器内部页面，或内容脚本尚未加载）</div>
-  <section>
+
+  <!-- 页签一：反色（高频项） -->
+  <section class="panel" id="panel-filter" data-panel="filter" role="tabpanel">
     <div class="sec-title">反色预设</div>
     <div class="chips">
       <span class="chip" id="chip-soft-gray">柔和灰</span>
@@ -186,8 +214,34 @@
     <div class="mini"><label>图片反色</label><input type="checkbox" id="imginv"></div>
     <div class="mini"><label>悬停显示原图</label><input type="checkbox" id="hover"></div>
   </section>
-  <div id="counts">—</div>
-  <footer><button id="open-settings">打开完整设置面板（页面内）</button></footer>
+
+  <!-- 页签二：本站（本站开关 + 站点名单） -->
+  <section class="panel" id="panel-sites" data-panel="sites" role="tabpanel" hidden>
+    <div class="power-row" id="power-row">
+      <span class="label"><b>本站反色</b><span>停用后本页完全不受影响</span></span>
+      <span class="switch"><input type="checkbox" id="power" aria-label="本站反色开关"><span class="knob"></span></span>
+    </div>
+    <div class="kv"><span class="k">当前站点</span><span id="host-row"><b id="host">—</b></span></div>
+    <div id="counts">—</div>
+    <div class="sec-title">站点名单</div>
+    <div class="kv"><span class="k">管理模式</span><span class="v" id="site-mode">—</span></div>
+    <div class="kv"><span class="k">名单条目</span><span class="v" id="site-counts">—</span></div>
+    <div class="kv"><span class="k">本站有覆盖</span><span class="v" id="overridden">—</span></div>
+    <div id="list-preview">—</div>
+  </section>
+
+  <!-- 页签三：更多（设置入口 / 清除覆盖 / 版本） -->
+  <section class="panel" id="panel-more" data-panel="more" role="tabpanel" hidden>
+    <div class="sec-title">设置</div>
+    <footer>
+      <button id="open-settings">打开页面内完整设置面板</button>
+      <button id="open-options">打开扩展设置页</button>
+      <button id="reset-site" class="danger">清除本站覆盖（回到继承）</button>
+    </footer>
+    <div class="kv"><span class="k">扩展版本</span><span class="v" id="ver-more">—</span></div>
+    <div class="kv"><span class="k">完整设置项</span><span class="v">在设置面板 / 设置页</span></div>
+  </section>
+
   <script src="popup.js"></script>
 </body>
 </html>

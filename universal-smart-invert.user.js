@@ -15119,6 +15119,30 @@
       showToast(v ? '本站反色已开启 (热生效)' : '本站反色已停用 (热生效)');
     }
 
+    // v6.4: 清除本站覆盖（本站三态项全部回到「继承」）。
+    // 与面板里把三态项循环回继承时是**同一处状态操作**（`delete state.siteOverrides[host]` +
+    // savePrefs + 热应用），故语义不分叉；popup 的「清除本站覆盖」复用它。
+    resetSiteOverrides() {
+      const host = profileKey();
+      let had = false;
+      try {
+        if (state.siteOverrides && Object.prototype.hasOwnProperty.call(state.siteOverrides, host)) {
+          delete state.siteOverrides[host];
+          had = true;
+        }
+      } catch (e) { /* ignore */ }
+      if (had) {
+        savePrefs();
+        evaluateSitePower();
+        try { updateImageFilterCss(); } catch (e) { /* ignore */ }
+        try { window.__svi_image_engine && window.__svi_image_engine.clearCacheAndRescan(); } catch (e) { /* ignore */ }
+        this.refreshPowerUi();
+        try { this.refreshCapCards(); } catch (e) { /* ignore */ }
+        try { this.syncVisuals(); } catch (e) { /* ignore */ }
+      }
+      return had;
+    }
+
     setSiteOffState(off) {
       this.siteOff = off;
       if (this.root) this.root.classList.toggle('svi-site-off', off);
@@ -16165,6 +16189,13 @@
                 bginv: document.querySelectorAll('[data-svi-bginv="true"]').length,
                 video: document.querySelectorAll('video').length,
               },
+              // v6.4: 站点名单的只读摘要（popup 的「站点」页签渲染用）。
+              // 只**新增**字段，既有字段一律不动 —— 老 popup / 老调用方零影响。
+              siteMode: state.siteMode || 'all',
+              blacklistCount: (state.siteBlacklist || []).length,
+              whitelistCount: (state.siteWhitelist || []).length,
+              overriddenSites: Object.keys(state.siteOverrides || {}).length,
+              listPreview: ((state.siteMode === 'whitelist' ? state.siteWhitelist : state.siteBlacklist) || []).slice(0, 4),
             });
           } else if (msg.type === 'svi-site-power') {
             uiController.setSitePower(msg.on !== false);
@@ -16198,6 +16229,10 @@
               return undefined;
             }
             sendResponse({ ok: true });
+          } else if (msg.type === 'svi-site-reset') {
+            // v6.4: 清除本站覆盖（popup 的「更多」页签）。与面板的三态循环回继承是同一处状态操作。
+            const had = uiController.resetSiteOverrides();
+            sendResponse({ ok: true, cleared: !!had, siteActive: runtime.siteActive !== false });
           } else if (msg.type === 'svi-open-settings') {
             uiController.openSettingsModal();
             sendResponse({ ok: true });
