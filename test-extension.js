@@ -383,8 +383,43 @@ function startServer() {
     };
 
     const first = await runOnce('首访');
-    // 等站点样本落盘（反色率门要 ≥5 样本 + ≥35% 才武装遮罩）
-    await sleep(1500);
+    // 等站点样本**真正落盘**再重访（反色率门要 ≥5 样本 + ≥35% 才武装遮罩）。
+    //   为什么不能固定 sleep：样本走 1s 防抖落盘，若重访的首帧读镜像时它们还没到，门看到的仍是
+    //   「本站尚无历史」—— 按 README §13 那就**该**不遮，此时断言「已武装」是测错了前提（不是产品错）。
+    //   故改为有界轮询 chrome.storage 的真值（≥5 样本），与项目既有的防偶发纪律一致。
+    // 重访的**确定性前置**：显式播种本站样本（走产品自己的 API: siteMediaStore.record + persist）。
+    //   为什么不"等上一访的防抖落盘"：那依赖机器时序（实测会超时——固定等待是概率不是时长）；
+    //   播种走的是产品的公开路径，语义与真实历史样本一致（5/6 反色 → 过 35% 与 ≥5 样本的门）。
+    const ctxSeedSamples = await pickExtWorld();
+    const seededSamples = await P.ev(`(() => {
+      const S = window.__svi, host = location.hostname;
+      for (let i = 0; i < 6; i++) S.siteMediaStore.record(host, i < 5);
+      S.siteMediaStore.persist();
+      const st = S.siteMediaStore.stats(host);
+      return { seen: st.seen, inverted: st.inverted };
+    })()`, ctxSeedSamples.id);
+    console.log('    本站样本已播种: seen=' + seededSamples.seen + ' inverted=' + seededSamples.inverted);
+    await waitFor(async () => {
+      const v = await P.ev(`(() => ({ pending: window.__svi.Store.pending.has('siteMedia') }))()`,
+        ctxSeedSamples.id);
+      return v && v.pending === false ? true : null;
+    }, 8000, '播种的样本已落盘 (Store.pending 无 siteMedia)');
+
+    // —— 复访前把「文档黑底 + 元素遮罩」档写进 svi:prefs（走产品自己的协议: prefs + savePrefs）——
+    //   为什么必须显式配档：产品默认档是 'document'（只铺黑底、不含元素遮罩），不配档则该档路径
+    //   在扩展 E2E 里**根本没被覆盖** —— 这正是「扩展形态遮罩永不武装」长期未被发现的原因。
+    //   时机选在首访**之后**：首访按默认档跑（README §13「首访一律不遮」），复访才是遮罩该起作用的时刻。
+    const ctxSeed = await pickExtWorld();
+    const prevTier = await P.ev(`(async () => {
+      const S = window.__svi;
+      const prev = S.prefs.flashGuardLevel;
+      S.prefs.flashGuardLevel = 'media';
+      S.savePrefs();
+      await new Promise((r) => setTimeout(r, 900));   // 300ms 防抖 + 分片落盘余量
+      return prev;
+    })()`, ctxSeed.id, true);
+    console.log('    配档: flashGuardLevel → media (复访前; 原值 ' + prevTier + ')');
+
     const revisit = await runOnce('复访');
     await P.send('Page.removeScriptToEvaluateOnNewDocument', { identifier: probeInstalled.result.identifier });
 
@@ -396,18 +431,91 @@ function startServer() {
       const S = window.__svi, key = location.hostname;
       const me = S.siteMediaStore.stats(key);
       const d = S.maskShouldArm(key, { seen: me.seen, inverted: me.inverted, minSeen: 5, rateThreshold: 0.35 });
+      const fresh = S.maskShouldArm(key, { seen: 0, inverted: 0, minSeen: 5, rateThreshold: 0.35 });
       return { key: key, storeKeys: Object.keys(S.siteMediaStore.load()), seen: me.seen, inverted: me.inverted,
-        armed: !!d.armed, reason: d.reason, maskArmed: !!S.pendingMask.armed };
+        armed: !!d.armed, reason: d.reason, maskArmed: !!S.pendingMask.armed,
+        freshArmed: !!fresh.armed, tier: S.prefs.flashGuardLevel,
+        masking: document.documentElement.hasAttribute('data-svi-masking'),
+        maskReason: (S.runtime && S.runtime.pendingMaskReason) || null };
     })()`, ctxT.id);
     console.log('    站样本门: ' + JSON.stringify(gate));
     assert.ok(gate.seen >= 5, '复访前本站样本必须已记录 (样本数 ' + gate.seen + ')，否则复访也过不了门');
     assert.strictEqual(gate.armed, true, '样本与反色率达标后该门必须武装，实测: ' + gate.reason);
+    // README §13「首访一律不遮」的确定性表述（纯函数, 不依赖帧时序）
+    assert.strictEqual(gate.freshArmed, false, '无样本的站点一律不遮（首访允许白闪）');
+    assert.strictEqual(gate.tier, 'media', '配档必须真的生效（远端 svi:prefs 已装载）');
+    // ★ 本缺陷的直接判据：远端 prefs 装载后，media 档必须真的把遮罩**武装**起来。
+    //   修复前此处恒为 false —— 武装点 whenRootReady(setupPendingMask) 只跑一次、读到的还是引导期
+    //   默认档 'document'，就绪后无人重放；当时零白闪靠「判定够快」侥幸成立，故断言时红时绿。
+    //   注意是**有界轮询**而非瞬时读：武装发生在 Store 远端装载完成之后（就绪后重放），瞬时读会与
+    //   被测的引导时序赛跑 —— 那是测试的竞态，不是产品的。修复前永远不会武装，故轮询超时即红。
+    const armed = await waitFor(async () => {
+      const v = await P.ev(`(() => ({
+        armed: !!window.__svi.pendingMask.armed,
+        masking: document.documentElement.hasAttribute('data-svi-masking'),
+        tier: window.__svi.prefs.flashGuardLevel,
+        reason: (window.__svi.runtime && window.__svi.runtime.pendingMaskReason) || null
+      }))()`, ctxT.id);
+      return v && v.tier === 'media' && v.armed && v.masking ? v : null;
+    }, 8000, 'media 档 + 样本达门 → 元素遮罩武装');
+    console.log('    遮罩已武装: ' + JSON.stringify(armed));
+    assert.strictEqual(armed.armed, true, '扩展形态下 media 档必须武装元素遮罩');
+    assert.strictEqual(armed.masking, true, 'data-svi-masking 属性必须在场（遮罩生效的可观测标志）');
 
-    // 结论断言：复访（遮罩已武装）下，被判反色的图**从未以原色出现过**
+    // 结论断言（按 README §13 的**文档化契约**收敛）：
+    //   旧版这里断言「复访整体零白闪」（flashed == []），但文档化的保证是「首访一律不遮」+
+    //   「元素遮罩覆盖**武装之后新插入**的媒体，首屏由文档黑底兜底」——首屏图片的插入早于武装时点
+    //   （武装要等 Store 远端装载完成，才拿得到 media 档与本站样本），遮罩机制上覆盖不到它们，
+    //   所以旧断言只能靠「判定够快」侥幸通过，时红时绿。首屏白闪帧数改为**证据**打印，不判红。
     const revisitedFlash = Object.keys(revisit.fp.bare || {}).filter((k) => revisit.inv[k]);
-    assert.deepStrictEqual(revisitedFlash, [],
-      '复访必须零白闪：下列图在被反色前曾以原色出现过 → ' + JSON.stringify(revisit.fp.bare));
-    console.log('    复访零白闪 ✓（首访白闪次数按 README §13 允许，仅作证据打印）');
+    console.log('    复访首屏白闪（证据，按 README §13 允许）: '
+      + (revisitedFlash.length ? revisitedFlash.join(', ') : '(无)'));
+
+    // 契约断言：武装之后**新插入**的媒体必须零白闪 —— 它从未处于「可见且未被遮罩标记」的状态。
+    //   这条能咬住本缺陷：修复前遮罩永不武装，注入的图会以原色可见地裸奔若干帧。
+    //   注意：`window.__fp` 住在**探针自己的世界**里（PROBE_WORLD），隔离世界读不到它 ——
+    //   必须分两步：注入在隔离世界（DOM 是共享的），读数在探针世界（否则拿到 undefined，
+    //   `bare: null` 会**空真通过**，正是本套件一直在防的假绿）。
+    const probeBefore = await P.ev('(() => ({ frames: (window.__fp || {}).frames || 0 }))()', (await pickProbeWorld()).id);
+    const injMeta = await P.ev(`(() => {
+      const img = document.createElement('img');
+      img.id = 'svi-inject-probe';
+      img.width = 40; img.height = 40;
+      img.style.cssText = 'position:fixed;left:4px;top:4px;z-index:2147483647';
+      img.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==';
+      document.body.appendChild(img);
+      return true;
+    })()`, ctxT.id, true);
+    assert.ok(injMeta, '注入探针媒体必须成功');
+    await sleep(600);   // 留若干帧 + 判定落定时间
+    const injRes = await P.ev(`(() => {
+      const img = document.getElementById('svi-inject-probe');
+      const fp = window.__fp || {};
+      return { bare: ((fp.bare || {})[img.id]) || null, frames: fp.frames || 0,
+        loaded: !!(img && img.complete && img.naturalWidth > 0),
+        pending: !!(img && img.hasAttribute('data-svi-pending')),
+        settled: img && img.getAttribute('data-svi-settled'),
+        inverted: img && img.getAttribute('data-svi-inverted') };
+    })()`, (await pickProbeWorld()).id);
+    console.log('    武装后新插入媒体: ' + JSON.stringify(injRes) + ' (注入前探针帧数 ' + probeBefore.frames + ')');
+    // 非空真守卫: 图没加载完成、或探针已停摆, 则「零白闪」无从谈起, 必须挡住
+    assert.ok(injRes.loaded, '注入的媒体必须真的加载完成（否则「零白闪」是空真断言）');
+    assert.ok(injRes.frames > probeBefore.frames, '探针必须在注入之后仍在观察帧（否则无从判定白闪）');
+    assert.strictEqual(injRes.bare, null,
+      '武装之后新插入的媒体必须零白闪（README §13）—— 实测曾处于「可见且未标记」的帧: '
+      + JSON.stringify(injRes.bare) + '（pending=' + injRes.pending + ', settled=' + injRes.settled
+      + ', inverted=' + injRes.inverted + '）');
+
+    // 还原档位：后续场景（像素 / 元素比对）不应在「元素遮罩」档下跑 —— 遮罩会把未判定的媒体
+    //   置为 visibility:hidden，让那些断言测到与本缺陷无关的差异。走同一份产品协议写回。
+    await P.ev(`(async () => {
+      const S = window.__svi;
+      S.prefs.flashGuardLevel = ${JSON.stringify(prevTier)};
+      S.savePrefs();
+      await new Promise((r) => setTimeout(r, 900));
+      return true;
+    })()`, ctxT.id, true);
+    console.log('    还原档位: flashGuardLevel → ' + prevTier);
 
     // ---------- 场景 3：隔离世界 + 扩展自验 ----------
     console.log('[Ext] Scenario 3: 隔离世界与扩展自验 ...');

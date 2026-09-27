@@ -16725,6 +16725,12 @@
     const reapplyPrefsFromStore = () => {
       try {
         state = loadState();
+        // v6.6+ (修 09-27): 丢掉引导期可能落下的**空记忆**。siteMediaStore.load() 把首次读到的值
+        //   永久记在 this.data；扩展形态下 Store 是异步后端，若那次读取发生在远端装载完成之前，
+        //   记下来的就是空 {} → 同一页内 stats() 恒为 0 样本 → 门判恒「不武装」。
+        //   就绪后清一次，让随后的读取真正落到镜像上。(改 load() 本体也能修，但它的记忆化语义
+        //   被单测钉着，且在「就绪前记录样本」这一角落会改变与远端值的覆盖关系；清一次的副作用面最小。)
+        siteMediaStore.data = null;
         // v4.6: prefs 已是 getter, 永远引用活 state, 不再需要显式回写
         updateImageFilterCss();
         applyVideoTune();
@@ -16733,6 +16739,16 @@
         syncMaskVars();
         setPeekGate(actionEnabled('peek'));
         if (actionEnabled('dim')) applyPageDim(true); else applyPageDim(false);
+        // v6.6+ (修 09-27): 元素 pending 遮罩的**武装**依赖远端偏好 (flashGuardLevel 的 'media' 档)
+        //   与本站样本 (pendingMaskGate)，二者都要等 Store 远端装载完成才可用；而它唯一的武装点
+        //   whenRootReady(setupPendingMask) 在**根就绪**(≈document_start)就跑过一次，那时 state 还是
+        //   引导期默认值 'document' → 在配置门早退，此后再无重放 → 扩展形态下该档**永不生效**。
+        //   （用户脚本形态不受影响: 同步后端在构造期即完成装载，首跑就是正确值 —— 所以这个缺陷
+        //   只在插件形态显形，正是 v6.6 修「根未就绪」时漏掉的另一半。）
+        //   setupPendingMask 自身幂等 (data-svi-masking / maskPaused / 配置门三重守卫)，
+        //   重复调用不会重建 observer。这与 whenRootReady 之于根节点是**同一约定**:
+        //   启动动作必须在它依赖的状态就绪后重放。
+        setupPendingMask();
       } catch (e) { /* ignore */ }
     };
 
