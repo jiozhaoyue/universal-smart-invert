@@ -65,6 +65,17 @@ negative control proving the assertions bite); `SVI_CHROME_PATH` is then the **o
 is what makes the "no browser → 未验证" downgrade path reachable.
 
 Harness traps that cost real debugging time in that suite — do not "simplify" them away:
+**Working-tree line endings (a real time sink — normalize after every git action):** this repo's
+blobs are CRLF while the machine runs `core.autocrlf=true`, so `git checkout` / `git apply` /
+`git stash push|pop` all rewrite the worktree as CRLF. That makes `test.js`'s *source-scanning* regexes
+(e.g. `/class UIController \{([\s\S]*?)
+  \}
+/`, which needs `}` immediately followed by `
+`) and the
+token-block **byte-equality** assertion fail with messages that look like product defects
+(`R1b: 必须能定位 UIController 类体`, `R1: … 必须与用户脚本逐字节一致`). Recipe: normalize the text
+files to LF, then **rebuild** `extension/`, then run the gates. `git diff` stays content-level either way.
+
 `Page.addScriptToEvaluateOnNewDocument` used for a first-paint probe must run in its own
 `worldName`, not the page's main world (in the main world the content script's isolated world
 becomes unfindable); the launch needs the three `--disable-*-throttling/backgrounding` flags or rAF
