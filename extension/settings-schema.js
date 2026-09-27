@@ -113,6 +113,7 @@
       { key: "bgTone", kind: "select", label: "色调", hint: "背景与边框的主题基调", options: [["pure-black", "纯黑", "默认基调，纯黑背景，对比最强。"], ["dark-gray", "深灰", "纯黑抬升为深灰底，长时间阅读更柔和。"], ["warm-black", "暖黑", "低色温暖底，夜间护眼。"]] },
       { key: "bgBrightness", kind: "slider", label: "页面亮度", hint: "动态主题生成配色的整体亮度倍率", min: 0.6, max: 1.4, step: 0.05, unit: "倍" },
       { key: "bgContrast", kind: "slider", label: "页面对比度", hint: "动态主题生成配色的整体对比度倍率", min: 0.7, max: 1.5, step: 0.05, unit: "倍" },
+      { key: "pageDarkEngine", kind: "select", label: "页级暗化引擎", hint: "整页变暗由谁执行；检测到 Dark Reader 时默认让它接管，避免两套滤镜叠加把页面压灰", options: [["auto", "自动", "检测到 Dark Reader 就让位给它，本插件专注媒体反色；未检测到则走内置路径。"], ["native", "内置", "始终用本插件自己的页级暗化；已装 Dark Reader 时会叠加，可能压暗过度。"], ["darkreader", "Dark Reader", "只用 Dark Reader 引擎；未检测到则自动降级回内置路径。"]] },
     ] },
     { id: "readability", title: "字体与可读性", items: [
       { key: "fontOverride", kind: "toggle", label: "字体覆盖", hint: "全站强制使用所选字体，代码块与图标不受影响" },
@@ -206,6 +207,7 @@ const SVI_DEFAULTS = {
   "fontOverride": false,
   "fontFamilyPreset": "sans",
   "textStroke": 0,
+  "pageDarkEngine": "auto",
   "bgTone": "pure-black",
   "bgBrightness": 1,
   "bgContrast": 1,

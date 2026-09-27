@@ -13,8 +13,13 @@ const path = require('path');
 const assert = require('assert');
 const { readCentralDirectory } = require('./scripts/lib/zip');
 
-const PORT = 8765;
-const PORT2 = 8766; // 跨域 CORS 服务器 (模拟 GitHub camo / star-history 跨域图床)
+// 端口/配置目录可经环境变量覆盖 —— 本机可能**同时有多个会话在跑同一套 bench**,
+//   固定端口会互相抢占; 更糟的是 CDP 端口撞车时, 后来者会把前者的 Chrome 当作"遗留实例"
+//   关掉 (Browser.close), 两边的跑动互相破坏, 表现为"页面完全没加载 / 夹具全部 missing"
+//   这类**无法归属**的假红 (2026-09-28 实测)。
+//   并发时用 SVI_PORT / SVI_PORT2 / SVI_CDP_PORT / SVI_PROFILE_DIR 把自己隔离到另一组资源。
+const PORT = Number(process.env.SVI_PORT || 8765);
+const PORT2 = Number(process.env.SVI_PORT2 || 8766); // 跨域 CORS 服务器 (模拟 GitHub camo / star-history 跨域图床)
 // Chrome discovery: SVI_CHROME_PATH override first, then per-platform defaults.
 // (CI uses browser-actions/setup-chrome + SVI_CHROME_PATH; local Windows keeps the default.)
 const CHROME_CANDIDATES = process.env.SVI_CHROME_PATH
@@ -25,7 +30,7 @@ const CHROME_CANDIDATES = process.env.SVI_CHROME_PATH
       ? ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser', '/snap/bin/chromium']
       : ['C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'];
 const CHROME_PATH = CHROME_CANDIDATES.find((p) => p && fs.existsSync(p)) || CHROME_CANDIDATES[0];
-const CDP_PORT = 9222;
+const CDP_PORT = Number(process.env.SVI_CDP_PORT || 9222);
 
 // SVG image generators for testing
 const SVG_TEMPLATES = {
@@ -333,6 +338,17 @@ const LEARN_HTML = `<!DOCTYPE html>
   <script>
     ${executableScript}
   <\/script>
+</body></html>`;
+
+// —— v0.6.8 Scenario 34: 页级暗化引擎仲裁 (与已装 Dark Reader 协作而非叠加) ——
+// 页面刻意是"浅色静态页": 引擎缺席时走自有路径, 在场时由引擎接管 —— 两种形态都能观测。
+const PAGEDARK_HTML = `<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="UTF-8"><title>Page dark arbitration bench</title>
+<script>${SEED_SNIPPET};<\/script>
+<style>body { background: #ffffff; color: #111; font-family: sans-serif; padding: 16px; }
+div.card { background: #f7f7f7; border: 1px solid #dddddd; padding: 12px; margin: 8px 0; }</style>
+</head><body><h1>Page dark arbitration</h1><div class="card">alpha</div><div class="card">beta</div>
+<script>${executableScript}<\/script>
 </body></html>`;
 
 // —— v3.0 Scenario 9: 媒体覆盖 (canvas / 视频海报 / Shadow DOM img / SVG image / input image) ——
@@ -705,6 +721,7 @@ const PAGES = {
   '/video-tl-page': VIDEO_TL_HTML,
   '/learn-page': LEARN_HTML,
   '/media-page': MEDIA_HTML,
+  '/pagedark-page': PAGEDARK_HTML,
   '/storage-page': STORAGE_HTML,
   '/github-page': GITHUB_HTML,
   '/policy-page': POLICY_HTML,
@@ -804,8 +821,13 @@ async function main() {
 
   console.log(`[Browser] Launching Headless Chrome: ${CHROME_PATH}`);
   // 固定 profile 目录跨运行持久化 (localStorage/overrides) —— 场景 1 断言假设全新存储,
-  // 每次运行前清空保证确定性; 运行内的刷新持久化场景 (2b/18) 不受影响
-  try { fs.rmSync(path.join(__dirname, '.chrome-test-profile'), { recursive: true, force: true }); } catch (e) { /* ignore */ }
+  // 每次运行前清空保证确定性; 运行内的刷新持久化场景 (2b/18) 不受影响。
+  // 并发运行时可经 SVI_PROFILE_DIR 换到别处: 两份跑动共用同一 profile 会互相 rmSync 清空
+  // localStorage, 表现之一是"偏好存活"类断言随机红。
+  const profileDir = process.env.SVI_PROFILE_DIR
+    ? path.resolve(process.env.SVI_PROFILE_DIR)
+    : path.join(__dirname, '.chrome-test-profile');
+  try { fs.rmSync(profileDir, { recursive: true, force: true }); } catch (e) { /* ignore */ }
   const chromeProc = spawn(CHROME_PATH, [
     `--remote-debugging-port=${CDP_PORT}`,
     '--headless=new',
@@ -816,7 +838,7 @@ async function main() {
     // CI (ubuntu) runners: sandbox of the bench Chrome instance is unnecessary
     // and often blocks in containerized runners — disabled for the bench only.
     ...(process.platform === 'linux' ? ['--no-sandbox'] : []),
-    '--user-data-dir=' + path.join(__dirname, '.chrome-test-profile'),
+    '--user-data-dir=' + profileDir,
     `http://127.0.0.1:${PORT}`
   ]);
 
@@ -3822,6 +3844,105 @@ async function main() {
       '33: 根未就绪的路径不得产生页面异常 (两个同族裸挂载点原本会 null.appendChild 抛错)');
     if (injectedId) await sendCdp('Page.removeScriptToEvaluateOnNewDocument', { identifier: injectedId });
     console.log('[Test] Scenario 33: 注入脚本已移除, 不留残留到后续场景');
+
+    // ============================================================
+    // Scenario 34 (v0.6.8): 页级暗化引擎仲裁 —— 与已装 Dark Reader 协作而非叠加
+    //   夹具把 **vendor/darkreader/darkreader.js 真的注入页面** (等于用户装了 Dark Reader),
+    //   所以断言咬的是真引擎而不是桩。三条互斥事实:
+    //     34a 引擎缺席 → 走自有路径 (逐字节等价于旧行为 —— 绝大多数用户的情形)
+    //     34b 引擎在场且未在跑 → 我们请它开, 同时自己的页级改色让位 (绝不叠加两套滤镜)
+    //     34c 引擎已在跑 (用户自己开的) → 我们只读不动, **收尾也不得关掉别人的**
+    // ============================================================
+    console.log('[Test] Scenario 34: 页级暗化引擎仲裁 (与 Dark Reader 协作) ...');
+    const errBefore34 = pageErrorCount;
+    const drSource = fs.readFileSync(path.join(__dirname, 'vendor', 'darkreader', 'darkreader.js'), 'utf8');
+    const readArb = async () => (await sendCdp('Runtime.evaluate', {
+      returnByValue: true,
+      expression: `(() => {
+        const svi = window.__svi;
+        const eng = svi.engines || {};
+        const c = svi.exportStats().counters;
+        return {
+          hasDr: !!svi.darkReaderGlobal(),
+          drEnabled: (function () { try { return svi.darkReaderGlobal() ? !!svi.darkReaderGlobal().isEnabled() : false; } catch (e) { return 'err'; } })(),
+          pref: svi.prefs.pageDarkEngine,
+          bgReplaceActive: !!(eng.bgReplace && eng.bgReplace.active),
+          bgrAttr: document.documentElement.hasAttribute('data-svi-bgr-on'),
+          delegated: c.pageDarkDelegated || 0,
+          adopted: c.pageDarkAdopted || 0,
+          fails: c.pageDarkDelegateFailures || 0,
+          bodyBg: getComputedStyle(document.body).backgroundColor,
+        };
+      })()`,
+    })).result.value;
+
+    // 34a —— 引擎缺席: 自有路径. 页级暗化在夹具里未被站点档案开启, 故 want=false → skip,
+    //   关键断言是"探测为缺席", 以及显式要求暗化时落自有路径 (不抛、不静默失败)。
+    await sendCdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/pagedark-page` });
+    await waitForExpr('!!(window.__svi && window.__svi.prefs && window.__svi.enginesBooted)', 15000, 200);
+    await new Promise((r) => setTimeout(r, 1200));
+    const a1 = await readArb();
+    assert.strictEqual(a1.hasDr, false, '34a: 未注入引擎时必须探测为缺席 (特性检测)');
+    assert.strictEqual(a1.pref, 'auto', '34a: pageDarkEngine 默认档为 auto');
+    const a2 = (await sendCdp('Runtime.evaluate', {
+      returnByValue: true,
+      expression: `(() => { const svi = window.__svi; try { svi.applyPageDarkForSite(true); return { ok: true, active: !!(svi.engines.bgReplace && svi.engines.bgReplace.active) }; } catch (e) { return { ok: false, err: String(e && e.message) }; } })()`,
+    })).result.value;
+    assert.strictEqual(a2.ok, true, '34a: 引擎缺席时 applyPageDarkForSite 不得抛 (适配器降级)');
+    assert.strictEqual(a2.active, true, '34a: 引擎缺席 → 自有页级暗化真的开起来 (逐字节旧行为)');
+
+    // 34b —— 注入引擎后重载: 我们请它开, 且自有路径让位
+    const drInjected = await sendCdp('Page.addScriptToEvaluateOnNewDocument', { source: drSource });
+    await sendCdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/pagedark-page` });
+    // **先等 boot 完成再建立基线**: 脚本没就绪时 svi.prefs 还是空的, 那次"清基线"是空操作,
+    //   随后 boot 期自己会按残留偏好委托一次 —— 实测就是这样让"委托计数 +1"变成 +0/+2 的。
+    await waitForExpr('!!(window.__svi && window.__svi.prefs && window.__svi.enginesBooted)', 15000, 200);
+    await new Promise((r) => setTimeout(r, 1200));
+    // **必须先建立基线**: localStorage 在同一轮里跨导航持久, 前面若干场景种下的
+    //   svi:prefs / siteOverrides 会让本站的 want 变成 true, 于是 boot 期就已经委托过一次 ——
+    //   那样"引擎此刻还没在跑"这个前提就不成立 (实测踩到)。显式清干净再测, 不依赖环境残留。
+    //   (另: statsEnabled 会被别的场景关掉并留在 localStorage 里, 而 StatsManager.count 在关闭时
+    //    直接 no-op —— 计数类断言会以 "0 → 0" 变红, 看上去像产品没计数。夹具显式打开。)
+    await sendCdp('Runtime.evaluate', {
+      returnByValue: true,
+      expression: `(() => { const s = window.__svi.prefs; s.siteOverrides = {}; s.bgReplace = false; s.statsEnabled = true; window.__svi.savePrefs(); window.__svi.applyPageDarkForSite(false); return true; })()`,
+    });
+    await new Promise((r) => setTimeout(r, 800));
+    const b0 = await readArb();
+    assert.strictEqual(b0.hasDr, true, '34b: 注入后必须探测到引擎 (真实 bundle 挂上了全局)');
+    assert.strictEqual(b0.drEnabled, false, '34b: 基线 —— 引擎此刻不在跑');
+    assert.strictEqual(b0.bgReplaceActive, false, '34b: 基线 —— 自有页级暗化此刻是关的');
+    const b1 = (await sendCdp('Runtime.evaluate', {
+      returnByValue: true,
+      expression: `(() => { try { window.__svi.applyPageDarkForSite(true); return { ok: true }; } catch (e) { return { ok: false, err: String(e && e.message) }; } })()`,
+    })).result.value;
+    assert.strictEqual(b1.ok, true, '34b: 委托路径不得抛');
+    await new Promise((r) => setTimeout(r, 800));
+    const b2 = await readArb();
+    assert.strictEqual(b2.drEnabled, true, '34b: 需要暗化且引擎在场 → 必须由引擎接管 (isEnabled 为真)');
+    assert.strictEqual(b2.delegated - b0.delegated, 1, '34b: 委托计数 +1 (可观测; 基线 ' + b0.delegated + ' → ' + b2.delegated + ')');
+    assert.notStrictEqual(b2.bodyBg, 'rgb(255, 255, 255)', '34b: 页面真的被引擎改暗了 (' + b2.bodyBg + ')');
+    assert.strictEqual(b2.bgReplaceActive, false, '34b: 自有页级暗化必须让位 —— 绝不叠加两套滤镜');
+
+    // 34c —— 已在跑的引擎(用户自己开的): 只读不动
+    //   先归还我们开的那一次, 再**模拟用户自己开**: 此时 owned 已清, 我们无权关它。
+    await sendCdp('Runtime.evaluate', { expression: `window.__svi.applyPageDarkForSite(false)` });
+    await new Promise((r) => setTimeout(r, 400));
+    const c1 = await readArb();
+    assert.strictEqual(c1.drEnabled, false, '34c: 归还后我们自己开的那次必须被关掉');
+    await sendCdp('Runtime.evaluate', {
+      expression: `(() => { window.__svi.darkReaderGlobal().enable({ mode: 1 }); return true; })()`,
+    });
+    await new Promise((r) => setTimeout(r, 600));
+    await sendCdp('Runtime.evaluate', { expression: `window.__svi.applyPageDarkForSite(false)` });
+    await new Promise((r) => setTimeout(r, 400));
+    const c2 = await readArb();
+    assert.strictEqual(c2.drEnabled, true, '34c: 用户自己开的 Dark Reader 绝不能被我们关掉 (只读不动)');
+    assert.strictEqual(c2.bgReplaceActive, false, '34c: 已暗的页面上我们同样不叠加自有路径');
+    assert.strictEqual(c2.fails, 0, '34c: 全程不得出现委托失败回退');
+    assert.strictEqual(pageErrorCount, errBefore34, '34c: 仲裁路径不得产生页面异常');
+    await sendCdp('Page.removeScriptToEvaluateOnNewDocument', { identifier: drInjected.identifier });
+    console.log('[Test] Scenario 34: 仲裁三态通过 (缺席=自有 / 在场=委托并让位 / 他人已开=只读不动)');
 
     console.log('\n🎉 ALL BROWSER AUTOMATION TESTS PASSED 100% SUCCESFULLY!\n');
 

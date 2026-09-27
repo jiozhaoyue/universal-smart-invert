@@ -822,8 +822,12 @@ function makeTestStore(mock) {
 //   取值依据 (实测): 这些轮询在空载下落定耗时 10 ~ 210ms; 但在**并发重度负载**下
 //   (同机跑 headless Chrome bench 时实测) 会越过 1000ms —— 故 deadline 取 2000ms,
 //   收尾预算 3000ms 留足"超时后仍要把断言跑完"的余量。宁可慢 1.5s, 不要假绿。
-const ASYNC_BUDGET_MS = 3000;  // 与文件末尾那个收尾 setTimeout 的时长必须一致
-const ASYNC_POLL_MS = 2000;    // 有界轮询 deadline; 与预算之间留 1000ms 余量
+//   2026-09-28 复调 (实测): 同机 12 个会话并发时 2000/3000 被越过两次 (chunked write 与
+//   区域 bench 各一次)。**注意这两个数不是断言的一部分** —— 往里放时间不会让任何期望值变松,
+//   只是把测试自己的计时器调准; 绿路径不受影响 (谓词一满足就继续), 只有真的慢时才多等。
+//   调大后仍保持 `ASYNC_POLL_MS < ASYNC_BUDGET_MS`, 且留够"超时后把断言跑完"的余量。
+const ASYNC_BUDGET_MS = 8000;  // 与文件末尾那个收尾 setTimeout 的时长必须一致
+const ASYNC_POLL_MS = 5000;    // 有界轮询 deadline; 与预算之间留 3000ms 余量
 let pollStarted = 0;
 let pollFinished = 0;
 const pollUntil = (pred, cb) => {
@@ -881,7 +885,8 @@ const pollUntil = (pred, cb) => {
   pollUntil(bigChunked, () => {
     const snap = mock.__snapshot();
     const metaKey = 'svi:unitBig.meta';
-    assert.ok(snap[metaKey], 'chunked write emits meta manifest');
+    // 超时兜底失败时必须能一眼看出"完全没写"还是"写了一半" —— 否则只能靠反复复现猜
+    assert.ok(snap[metaKey], 'chunked write emits meta manifest (实测键: ' + Object.keys(snap).join(',') + ')');
     const meta = JSON.parse(snap[metaKey]);
     assert.ok(meta.chunks >= 3, 'large value split into multiple chunks');
     assert.ok(snap['svi:unitBig#0'], 'chunk #0 written');
@@ -1321,6 +1326,69 @@ for (const g of [0, 1, 4, 12]) {
 }
 // buildBgGuardInfo 是纯读取构造器, 桩环境下对 body 之外的元素不得抛
 assert.strictEqual(typeof svi.buildBgGuardInfo, 'function', 'buildBgGuardInfo must be exported (背景图路径的守卫输入)');
+
+// —— 9c-3. v0.6.8 页级暗化引擎仲裁 (与已装 Dark Reader 协作而非叠加) ——
+// 关键不变量: **引擎缺席时逐字节等价于旧行为** (native/skip)。这条一破, 没有装 Dark Reader 的
+// 绝大多数用户就会受影响 —— 所以缺席分支是本组测试的重点。
+const pdp = svi.pickPageDarkPlan;
+const drTheme = svi.mapPrefsToDarkReaderTheme;
+assert.strictEqual(typeof pdp, 'function', 'pickPageDarkPlan must be exported');
+assert.strictEqual(typeof drTheme, 'function', 'mapPrefsToDarkReaderTheme must be exported');
+const pdi = (o) => Object.assign({ present: false, drEnabled: false, owned: false, want: false, pref: 'auto' }, o);
+
+// ① 引擎缺席 → 一律落自有路径 (逐字节旧行为)
+assert.strictEqual(pdp(pdi({ want: true })), 'native', 'absent: want dark → native path');
+assert.strictEqual(pdp(pdi({ want: false })), 'skip', 'absent: no dark wanted → skip');
+assert.strictEqual(pdp(pdi({ want: true, pref: 'darkreader' })), 'native', 'absent + darkreader pref → 降级 native (绝不因第三方缺席而残废)');
+assert.strictEqual(pdp(pdi({ want: false, pref: 'native' })), 'skip', 'absent + native pref → skip');
+assert.strictEqual(pdp({}), 'skip', 'pickPageDarkPlan 缺 info 也不得抛');
+
+// ② 引擎在场但没在跑
+assert.strictEqual(pdp(pdi({ present: true, want: true })), 'delegate', 'auto: present + want → 交给它');
+assert.strictEqual(pdp(pdi({ present: true, want: true, pref: 'native' })), 'native', 'native 档: 始终走自有');
+assert.strictEqual(pdp(pdi({ present: true, want: true, pref: 'darkreader' })), 'delegate', 'darkreader 档: 请它开');
+assert.strictEqual(pdp(pdi({ present: true, want: false, pref: 'darkreader' })), 'skip', 'darkreader 档 + 不需要暗化 → 什么都不做');
+
+// ③ **绝不叠加**: 对方已在跑 (不论谁开的) 一律让位
+assert.strictEqual(pdp(pdi({ present: true, drEnabled: true, want: true })), 'adopt', '已装的 Dark Reader 在跑 → 让位, 不叠加');
+assert.strictEqual(pdp(pdi({ present: true, drEnabled: true, want: false })), 'adopt', '不需要暗化时也不得去关用户的 Dark Reader');
+assert.strictEqual(pdp(pdi({ present: true, drEnabled: true, want: true, pref: 'native' })), 'adopt', 'native 档也不得叠加在已跑的引擎之上');
+assert.strictEqual(pdp(pdi({ present: true, drEnabled: true, owned: true, want: true })), 'adopt', '我们开的且仍需要 → 维持');
+assert.strictEqual(pdp(pdi({ present: true, drEnabled: true, owned: true, want: false })), 'release', '我们开的但不再需要 → 交回经营权 (只关我们开的那次)');
+assert.strictEqual(pdp(pdi({ present: true, owned: true, want: false })), 'release', '账上记着我们开过、但引擎已不在跑 → 归还一次 (幂等关 + 清账), 不得留下悬挂记账');
+
+// ④ 偏好 → theme 映射 (默认恒等: 底色/文字色就是设计 token 的深青调)
+const t0 = drTheme({ bgTone: 'pure-black', bgBrightness: 1, bgContrast: 1 });
+assert.strictEqual(t0.mode, 1, 'theme.mode 固定深色');
+assert.strictEqual(t0.brightness, 100, 'brightness 恒等 100 —— 我们的亮度已烘进颜色, 交给它当滤镜会二次施加');
+assert.strictEqual(t0.contrast, 100, 'contrast 恒等 100 (同上)');
+assert.strictEqual(t0.darkSchemeBackgroundColor, '#0f161b', '默认底色 = --svi-bg-deep');
+assert.strictEqual(t0.darkSchemeTextColor, '#e8f4f6', '默认文字色 = --svi-text-strong');
+assert.strictEqual(t0.sepia, 0, 'sepia 关闭');
+assert.strictEqual(t0.grayscale, 0, 'grayscale 关闭');
+assert.strictEqual(t0.useFont, false, 'fontOverride 关 → 不动字体');
+assert.strictEqual(t0.textStroke, 0, 'textStroke 0');
+// 色调档位真的流进底色
+assert.notStrictEqual(drTheme({ bgTone: 'dark-gray', bgBrightness: 1, bgContrast: 1 }).darkSchemeBackgroundColor, '#0f161b', '深灰档必须抬底');
+assert.notStrictEqual(drTheme({ bgTone: 'pure-black', bgBrightness: 1.3, bgContrast: 1 }).darkSchemeBackgroundColor, '#0f161b', '亮度必须流进底色');
+// 字体与描边
+const t1 = drTheme({ bgTone: 'pure-black', fontOverride: true, fontFamilyPreset: 'mono', textStroke: 5 });
+assert.strictEqual(t1.useFont, true, 'fontOverride 开 → useFont true');
+assert.ok(/monospace/i.test(t1.fontFamily), 'mono 档字体栈必须传下去');
+assert.strictEqual(t1.textStroke, 1, 'textStroke 上限 1 (与 Dark Reader 的 0~1px 契约一致)');
+// 引擎探测在无全局的桩环境下必须优雅返回 null (缺席即降级, 不抛)
+assert.strictEqual(svi.darkReaderGlobal(), null, '无 DarkReader 全局时 darkReaderGlobal() 必须返回 null 而不是抛');
+
+// —— 9c-4. 第三方固化产物的完整性 (vendor/darkreader) ——
+// 「冻结」要成立就必须可验证: 文件被手改、或溯源表与文件对不上, 都在这里红。
+// 上游是活跃的扩展项目, 我们不跟随它 —— 换取这份确定性的代价就是这条断言。
+{
+  let err = null;
+  try { require('./scripts/vendor-darkreader.js').verify(); } catch (e) { err = e; }
+  assert.strictEqual(err, null, 'vendor/darkreader/darkreader.js 必须与 PROVENANCE.md 的 SHA-256 一致'
+    + ' (冻结产物不得手改; 升级请用 node scripts/vendor-darkreader.js --update <版本> --yes)'
+    + (err ? ' —— 实测: ' + err.message : ''));
+}
 
 // —— 9d. decideImage 统一决策管线 (真实引擎实例, Node 桩环境) ——
 // 引擎构造在桩环境安全: IntersectionObserver 缺失 → init() 早退, 无 IO/扫描副作用
@@ -3786,14 +3854,23 @@ setTimeout(() => {
     // 轮数刻意小: 本文件的同步执行时间会挤到别的"固定等待 120ms"的异步用例 (见 v3.0 quota 用例),
     //   所以 bench 只取足够稳定的样本量, 不追求统计精度。
     const runs = 25;
+    // 每轮单独计时并同时返回**均值与最小值**。断言取最小值: 均值会把"被调度器打断的时间"
+    //   一起算进"这段代码有多贵", 于是机器一忙就假红 (实测并发 12 个会话时均值 1.08ms / 预算 1ms,
+    //   而复跑即绿)。最小值是"不被外界干扰时这段代码的固有代价"的无偏估计 —— 这才是性能预算
+    //   想表达的东西; 真有性能回归时最小值同样会抬起来, 断言照样咬得住。均值仍打进日志供观察。
     const measure = (n, kind) => {
       const g = mkGrid(n, kind);
       regionCacheClear();
-      const t0 = Date.now();
+      let min = Infinity;
+      let total = 0;
       for (let i = 0; i < runs; i++) {
+        const t0 = Date.now();
         regionMaskTake(g, { key: 'bench|' + n + '|' + kind + '|' + i }); // 每轮换键 → 强制重算
+        const dt = Date.now() - t0;
+        if (dt < min) min = dt;
+        total += dt;
       }
-      return (Date.now() - t0) / runs;
+      return { avg: total / runs, min: min === Infinity ? 0 : min };
     };
     const light = measure(16, 'light');     // 门 1 短路 (最廉价路径)
     const blocks16 = measure(16, 'blocks'); // 真正走完分割 (典型路径)
@@ -3801,14 +3878,15 @@ setTimeout(() => {
     const blocks32 = measure(32, 'blocks');
     regionCacheClear();
 
-    console.log('[v6.0 阶段3 bench] 单图掩码构建平均耗时 (ms, ' + runs + ' 轮): '
-      + 'N16 短路=' + light.toFixed(4) + ' 典型=' + blocks16.toFixed(4) + ' 随机=' + rnd16.toFixed(4)
-      + ' | N32 典型=' + blocks32.toFixed(4));
+    const fmt = (m) => 'min=' + m.min.toFixed(4) + '/avg=' + m.avg.toFixed(4);
+    console.log('[v6.0 阶段3 bench] 单图掩码构建耗时 (ms, ' + runs + ' 轮): '
+      + 'N16 短路(' + fmt(light) + ') 典型(' + fmt(blocks16) + ') 随机(' + fmt(rnd16) + ')'
+      + ' | N32 典型(' + fmt(blocks32) + ')');
 
     // 内部预算 16ms: 这里断言一个远宽于实测值的上界 (实测在 0.01~0.5ms 量级),
-    //   既能把「性能预算 <1ms 量级」这条约束钉住, 又不会因为 CI 机器抖动而假红。
-    assert.ok(rnd16 < 5, 'N=16 最坏路径平均耗时 < 5ms (实测 ' + rnd16.toFixed(4) + 'ms)');
-    assert.ok(blocks16 < 1, 'N=16 典型路径平均耗时 < 1ms (实测 ' + blocks16.toFixed(4) + 'ms)');
+    //   既能把「性能预算 <1ms 量级」这条约束钉住, 又不会因为机器抖动而假红。
+    assert.ok(rnd16.min < 5, 'N=16 最坏路径固有耗时 < 5ms (' + fmt(rnd16) + ')');
+    assert.ok(blocks16.min < 1, 'N=16 典型路径固有耗时 < 1ms (' + fmt(blocks16) + ')');
   }
 
   // ---- 3. 门 2 只对「真正抠掉了东西」的图有意义: 覆盖率落在开区间才产出 region ----
@@ -4098,10 +4176,18 @@ setTimeout(() => {
   {
     regionCacheClear();
     const before = regionDiagnostics();
-    for (let i = 0; i < REGION_CACHE_MAX; i++) {
-      regionMaskTake(grid1, { key: regionMaskKey('host', 'img.k' + i, 100, 100) });
+    // **有界补填**而不是"恰好插 MAX 次": 掩码构建带**时间预算**, 机器繁忙时会降级为
+    //   "本次不缓存" (regionDegradeBudget) —— 于是"插 MAX 次 ⇒ 缓存里恰好 MAX 条"这个
+    //   等式在负载下不成立 (实测 199 !== 200)。要钉住的不变量是"缓存能填到上限且不到上限
+    //   就不淘汰", 所以补填到上限为止 (最多多试 20 次), 真失败时把降级计数一并打出来归属。
+    const CAP = REGION_CACHE_MAX;
+    let attempt = 0;
+    for (; attempt < CAP + 20 && regionDiagnostics().cacheSize < CAP; attempt++) {
+      regionMaskTake(grid1, { key: regionMaskKey('host', 'img.k' + attempt, 100, 100) });
     }
-    assert.strictEqual(regionDiagnostics().cacheSize, REGION_CACHE_MAX, '装到上限不淘汰');
+    const diag = regionDiagnostics();
+    assert.strictEqual(diag.cacheSize, CAP,
+      '装到上限不淘汰 (插了 ' + attempt + ' 次, 分割 ' + diag.segmented + ' 次, 降级 ' + JSON.stringify(diag.degrade) + ')');
     assert.strictEqual(regionDiagnostics().evictions - before.evictions, 0, '未超限 → 零淘汰');
 
     regionMaskTake(grid1, { key: regionMaskKey('host', 'img.overflow', 100, 100) });

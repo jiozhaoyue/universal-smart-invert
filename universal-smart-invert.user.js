@@ -3,10 +3,10 @@
 // @name:zh-CN   全网通用智能视频与图片反色
 // @name:en      Universal Smart Video & Image Invert
 // @namespace    https://github.com/jiozhaoyue/universal-smart-invert
-// @version      0.6.7
-// @description  全网通用智能视频与图片反色脚本 (0.6.7, AGPL-3.0 开源)。视频/图片/背景图/Canvas 智能反色, 判定以连通区域为单位; 0.6 线新增区域反色 (按连通区域自动判定, 默认关闭)、界面全量同源重构与扩展形态。 保留v5.0页面媒体治理层(统一元素动作表 invert/keep/hide/mask/dim/peek、元素屏蔽 Alt+Shift+点击、遮罩 Alt+M 三档风格可调、全页压暗、悬停复原通用门, 全部默认关闭且可开关)与v4.6全部能力(本地优先判定/Alt+点击一次生效/暗色遮罩感知)。
-// @description:zh-CN 全网通用智能视频与图片反色脚本 (0.6.7, AGPL-3.0 开源)。新增: 区域反色 (按连通区域自动判定, 默认关闭)、界面全量同源重构、扩展形态与发版流水线; 保留 v5.0 页面媒体治理层与 v4.6 全部能力。
-// @description:en Universal smart video and image invert userscript (0.6.7, AGPL-3.0 licensed). Smart inversion for video, images, background images and canvas, decided at connected-region granularity. The 0.6 line adds region inversion (per connected region, off by default), a fully unified UI rebuild, and the browser-extension form with its release pipeline. Retains the v5.0 page-media governance layer (unified element-action table invert/keep/hide/mask/dim/peek, element blocking Alt+Shift+click, masks Alt+M with three adjustable styles, whole-page dimming, generic hover-restore gate — all off by default and individually switchable) and every v4.6 capability (local-first decisions, once-per-click Alt+click, dark-veil awareness).
+// @version      0.6.8
+// @description  全网通用智能视频与图片反色脚本 (0.6.8, AGPL-3.0 开源)。视频/图片/背景图/Canvas 智能反色, 判定以连通区域为单位; 0.6 线新增区域反色 (按连通区域自动判定, 默认关闭)、界面全量同源重构与扩展形态。 保留v5.0页面媒体治理层(统一元素动作表 invert/keep/hide/mask/dim/peek、元素屏蔽 Alt+Shift+点击、遮罩 Alt+M 三档风格可调、全页压暗、悬停复原通用门, 全部默认关闭且可开关)与v4.6全部能力(本地优先判定/Alt+点击一次生效/暗色遮罩感知)。
+// @description:zh-CN 全网通用智能视频与图片反色脚本 (0.6.8, AGPL-3.0 开源)。新增: 区域反色 (按连通区域自动判定, 默认关闭)、界面全量同源重构、扩展形态与发版流水线; 保留 v5.0 页面媒体治理层与 v4.6 全部能力。
+// @description:en Universal smart video and image invert userscript (0.6.8, AGPL-3.0 licensed). Smart inversion for video, images, background images and canvas, decided at connected-region granularity. The 0.6 line adds region inversion (per connected region, off by default), a fully unified UI rebuild, and the browser-extension form with its release pipeline. Retains the v5.0 page-media governance layer (unified element-action table invert/keep/hide/mask/dim/peek, element blocking Alt+Shift+click, masks Alt+M with three adjustable styles, whole-page dimming, generic hover-restore gate — all off by default and individually switchable) and every v4.6 capability (local-first decisions, once-per-click Alt+click, dark-veil awareness).
 // @author       jiozhaoyue
 // @license      AGPL-3.0-or-later
 // @icon         data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><circle cx=%2250%22 cy=%2250%22 r=%2246%22 fill=%22%23141e24%22 stroke=%22%2353a1b3%22 stroke-width=%228%22/><path d=%22M50 4 A46 46 0 0 1 50 96 Z%22 fill=%22%2353a1b3%22/></svg>
@@ -40,7 +40,7 @@
   // ==========================================
   // 1. 配置与常量定义
   // ==========================================
-  const SCRIPT_VERSION = '0.6.7';
+  const SCRIPT_VERSION = '0.6.8';
   const PREFS_KEY = 'universal_smart_invert_v4';   // v2.0 遗留偏好键 (迁移源, 迁移后原样保留以便回滚)
   const LEGACY_KEY = 'universal_smart_invert_v3';  // v1.x 旧键 (仅读取迁移, 保留不删以便回滚)
   const STATS_KEY = 'universal_smart_invert_stats_v1'; // v2.0 遗留统计键 (保留写入以兼容回滚)
@@ -181,6 +181,11 @@
     textStroke: 0,             // 文字描边粗细 px (0 = 关闭, 0 ~ 1)
 
     // ===== v4.2 新增偏好: 动态深色主题调节 (P1/P2) + 定时模式 (P5) =====
+    // ===== v0.6.8 新增偏好: 页级暗化的执行引擎 (与已装 Dark Reader 协作而非叠加) =====
+    //   'auto'        引擎在场就让位给它, 缺席走自有路径 (默认)
+    //   'native'      一律用自有页级暗化 (已装 Dark Reader 时也照旧 —— 会叠加, 慎用)
+    //   'darkreader'  只用引擎, 缺席则降级回自有路径
+    pageDarkEngine: 'auto',
     bgTone: 'pure-black',      // 动态主题色调: 'pure-black' | 'dark-gray' | 'warm-black'
     bgBrightness: 1.0,         // 页面亮度倍率 (0.6 ~ 1.4, 仅动态主题生成路径, 非 filter)
     bgContrast: 1.0,           // 页面对比度倍率 (0.7 ~ 1.5, 仅动态主题生成路径)
@@ -998,6 +1003,10 @@
   try { Store.migrateLegacy(); } catch (e) { /* ignore */ }
   try { Store.applyBackendPref(); } catch (e) { /* ignore */ }
 
+  // v0.6.8 页级暗化委托的记账 (定义在此处而非适配器函数旁: 适配器被 boot 期的早期调用点引用,
+  //   常量必须早于任何调用者完成初始化, 否则会踩 TDZ)。
+  const pageDarkState = { owned: false, engine: 'native' };
+
   function loadState() {
     const defaults = JSON.parse(JSON.stringify(DEFAULT_PREFS));
     let stored = null;
@@ -1086,6 +1095,7 @@
     }
     // v4.2 字段规范化: 动态主题与定时模式
     if (['pure-black', 'dark-gray', 'warm-black'].indexOf(merged.bgTone) === -1) merged.bgTone = 'pure-black';
+    if (['auto', 'native', 'darkreader'].indexOf(merged.pageDarkEngine) === -1) merged.pageDarkEngine = 'auto';
     merged.bgBrightness = clampNumber(merged.bgBrightness, 0.6, 1.4, 1.0);
     merged.bgContrast = clampNumber(merged.bgContrast, 0.7, 1.5, 1.0);
     merged.scheduleEnabled = merged.scheduleEnabled === true;
@@ -1417,7 +1427,7 @@
         document.documentElement.classList.remove('svi-video-tune');
         document.documentElement.style.setProperty('--svi-video-tune', 'none');
       } catch (e) { /* ignore */ }
-      try { applyBackgroundReplace(false); } catch (e) { /* ignore */ }
+      try { applyPageDarkForSite(false); } catch (e) { /* ignore */ }
       try { window.__svi.ui && window.__svi.ui.setSiteOffState(true); } catch (e) { /* ignore */ }
     } else {
       if (runtime.siteActive === true) return;
@@ -1430,7 +1440,7 @@
           const bg = eng.bgImage;
           if (bg && typeof bg.sweep === 'function') bg.sweep();
         } catch (e) { /* ignore */ }
-        try { if (getSiteProfile().bgReplace) applyBackgroundReplace(true); } catch (e) { /* ignore */ }
+        try { applyPageDarkForSite(getSiteProfile().bgReplace === true); } catch (e) { /* ignore */ }
       }
       try { updateImageFilterCss(); } catch (e) { /* ignore */ } // 恢复门类 (enabled=true → 重新点亮)
       try { applyVideoTune(); } catch (e) { /* ignore */ }      // 恢复视频画面调节
@@ -6291,7 +6301,7 @@
       this.ui && this.ui.syncVisuals();
       if (this.ui && this.ui.modalControls) this.ui.modalControls.syncAll();
       // 背景替换引擎与重置后的站点档案重新对齐 (防止按钮显示"关"而引擎仍在运行)
-      try { applyBackgroundReplace(getSiteProfile().bgReplace === true); } catch (e) { /* ignore */ }
+      try { applyPageDarkForSite(getSiteProfile().bgReplace === true); } catch (e) { /* ignore */ }
     }
   }
 
@@ -10778,6 +10788,127 @@
     }
   }
 
+  // ==========================================
+  // 19.5 v0.6.8 页级暗化引擎仲裁 (与已装 Dark Reader 协作而非叠加)
+  //
+  //   本插件的主场是**媒体**(视频/图片/背景图/Canvas 的智能反色)与 Dark Reader 做不到的效果;
+  //   "整页变暗"这件事它的引擎为此而生, 做得比我们好。因此当它**在场**(用户已装 Dark Reader,
+  //   或本仓固化的 vendor/darkreader 被注入)时, 我们把页级暗化交给它, 自己不介入 ——
+  //   避免双重滤镜把页面压成灰。
+  //
+  //   **绝不劫持用户的 Dark Reader**: 它已在跑时我们什么都不做 (不 enable 也不 disable);
+  //   只有"本插件请它开的"那一次才由我们负责关掉 (pageDarkState.owned 记账)。
+  //
+  //   引擎缺席时逐字节等价于旧行为 (pickPageDarkPlan 返回 native/skip, 直接落原路径) ——
+  //   特性检测 + 静默降级, 绝不因第三方缺席而残废 (适配器模式)。
+  // ==========================================
+  const PAGE_DARK_PREF_DEFAULT = 'auto';   // 'auto' | 'native' | 'darkreader'
+
+  // 引擎句柄探测: 只认官方公开 API 面 (enable/disable/isEnabled), 不碰内部结构
+  function darkReaderGlobal() {
+    try {
+      const dr = (typeof DarkReader !== 'undefined' && DarkReader)
+        ? DarkReader
+        : (typeof window !== 'undefined' && window.DarkReader ? window.DarkReader : null);
+      if (!dr || typeof dr.enable !== 'function' || typeof dr.disable !== 'function') return null;
+      return dr;
+    } catch (e) { return null; }
+  }
+
+  function darkReaderEnabledOnPage() {
+    const dr = darkReaderGlobal();
+    if (!dr) return false;
+    try { return typeof dr.isEnabled === 'function' ? !!dr.isEnabled() : false; } catch (e) { return false; }
+  }
+
+  // 纯函数 (单测契约): 页级暗化这一轮由谁执行
+  //   present / drEnabled / owned / want / pref
+  // 返回 'adopt' | 'delegate' | 'native' | 'skip' | 'release'
+  function pickPageDarkPlan(info) {
+    const i = info || {};
+    const pref = i.pref || PAGE_DARK_PREF_DEFAULT;
+    const present = !!i.present;
+    const want = !!i.want;
+    // ① 对方已在跑 (不论谁开的) → 一律让位: **绝不叠加**。若那正是我们上轮开的而本轮不再需要,
+    //    交回经营权 (release), 由调用方关掉我们开的那一次。
+    if (present && i.drEnabled && !i.owned) return 'adopt';
+    if (present && i.drEnabled && i.owned) return want ? 'adopt' : 'release';
+    // ② 没有在跑的引擎 → 按偏好决定
+    if (pref === 'native') return want ? 'native' : (i.owned ? 'release' : 'skip');
+    if (pref === 'darkreader') return present ? (want ? 'delegate' : (i.owned ? 'release' : 'skip')) : (want ? 'native' : 'skip');
+    // auto: 需要暗化且引擎在场 → 请它开; 否则走自己
+    if (!want) return i.owned ? 'release' : 'skip';
+    return present ? 'delegate' : 'native';
+  }
+
+  // 纯函数 (单测契约): 我们的偏好 → Dark Reader theme。
+  //   刻意把 brightness/contrast 固定为 100 (恒等): 我们的 bgBrightness/bgContrast 已经**烘进**
+  //   底色与文字色 (applyDynamicThemeAdjust), 再交给它当 CSS 滤镜会二次施加同一调整。
+  function mapPrefsToDarkReaderTheme(prefs) {
+    const p = prefs || {};
+    const tone = p.bgTone || 'pure-black';
+    const b = Number(p.bgBrightness);
+    const c = Number(p.bgContrast);
+    const br = isNaN(b) ? 1 : b;
+    const ct = isNaN(c) ? 1 : c;
+    const base = applyDynamicThemeAdjust([0x0f, 0x16, 0x1b], tone, br, ct);
+    const fg = applyDynamicThemeAdjust([0xe8, 0xf4, 0xf6], 'pure-black', br, ct);
+    const stroke = Number(p.textStroke);
+    return {
+      mode: 1,
+      brightness: 100,
+      contrast: 100,
+      sepia: 0,
+      grayscale: 0,
+      useFont: !!p.fontOverride,
+      fontFamily: p.fontOverride ? (FONT_STACKS[p.fontFamilyPreset] || FONT_STACKS.sans) : '',
+      textStroke: (!isNaN(stroke) && stroke > 0) ? Math.min(1, stroke) : 0,
+      darkSchemeBackgroundColor: rgbToHex(base),
+      darkSchemeTextColor: rgbToHex(fg),
+      styleSystemControls: true,
+    };
+  }
+
+  // 站点级页级暗化的**唯一入口** (取代原先各调用点直呼 applyBackgroundReplace)
+  function applyPageDarkForSite(want) {
+    const dr = darkReaderGlobal();
+    const plan = pickPageDarkPlan({
+      present: !!dr,
+      drEnabled: darkReaderEnabledOnPage(),
+      owned: pageDarkState.owned,
+      want: !!want,
+      pref: state.pageDarkEngine || PAGE_DARK_PREF_DEFAULT,
+    });
+    pageDarkState.engine = plan;
+    try {
+      if (plan === 'delegate') {
+        dr.enable(mapPrefsToDarkReaderTheme(state));
+        pageDarkState.owned = true;
+        applyBackgroundReplace(false);       // 让位: 关掉自己的页级改色, 绝不同时跑两套
+        StatsManager.count('pageDarkDelegated');
+      } else if (plan === 'adopt') {
+        applyBackgroundReplace(false);       // 对方已在跑 → 我们完全不介入页级暗化
+        StatsManager.count('pageDarkAdopted');
+      } else if (plan === 'release') {
+        if (pageDarkState.owned) { try { dr.disable(); } catch (e) { /* ignore */ } }
+        pageDarkState.owned = false;
+        applyBackgroundReplace(false);
+      } else if (plan === 'native') {
+        pageDarkState.owned = false;
+        applyBackgroundReplace(true);
+      } else {                               // skip
+        applyBackgroundReplace(false);
+      }
+    } catch (e) {
+      // 适配器绝不因第三方异常而残废: 出错即回退到自己的路径, 并留可观测痕迹
+      console.warn('[SmartInvert] 页级暗化委托失败, 回退自有路径:', e);
+      StatsManager.count('pageDarkDelegateFailures');
+      pageDarkState.engine = 'native';
+      pageDarkState.owned = false;
+      try { applyBackgroundReplace(!!want); } catch (e2) { /* ignore */ }
+    }
+  }
+
   function applyBackgroundReplace(active) {
     const engine = (window.__svi && window.__svi.engines) ? window.__svi.engines.bgReplace : null;
     if (!engine) return;
@@ -12218,6 +12349,10 @@
         bgCoverGuarded: 0,
         // v0.6.7: 视频海报被"封面/骨架豁免"拦下的次数 (列表页里 <video poster> 即封面)
         posterCoverGuarded: 0,
+        // v0.6.8: 页级暗化交给 Dark Reader 引擎的次数 / 让位次数 / 委托失败回退次数
+        pageDarkDelegated: 0,
+        pageDarkAdopted: 0,
+        pageDarkDelegateFailures: 0,
         taintFallbacks: 0,
         videoAutoActivations: 0,
         bgReplacePages: 0,
@@ -12467,6 +12602,7 @@
       { key: "bgTone", kind: "select", label: "色调", hint: "背景与边框的主题基调", options: [["pure-black", "纯黑", "默认基调，纯黑背景，对比最强。"], ["dark-gray", "深灰", "纯黑抬升为深灰底，长时间阅读更柔和。"], ["warm-black", "暖黑", "低色温暖底，夜间护眼。"]] },
       { key: "bgBrightness", kind: "slider", label: "页面亮度", hint: "动态主题生成配色的整体亮度倍率", min: 0.6, max: 1.4, step: 0.05, unit: "倍" },
       { key: "bgContrast", kind: "slider", label: "页面对比度", hint: "动态主题生成配色的整体对比度倍率", min: 0.7, max: 1.5, step: 0.05, unit: "倍" },
+      { key: "pageDarkEngine", kind: "select", label: "页级暗化引擎", hint: "整页变暗由谁执行；检测到 Dark Reader 时默认让它接管，避免两套滤镜叠加把页面压灰", options: [["auto", "自动", "检测到 Dark Reader 就让位给它，本插件专注媒体反色；未检测到则走内置路径。"], ["native", "内置", "始终用本插件自己的页级暗化；已装 Dark Reader 时会叠加，可能压暗过度。"], ["darkreader", "Dark Reader", "只用 Dark Reader 引擎；未检测到则自动降级回内置路径。"]] },
     ] },
     { id: "readability", title: "字体与可读性", items: [
       { key: "fontOverride", kind: "toggle", label: "字体覆盖", hint: "全站强制使用所选字体，代码块与图标不受影响" },
@@ -13290,7 +13426,7 @@
       const ov = state.siteOverrides[host] || (state.siteOverrides[host] = {});
       ov.bgReplace = !profile.bgReplace;
       savePrefs();
-      applyBackgroundReplace(ov.bgReplace);
+      applyPageDarkForSite(ov.bgReplace);
       this.syncVisuals();
       showToast(ov.bgReplace ? '本站背景替换已开启' : '本站背景替换已关闭');
     }
@@ -15056,7 +15192,7 @@
       window.__svi_image_engine?.clearCacheAndRescan();
       updateImageFilterCss();
       try {
-        if (getSiteProfile().bgReplace === true) applyBackgroundReplace(true);
+        applyPageDarkForSite(getSiteProfile().bgReplace === true);
       } catch (e) { /* ignore */ }
       this.refreshSiteSection();
       this.refreshElementRules();
@@ -15914,7 +16050,7 @@
           updateImageFilterCss();
           window.__svi_image_engine && window.__svi_image_engine.clearCacheAndRescan();
         } else if (key === 'bgReplace') {
-          applyBackgroundReplace(getSiteProfile().bgReplace === true);
+          applyPageDarkForSite(getSiteProfile().bgReplace === true);
         } else if (key === 'videoInvert' && getSiteProfile().videoInvert === false && runtime.invertActive) {
           const hil = window.__svi && window.__svi.engines ? window.__svi.engines.hil : null;
           if (hil) {
@@ -16146,6 +16282,22 @@
         }, 0.7, 1.5, 0.05, '倍');
       sec.appendChild(contrastRow.row);
       this.rowSyncs.push(contrastRow.sync);
+
+      // v0.6.8: 页级暗化的执行引擎 —— 与已装 Dark Reader 协作而非叠加
+      const pageEngineRow = SviControls.selectRow('页级暗化引擎', '整页变暗由谁执行；检测到 Dark Reader 时默认让它接管，避免两套滤镜叠加把页面压灰',
+        [
+          { v: 'auto', label: '自动', describe: '检测到 Dark Reader 就让位给它，本插件专注媒体反色；未检测到则走内置路径。' },
+          { v: 'native', label: '内置', describe: '始终用本插件自己的页级暗化；已装 Dark Reader 时会叠加，可能压暗过度。' },
+          { v: 'darkreader', label: 'Dark Reader', describe: '只用 Dark Reader 引擎；未检测到则自动降级回内置路径。' },
+        ],
+        () => state.pageDarkEngine || 'auto',
+        (v) => {
+          state.pageDarkEngine = v;
+          savePrefs();
+          applyPageDarkForSite(getSiteProfile().bgReplace === true); // 立刻按新档位重算
+        });
+      sec.appendChild(pageEngineRow.row);
+      this.rowSyncs.push(pageEngineRow.sync);
 
       return sec;
     }
@@ -16629,6 +16781,11 @@
     // v0.6.7 两条判定路径共用的封面/骨架豁免 (单测契约; <img> 与 background-image 同源)
     passesCoverGuard,
     buildBgGuardInfo,
+    // v0.6.8 页级暗化引擎仲裁 (单测契约; 第三方引擎缺席时逐字节等价于旧行为)
+    pickPageDarkPlan,
+    mapPrefsToDarkReaderTheme,
+    darkReaderGlobal,
+    applyPageDarkForSite,
     // v4.5 纯函数导出 (单测契约): 上下文命中忽略文档根
     closestContextHit,
     // v4.6 纯函数导出 (单测契约): 暗色遮罩上下文检测 (任务 v4.6-4)
@@ -17051,7 +17208,7 @@
     // 按站点档案激活背景替换
     try {
       if (getSiteProfile().bgReplace && bgrEngine) {
-        applyBackgroundReplace(true);
+        applyPageDarkForSite(true);
       }
     } catch (e) { /* ignore */ }
     });
