@@ -331,7 +331,12 @@ function startServer() {
     // 时序探针住在自己的隔离世界（PROBE_WORLD）里，按世界名取它
     const pickProbeWorld = () => waitFor(async () => P.ctxs.find((c) => c.name === PROBE_WORLD) || null,
       BOOT_TIMEOUT_MS, '时序探针世界 ' + PROBE_WORLD + ' 出现');
-    const booted = async () => (await P.ev('document.documentElement.classList.contains("svi-img-invert-on")')) === true;
+    // 空值守卫：导航刚提交、`<html>` 尚未创建的那一瞬间 `document.documentElement` 为 null
+    //   （document_start 时序），裸取 `.classList` 会抛
+    //   `TypeError: Cannot read properties of null (reading 'classList')` —— 实测占某批失败 3/6，
+    //   且它抛的是**裸异常**而非「尚未就绪」，会把整轮等待直接打断。这里把它变成老实话：还没就绪。
+    const booted = async () => (await P.ev(
+      '!!(document.documentElement && document.documentElement.classList.contains("svi-img-invert-on"))')) === true;
 
     await P.send('Runtime.enable');
     await P.send('Page.enable');

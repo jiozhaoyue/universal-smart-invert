@@ -933,7 +933,27 @@ const pollUntil = (pred, cb) => {
   const st = makeTestStore(chromeMock);
   st.set('prefs', { brightness: 0.77 });
   st.flush();
-  setTimeout(() => {
+  // 原为固定 `setTimeout(…, 40)`：但 `prefs` 走**分片写链**（十几次串行 1ms mock 往返），
+  //   机器一忙就在 40ms 内写不完 → 快照落在链条中间 → 重组的远端命名空间里没有 prefs
+  //   → 下面的断言变红（实测：基线 5 跑 2 绿）。改为**有界轮询**前置条件：远端快照必须已能
+  //   重组成一个 brightness=0.77 的 svi:prefs，再进用例主体。轮询本身受 ASYNC_POLL_MS 与
+  //   台账自检约束，超时后照样进主体、断言如实报红（不吞失败）。
+  const readyToSnapshot = () => {
+    try {
+      const s = chromeMock.__snapshot();
+      let raw = s['svi:prefs'];
+      const metaRaw = s['svi:prefs.meta'];
+      if (metaRaw) {                                   // 分片形态：先读清单再拼，缺片即未就绪
+        let n = 0; try { n = (JSON.parse(metaRaw).chunks || 0); } catch (e2) { return false; }
+        let acc = '';
+        for (let i = 0; i < n; i++) { const p = s['svi:prefs#' + i]; if (p === undefined) return false; acc += p; }
+        raw = acc;
+      }
+      if (raw === undefined) return false;
+      try { return JSON.parse(raw).brightness === 0.77; } catch (e2) { return false; }
+    } catch (e2) { return false; }
+  };
+  pollUntil(readyToSnapshot, () => {
     // 全新启动模拟 (不经 makeTestStore 的 __useBackend —— 那会预置 ready)
     const st2 = Object.create(svi.Store);
     st2.mirror = new Map();
@@ -967,8 +987,10 @@ const pollUntil = (pred, cb) => {
       const p = st2.get('prefs');
       assert.ok(p && p.brightness === 0.77, 'init() loads remote namespace into mirror after boot (regression: extension persistence)');
       assert.strictEqual(st2.ready, true, 'init completes ready flag');
-    }).catch(() => { assert.fail('init() should not reject'); });
-  }, 40);
+      // `.catch` 会把 `.then` 里的**断言失败**一并吞掉（原来只报 'init() should not reject'，
+      // 把真实失败伪装成一句与事实不符的话，误导诊断）。这里把真实错误带出来。
+    }).catch((e) => { assert.fail('init() 流程失败（init 自身 reject 或内部断言未过）: ' + (e && e.message)); });
+  });
 }
 
 // —— 8e-3. Store 回归: sync 配额写失败 → 降级 chrome.storage.local (数据不丢失, 不抛错) ——
