@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 19
+- **Total Sessions**: 20
 - **Last Active**: 2026-09-27
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~738 | Active |
+| `journal-1.md` | ~760 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 20 | 2026-09-27 | v6-5 扩展工程收口：真扩展 E2E + CRX + 扩展 ID 固定；顺带堵住 test.js 的假绿闸门 | `1c0822d` | `main` |
 | 19 | 2026-09-27 | v6-4 第二轮交付完成（R3 清零 + R4 文档）并归档；修一条被压爆的偶发红 | `bcda4cc` | `main` |
 | 16 | 2026-09-26 | v6-3 完成: 纠正与自校准数据回路 (一次点击翻转 + 掩码差分) | `f7a63e9` | `main` |
 | 15 | 2026-09-26 | v6-2 完成: 部分反色渲染层 (backdrop 覆盖层 + 位图/矢量掩码) | `9d58bd0`, `1df8c4a` | `main` |
