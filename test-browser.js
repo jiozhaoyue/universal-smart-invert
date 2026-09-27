@@ -175,6 +175,10 @@ const HTML_CONTENT = `<!DOCTYPE html>
     <div class="frame"><img id="img-camo" src="http://127.0.0.1:${PORT2}/img/camo-sized.svg" alt="Camo sized"><p>8. CORS SVG (sized)</p></div>
     <div class="frame"><img id="img-camo-nosize" src="http://127.0.0.1:${PORT2}/img/camo-nosize.svg" alt="Camo nosize"><p>9. CORS SVG (no size)</p></div>
     <div class="frame"><div id="bg-thumb" style="background-image: url('/img/white-diagram.svg'); background-size: cover;"></div><p>10. BG-Image Thumb</p></div>
+    <!-- v0.6.7 封面/骨架豁免的 A/B 夹具: 三者**同 URL 同像素同尺寸** (220x130), 唯一变量是结构。
+         同 URL 保证像素判定结论相同 (背景图引擎按 URL 缓存) ⇒ 差异只能来自结构守卫。 -->
+    <div class="frame"><a class="video-card" href="#"><div id="cover-bg" style="width: 220px; height: 130px; background-image: url('/img/white-diagram.svg'); background-size: cover;"></div></a><p>11. Card cover (background-image)</p></div>
+    <div class="frame"><div id="plain-bg" style="width: 220px; height: 130px; background-image: url('/img/white-diagram.svg'); background-size: cover;"></div><p>12. Standalone background</p></div>
   </div>
   <div id="icon-grid">
     ${ICON_GRID}
@@ -340,6 +344,8 @@ const MEDIA_HTML = `<!DOCTYPE html>
 </head><body>
   <canvas id="light-canvas" width="160" height="120"></canvas>
   <video id="poster-video" poster="/img/light-poster.svg" muted playsinline></video>
+  <!-- v0.6.7: 列表页里 <video poster> 即封面 —— 同 URL 同像素, 唯一变量是"卡片容器" -->
+  <div class="video-card"><video id="poster-video-card" poster="/img/light-poster.svg" muted playsinline></video></div>
   <div id="shadow-host"></div>
   <svg viewBox="0 0 200 120" width="200" height="120"><image id="svg-image" href="/img/white-diagram.svg" x="0" y="0" width="200" height="120"/></svg>
   <input type="image" id="input-image" src="/img/gray-chart.svg" alt="input image">
@@ -882,19 +888,63 @@ async function main() {
     console.log('[Test] Navigating to main bench page ...');
     await sendCdp('Page.navigate', { url: `http://127.0.0.1:${PORT}` });
 
-    // Wait for images, blob decode chain, bg-image analysis and idle sweeps
-    console.log('[Test] Waiting for image analysis to complete in Chrome...');
-    await new Promise((r) => setTimeout(r, 4000));
+    // 判定落定的证据是**权威结论**而非时间, 也不是"有标记": 档 B 的 keep/local-context 是等待
+    // 解码期间的**临时结论 (provisional)**, 拿到它就读会把升级窗口误报成"图片没反色" (实测过)。
+    // 故条件为: 每个 <img> 夹具都有非临时结论 (或已登记失败), 且背景图引擎已出该 URL 的结论。
+    console.log('[Test] Waiting for image analysis to settle in Chrome (bounded poll on authoritative decisions) ...');
+    const FIXTURE_IDS = ['img-white', 'img-gray', 'img-cream', 'img-blue', 'img-thumb', 'img-dark', 'img-color', 'img-camo', 'img-camo-nosize'];
+    const SETTLE_BG_URL = `http://127.0.0.1:${PORT}/img/white-diagram.svg`;
+    const settleProbe = `(() => {
+      const ENG = (window.__svi && window.__svi.engines) ? window.__svi.engines.image : null;
+      const BG = (window.__svi && window.__svi.engines) ? window.__svi.engines.bgImage : null;
+      const pending = [];
+      for (const id of ${JSON.stringify(FIXTURE_IDS)}) {
+        const el = document.getElementById(id);
+        if (!el) { pending.push(id + ':missing'); continue; }
+        if (el.hasAttribute('data-svi-failed')) continue;
+        const src = el.currentSrc || el.src || '';
+        const d = (ENG && ENG.decisionBySrc) ? ENG.decisionBySrc.get(src) : null;
+        if (!d) pending.push(id + ':undecided');
+        else if (d.provisional) pending.push(id + ':' + d.reason + '(provisional)');
+      }
+      if (BG && BG.cache && !BG.cache.has(${JSON.stringify(SETTLE_BG_URL)})) pending.push('bgImage:no-url-verdict');
+      return pending.length ? pending : true;
+    })()`;
+    const settled = await waitForExpr(`(${settleProbe}) === true`, 25000, 250);
+    if (!settled) {
+      const pendingRes = await sendCdp('Runtime.evaluate', { expression: settleProbe, returnByValue: true });
+      console.warn(`[Test] 等待判定落定超时; 未落定: ${JSON.stringify(pendingRes.result.value)} (继续执行, 后续断言会指名)`);
+    }
 
     const evalRes = await sendCdp('Runtime.evaluate', {
       expression: `(() => {
         const results = {};
         const ids = ['img-white', 'img-gray', 'img-cream', 'img-blue', 'img-thumb', 'img-dark', 'img-color', 'img-camo', 'img-camo-nosize'];
+        const logged = new Map();
+        try {
+          const pl = window.__svi && window.__svi.processedLog;
+          if (pl && Array.isArray(pl.items)) for (const it of pl.items) { try { logged.set(it.el, it); } catch (e) {} }
+        } catch (e) {}
         ids.forEach(id => {
           const el = document.getElementById(id);
+          const it = el ? logged.get(el) : null;
+          const attrMap = {};
+          if (el) { for (const a of el.attributes || []) if (a.name.indexOf('data-svi') === 0) attrMap[a.name] = a.value; }
           results[id] = {
+            // 元素是否存在必须单独留痕: "没有属性" 与 "元素不在 DOM" 在报告里长得一模一样,
+            // 会把"页面被换掉"误读成"管线没跑" (调查本轮偶发时真实踩到)。
+            exists: !!el,
+            html: el ? String(el.outerHTML || '').slice(0, 160) : null,
             inverted: el ? el.getAttribute('data-svi-inverted') === 'true' : false,
-            checkedSrc: el ? !!el.getAttribute('data-svi-checked-src') : false
+            // 原样保留 attribute 值: 空串与"没有该属性"必须能区分 —— 否则一条 '' 值会被读成
+            // "从未判定", 把红因错误地指向管线入口 (调查 CORS SVG 时真实踩到)。
+            checkedSrc: el ? (el.hasAttribute('data-svi-checked-src') ? (el.getAttribute('data-svi-checked-src') || '(empty)') : '') : '',
+            hasChecked: el ? el.hasAttribute('data-svi-checked-src') : false,
+            failed: el ? el.hasAttribute('data-svi-failed') : false,
+            // 失败现场全量留痕: 偶发红必须自带可读的成因, 否则只能靠反复复现猜
+            attrs: attrMap,
+            // "本页已处理" 会话日志的成因码 —— 没反色时用来区分「判成 keep」与「压根没进管线」
+            loggedReason: it ? (it.actionId + '/' + it.reason) : null
           };
         });
 
@@ -906,6 +956,14 @@ async function main() {
 
         const bgThumb = document.getElementById('bg-thumb');
         results.bgThumb = { bginv: bgThumb ? bgThumb.getAttribute('data-svi-bginv') === 'true' : false };
+        // v0.6.7: 背景图路径的封面豁免 A/B (同 URL 同像素同尺寸, 唯一变量是结构)
+        const coverBg = document.getElementById('cover-bg');
+        const plainBg = document.getElementById('plain-bg');
+        results.coverBg = { bginv: coverBg ? coverBg.getAttribute('data-svi-bginv') === 'true' : false, exists: !!coverBg };
+        results.plainBg = { bginv: plainBg ? plainBg.getAttribute('data-svi-bginv') === 'true' : false, exists: !!plainBg };
+        results.bgCoverGuarded = (() => {
+          try { return window.__svi.exportStats().counters.bgCoverGuarded || 0; } catch (e) { return -1; }
+        })();
 
         const statsExport = window.__svi ? window.__svi.exportStats() : null; // 开发者导出路径 (导出前强制落盘)
         const statsRaw = localStorage.getItem('universal_smart_invert_stats_v1');
@@ -944,6 +1002,41 @@ async function main() {
           exportImagesAnalyzed: statsExport ? (statsExport.counters && statsExport.counters.imagesAnalyzed) || 0 : -1,
           exportSchema: statsExport ? statsExport.schema : -1
         };
+        // 引擎内部的**结论+理由码**: 判定落定但结果不符期望时, 只有理由码能区分
+        // "策略跳过 / 小元素跳过 / 像素判暗 / 暗色遮罩否决" —— 否则红因不可归属。
+        try {
+          const eng = (window.__svi && window.__svi.engines) ? window.__svi.engines.image : null;
+          if (eng && eng.decisionBySrc) {
+            for (const id of ids) {
+              const el = document.getElementById(id);
+              if (!el) continue;
+              const src = el.currentSrc || el.src || '';
+              const d = eng.decisionBySrc.get(src);
+              if (d) results[id].decision = d.verdict + '/' + (d.reason || '') + (d.provisional ? '(prov)' : '');
+              // 档位证据: 临时结论卡住时, 只有"元素是否仍在 pendingEls"能区分
+              // "唤醒监听没挂上/没触发" 与 "升级跑过但结论没变"
+              results[id].evidence = {
+                complete: el.complete === true,
+                natural: el.naturalWidth || 0,
+                pending: !!(eng.pendingEls && eng.pendingEls.has(el)),
+              };
+            }
+          }
+        } catch (e) { /* ignore */ }
+        // 引擎内部态: 偶发红只在"管线走到哪一步"上才可辨 (失败登记 / 未决的临时结论 / 在飞分析)
+        try {
+          const eng = (window.__svi && window.__svi.engines) ? window.__svi.engines.image : null;
+          results.engine = eng ? {
+            booted: !!window.__svi.enginesBooted,
+            imageInvert: window.__svi.prefs ? window.__svi.prefs.imageInvert : null,
+            decisions: eng.decisionBySrc ? eng.decisionBySrc.size : -1,
+            provisional: eng.decisionBySrc ? Array.from(eng.decisionBySrc.values()).filter(d => d && d.provisional).length : -1,
+            pendingEls: eng.pendingEls ? eng.pendingEls.size : -1,
+            inflight: eng.inflightSrcs ? eng.inflightSrcs.size : -1,
+            cache: eng.cache ? eng.cache.size : -1,
+            failures: eng.failures ? Array.from(eng.failures.entries()).map(([k, v]) => ({ src: String(k).slice(-34), count: v.count })) : null
+          } : null;
+        } catch (e) { results.engine = { err: String(e && e.message) }; }
         return results;
       })()`,
       returnByValue: true
@@ -952,16 +1045,25 @@ async function main() {
     const report = evalRes.result.value;
     console.log('\n[Browser Test Results — Scenario 1: engines + UI + stats]');
     console.log('----------------------------------------------------');
-    console.log(`1. Pure White Diagram:       Inverted = ${report['img-white'].inverted} (Expected: true)`);
-    console.log(`2. Light Gray Chart:         Inverted = ${report['img-gray'].inverted} (Expected: true)`);
-    console.log(`3. Warm Cream Slide:         Inverted = ${report['img-cream'].inverted} (Expected: true)`);
-    console.log(`4. Pale Blue Flowchart:      Inverted = ${report['img-blue'].inverted} (Expected: true)`);
-    console.log(`5. Wiki/Thumb URL Diagram:   Inverted = ${report['img-thumb'].inverted} (Expected: true)`);
-    console.log(`6. Dark Scenery Photo:       Inverted = ${report['img-dark'].inverted} (Expected: false)`);
-    console.log(`7. High-Sat Colorful Banner: Inverted = ${report['img-color'].inverted} (Expected: false)`);
-    console.log(`8. CORS SVG (sized):         Inverted = ${report['img-camo'].inverted} (Expected: true)`);
-    console.log(`9. CORS SVG (no size):       Inverted = ${report['img-camo-nosize'].inverted} (Expected: true)`);
+    // v6.x: 判定痕迹一并打印 —— "没反色" 有两种成因 (判成 keep 与 根本没进管线),
+    //   只打印 Inverted 会把两者混为一谈, 让红因无法归属 (本表是唯一的现场证据)。
+    const trace = (id) => {
+      const e = report[id].evidence || {};
+      return `[decision=${report[id].decision || '-'} checked=${report[id].hasChecked ? 'Y' : 'N'} failed=${report[id].failed ? 'Y' : 'N'} complete=${e.complete ? 'Y' : 'N'} nat=${e.natural} pending=${e.pending ? 'Y' : 'N'}]`;
+    };
+    console.log(`1. Pure White Diagram:       Inverted = ${report['img-white'].inverted} (Expected: true) ${trace('img-white')}`);
+    console.log(`2. Light Gray Chart:         Inverted = ${report['img-gray'].inverted} (Expected: true) ${trace('img-gray')}`);
+    console.log(`3. Warm Cream Slide:         Inverted = ${report['img-cream'].inverted} (Expected: true) ${trace('img-cream')}`);
+    console.log(`4. Pale Blue Flowchart:      Inverted = ${report['img-blue'].inverted} (Expected: true) ${trace('img-blue')}`);
+    console.log(`5. Wiki/Thumb URL Diagram:   Inverted = ${report['img-thumb'].inverted} (Expected: true) ${trace('img-thumb')}`);
+    console.log(`6. Dark Scenery Photo:       Inverted = ${report['img-dark'].inverted} (Expected: false) ${trace('img-dark')}`);
+    console.log(`7. High-Sat Colorful Banner: Inverted = ${report['img-color'].inverted} (Expected: false) ${trace('img-color')}`);
+    console.log(`8. CORS SVG (sized):         Inverted = ${report['img-camo'].inverted} (Expected: true) ${trace('img-camo')}`);
+    console.log(`9. CORS SVG (no size):       Inverted = ${report['img-camo-nosize'].inverted} (Expected: true) ${trace('img-camo-nosize')}`);
     console.log(`10. BG-Image Thumb div:      data-svi-bginv = ${report.bgThumb.bginv} (Expected: true)`);
+    console.log(`11. Card cover (bg):         data-svi-bginv = ${report.coverBg.bginv} (Expected: false — 与 <img> 路径同源豁免)`);
+    console.log(`12. Standalone background:   data-svi-bginv = ${report.plainBg.bginv} (Expected: true — 守卫不得越界)`);
+    console.log(`    bgCoverGuarded counter:  ${report.bgCoverGuarded} (Expected: >= 1)`);
     console.log(`Icon grid (20 tiny repeats): ${report.iconGrid.invertedCount}/${report.iconGrid.count} inverted (Expected: 0)`);
     console.log(`Stats key parsed:            ${report.statsKey.parsed} imagesAnalyzed = ${report.statsKey.imagesAnalyzed} (Expected: parsed + >=1)`);
     console.log('----------------------------------------------------');
@@ -976,6 +1078,12 @@ async function main() {
     console.log(`Modal Shield Section:        ${report.ui.hasShieldSection ? '✓ Present' : '✗ Missing'}`);
     console.log(`Modal Stats Section:         ${report.ui.hasStatsSection ? '✓ Present' : '✗ Missing'}`);
     console.log('----------------------------------------------------\n');
+
+    // 跨域 SVG 链路偶发留痕: 见过元素既无 checked 也无 failed 的一次 (属真实偶发,
+    // 修法须有现场才能定)。断言失败前把两条的完整属性图打出来, 让红自带成因。
+    if (!report['img-camo'].inverted || !report['img-camo-nosize'].inverted) {
+      console.error('[Diag] CORS SVG 现场: ' + JSON.stringify({ sized: report['img-camo'], nosize: report['img-camo-nosize'], engine: report.engine }, null, 1));
+    }
 
     // Assertions — original image engine behaviors must not regress
     assert.strictEqual(report['img-white'].inverted, true, 'White diagram must be inverted');
@@ -992,6 +1100,13 @@ async function main() {
 
     // R8: bilibili-style background-image thumbnail
     assert.strictEqual(report.bgThumb.bginv, true, 'Light background-image div must get data-svi-bginv=true');
+    // v0.6.7: 背景图路径的封面豁免 —— A/B 只有结构不同, 因此这两条同时钉住"同一张图两条路径结论一致"
+    // 与"守卫不得越界"两个方向。修前 cover-bg 必为 true (整张封面被反色), 即负向对照。
+    assert.ok(report.coverBg.exists, 'card-cover background fixture must exist in DOM');
+    assert.strictEqual(report.coverBg.bginv, false, '卡片封面内的背景图必须不反色 (与 <img> 路径同源豁免; 修前必红)');
+    assert.ok(report.plainBg.exists, 'standalone background fixture must exist in DOM');
+    assert.strictEqual(report.plainBg.bginv, true, '独立背景图仍须反色 (守卫不得越界)');
+    assert.ok(report.bgCoverGuarded >= 1, `封面豁免计数必须可观测 (实测 ${report.bgCoverGuarded})`);
 
     // R3: repeated tiny icon grid must never be auto-inverted
     assert.strictEqual(report.iconGrid.count, 20, 'Icon grid must contain 20 icons');
@@ -1511,6 +1626,9 @@ async function main() {
         return {
           canvasInverted: cv.getAttribute('data-svi-inverted') === 'true',
           posterLight: pv.dataset.sviPoster === 'light',
+          // v0.6.7: 卡片内的海报与独立海报同 URL 同像素, 唯一变量是结构 → 必须得到相反结论
+          posterCardLight: (function () { const p = document.getElementById('poster-video-card'); return p ? p.dataset.sviPoster === 'light' : 'missing'; })(),
+          posterCoverGuarded: (function () { try { return window.__svi.exportStats().counters.posterCoverGuarded || 0; } catch (e) { return -1; } })(),
           shadowImgInverted: !!(sh && sh.getAttribute('data-svi-inverted') === 'true'),
           svgImageInverted: !!(si && si.getAttribute('data-svi-inverted') === 'true'),
           inputImageInverted: !!(ii && ii.getAttribute('data-svi-inverted') === 'true'),
@@ -1522,6 +1640,8 @@ async function main() {
     console.log('Media coverage:', JSON.stringify(mediaRes));
     assert.strictEqual(mediaRes.canvasInverted, true, 'light canvas must be inverted');
     assert.strictEqual(mediaRes.posterLight, true, 'light video poster must be tagged data-svi-poster=light');
+    assert.strictEqual(mediaRes.posterCardLight, false, '视频卡片内的海报必须不反色 (封面/骨架豁免; 修前必红)');
+    assert.ok(mediaRes.posterCoverGuarded >= 1, `海报封面豁免计数必须可观测 (实测 ${mediaRes.posterCoverGuarded})`);
     assert.strictEqual(mediaRes.shadowImgInverted, true, 'shadow-DOM img must be inverted');
     assert.strictEqual(mediaRes.svgImageInverted, true, 'inline SVG <image> must be inverted');
     assert.strictEqual(mediaRes.inputImageInverted, true, 'input[type=image] must be inverted');
@@ -2764,7 +2884,6 @@ async function main() {
       const svi = window.__svi;
       const el = document.getElementById('act-target');
       svi.prefs.actions.mask.enabled = true;
-      const settle = () => new Promise((r) => setTimeout(r, 400));
       // 有界轮询: 等 data-svi-masked 真的变成目标档 (属性写入走写点仲裁, 不是同步落地的)
       const waitAttr = async (want) => {
         const deadline = Date.now() + 2000;
@@ -2775,10 +2894,24 @@ async function main() {
         return false;
       };
       const out = {};
+      // 有界等待**计算值**到位, 而不是固定睡 N ms: 属性写入走写点仲裁、CSS 变量传递、140ms
+      // opacity 过渡 —— 每一步都有延迟, 固定睡眠只是拿概率赌"已经生效"。超时后仍读一次真实值
+      // 交给断言报告, 所以诊断力不降 (读到上一档 opacity 会以 want= 一同打印, 一眼可辨)。
+      const waitOpacity = async (want) => {
+        if (!Number.isFinite(want)) return true;
+        const deadline = Date.now() + 3000;
+        while (Date.now() < deadline) {
+          if (parseFloat(getComputedStyle(el, '::after').opacity) === want) return true;
+          await new Promise((r) => setTimeout(r, 20));
+        }
+        return false;
+      };
       for (const style of ['solid', 'dim', 'frost']) {
+        const preset = (svi.MASK_PRESETS && svi.MASK_PRESETS[style]) || {};
+        const wantOpacity = parseFloat(preset.opacity);
         svi.ACTIONS.mask.apply(el, { style: style }, 'manual');
-        out[style] = { attrInTime: await waitAttr(style) };
-        await settle(); // 属性到位后, ::after 还有 140ms opacity 过渡, 等它结束再读计算值
+        out[style] = { attrInTime: await waitAttr(style), want: wantOpacity };
+        out[style].opacityInTime = await waitOpacity(wantOpacity);
         const cs = getComputedStyle(el, '::after');
         out[style].attr = el.getAttribute('data-svi-masked');
         out[style].opacity = cs.opacity;
@@ -2795,6 +2928,7 @@ async function main() {
     for (const st of ['solid', 'dim', 'frost']) {
       assert.ok(maskRes[st].attrInTime, 'mask 预设 ' + st + ' 的属性写入应在 2s 内有界等待内到位 (写点仲裁未落地的判据)');
       assert.strictEqual(maskRes[st].attr, st, 'mask 预设 ' + st + ' 的 data-svi-masked 应等于该档 id');
+      assert.ok(maskRes[st].opacityInTime, 'mask 预设 ' + st + ' 的 ::after 不透明度应在 3s 内达到 MASK_PRESETS 值 (实测 ' + maskRes[st].opacity + ', 期望 ' + maskRes[st].want + ')');
     }
     assert.strictEqual(parseFloat(maskRes.solid.opacity), 1, 'solid = 全遮挡 (opacity 1)');
     assert.strictEqual(parseFloat(maskRes.dim.opacity), 0.75, 'dim 预设不透明度取自 MASK_PRESETS');

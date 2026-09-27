@@ -1297,6 +1297,31 @@ assert.strictEqual(pip(pinfo({ maxDim: 60, contentContext: true, policy: 'conser
 assert.strictEqual(pip(pinfo({ maxDim: 20, policy: 'aggressive' })), true, 'aggressive: size gates only');
 assert.strictEqual(pip(pinfo({ maxDim: 2000, gridSiblings: 50, chromeContext: true, policy: 'aggressive' })), true, 'aggressive: always passes');
 
+// —— 9c-2. v0.6.7 passesCoverGuard: <img> 与 background-image 两条路径共用的结构性豁免 ——
+// 本组是「同一张图换个渲染方式结论就翻」的回归防线: 判据只允许有一份实现 (passesImagePolicy
+// 的 balanced 分支委托它), 因此这里对纯函数直接断言, 并额外钉住"两条路径一致"这条不变量。
+const pcg = svi.passesCoverGuard;
+assert.strictEqual(typeof pcg, 'function', 'passesCoverGuard must be exported (两条路径共用的唯一定义处)');
+assert.strictEqual(pcg(pinfo({})), true, 'cover guard: lone element passes');
+assert.strictEqual(pcg(pinfo({ gridSiblings: 4 })), false, 'cover guard: grid threshold is exactly 4');
+assert.strictEqual(pcg(pinfo({ gridSiblings: 3 })), true, 'cover guard: 3 siblings still passes');
+assert.strictEqual(pcg(pinfo({ chromeContext: true })), false, 'cover guard: card/cover container fails');
+assert.strictEqual(pcg(pinfo({ chromeContext: true, contentContext: true })), true, 'cover guard: content context wins');
+assert.strictEqual(pcg(pinfo({ gridSiblings: 9, contentContext: true })), true, 'cover guard: content context wins over grid');
+assert.strictEqual(pcg(null), true, 'cover guard: missing info is permissive (绝不因缺信息误伤)');
+// 一致性: balanced 档下 maxDim 达标时, passesImagePolicy 的结论必须完全等于 passesCoverGuard
+// (尺寸门之外不得再有第二套结构性判据 —— 那正是背景图路径漂移的成因)
+for (const g of [0, 1, 4, 12]) {
+  for (const c of [false, true]) {
+    for (const k of [false, true]) {
+      const info = pinfo({ maxDim: 300, gridSiblings: g, chromeContext: c, contentContext: k });
+      assert.strictEqual(pip(info), pcg(info), `balanced policy must delegate to cover guard (grid=${g} chrome=${c} content=${k})`);
+    }
+  }
+}
+// buildBgGuardInfo 是纯读取构造器, 桩环境下对 body 之外的元素不得抛
+assert.strictEqual(typeof svi.buildBgGuardInfo, 'function', 'buildBgGuardInfo must be exported (背景图路径的守卫输入)');
+
 // —— 9d. decideImage 统一决策管线 (真实引擎实例, Node 桩环境) ——
 // 引擎构造在桩环境安全: IntersectionObserver 缺失 → init() 早退, 无 IO/扫描副作用
 // ============================================================

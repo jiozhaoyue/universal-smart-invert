@@ -3,7 +3,7 @@
  * universal-smart-invert — browser extension content script
  * GENERATED FILE — DO NOT EDIT.
  * Built by scripts/build-extension.js from universal-smart-invert.user.js
- * Source version: 0.6.6
+ * Source version: 0.6.7
  *
  * Prelude contract (see scripts/build-extension.js header):
  *   - EXT_MODE (wrapper scope)   → core claims coexistence kind 'ext'
@@ -75,7 +75,7 @@
   // ==========================================
   // 1. 配置与常量定义
   // ==========================================
-  const SCRIPT_VERSION = '0.6.6';
+  const SCRIPT_VERSION = '0.6.7';
   const PREFS_KEY = 'universal_smart_invert_v4';   // v2.0 遗留偏好键 (迁移源, 迁移后原样保留以便回滚)
   const LEGACY_KEY = 'universal_smart_invert_v3';  // v1.x 旧键 (仅读取迁移, 保留不删以便回滚)
   const STATS_KEY = 'universal_smart_invert_stats_v1'; // v2.0 遗留统计键 (保留写入以兼容回滚)
@@ -6762,22 +6762,37 @@
     };
   }
 
+  // —— v0.6.7: 封面/骨架豁免 (纯函数, 单测契约) ——
+  // 这是 passesImagePolicy 的**结构性**子集: 只取"内容上下文 / 网格贴图 / 页面骨架"三条判据,
+  // 刻意**不含**尺寸与策略档位 —— 背景图路径的尺寸语义与 <img> 不同 (评论缩略图刻意要反,
+  // 见站点档案 bgImageSelectors)。
+  //
+  // **为什么必须是单一实现点**: 背景图引擎原只有一道 ≥32×32 尺寸门, 于是同一张浅色图
+  // 用 <img> 渲染会被判"封面→跳过", 用 background-image 渲染却按像素亮暗直接反色 ——
+  // 两条路径各写一份策略必然漂移, 那就是"B站收藏夹/播放列表封面被整张反色"的根因
+  // (卡片封面、网格缩略图、页面骨架装饰在中文站点普遍用 background-image 渲染)。
+  function passesCoverGuard(info) {
+    if (!info) return true;
+    if (info.contentContext) return true;            // 正文上下文放行 (与 passesImagePolicy 同序)
+    if ((info.gridSiblings | 0) >= 4) return false;  // 网格重复贴图
+    if (info.chromeContext) return false;            // 页面骨架 / 卡片 / 封面容器
+    return true;
+  }
+
   // —— v3.1 R4: 智能图片策略 (纯函数, 导出 window.__svi 供单测) ——
   // 输入 info: { maxDim, contentContext, chromeContext, gridSiblings, policy }
   // - aggressive  : v3.0 行为 (仅 classifySmallElement 尺寸门, 策略恒通过)
   // - conservative: 正文上下文 OR maxDim ≥ 200
-  // - balanced    : 正文上下文 OR (maxDim ≥ 96 且非网格重复 且非页面骨架上下文)
+  // - balanced    : 正文上下文 OR (maxDim ≥ 96 且 通过封面/骨架豁免)
   function passesImagePolicy(info) {
     const policy = (info && info.policy) || 'balanced';
     if (policy === 'aggressive') return true;
     if (info.contentContext) return true;
     const maxDim = Math.max((info.maxDim | 0), 0);
     if (policy === 'conservative') return maxDim >= 200;
-    // balanced
+    // balanced —— 结构性三条统一委托 passesCoverGuard (唯一定义处)
     if (maxDim < 96) return false;
-    if ((info.gridSiblings | 0) >= 4) return false;
-    if (info.chromeContext) return false;
-    return true;
+    return passesCoverGuard(info);
   }
 
   // 网格分组计数 (纯函数, 导出单测): 同父容器内同标签且尺寸 ±8px 的元素分组计数 (含自身);
@@ -6850,6 +6865,37 @@
     return false;
   }
 
+  // 背景图侧的守卫输入 (buildClassifyInfo 的兄弟, 纯读取 + 与 <img> 路径同源复用检测器)。
+  // 刻意只喂 passesCoverGuard 真正读的字段, **不**复用 classifySmallElement 的全部门 ——
+  // tiny / below-min / repeated-small 会改变背景图既有行为 (评论缩略图刻意要反), 属另一件事。
+  // meta 并入背景 URL 的路径段: 头像目录 (/face/、/avatar/) 是比 class 更可靠的特征。
+  function buildBgGuardInfo(el, url) {
+    let content = false;
+    let chrome = false;
+    let grid = 0;
+    let meta = '';
+    try { content = !!closestContextHit(el, CONTENT_CONTEXT_SELECTOR); } catch (e) { /* ignore */ }
+    try { chrome = detectChromeContext(el); } catch (e) { /* ignore */ }
+    try { grid = detectGridSiblings(el); } catch (e) { grid = 0; }
+    try {
+      const cls = (typeof el.className === 'string')
+        ? el.className
+        : (el.className && el.className.baseVal !== undefined ? el.className.baseVal : '');
+      meta = (String(cls || '') + ' ' + String(el.id || '')).toLowerCase();
+    } catch (e) { /* ignore */ }
+    try {
+      // URL 路径段并入元数据 —— 与 buildClassifyInfo 同源手法: /face/、/avatars/ 这类
+      // 目录特征是比 class 更可靠的头像证据 (B站头像正是 background-image)。
+      meta += ' ' + new URL(url || '', location.href).pathname.toLowerCase();
+    } catch (e) { /* ignore */ }
+    return {
+      contentContext: content,
+      chromeContext: chrome,
+      gridSiblings: grid,
+      metaIcon: META_ICON_RE.test(meta),
+    };
+  }
+
   // 跳过原因中文映射 (当前页媒体面板展示用)
   const SKIP_REASON_ZH = {
     'meta-icon': '头像/图标',
@@ -6860,6 +6906,7 @@
     'favicon': 'favicon',
     'policy': '策略跳过',
     'analysis-failed': '分析失败',
+    'bg-cover': '封面/骨架（保持原样）',
   };
 
   // 合并站点级原色屏蔽后的求值偏好快照
@@ -10143,6 +10190,22 @@
       return parts.join(',');
     }
 
+    // 站点档案里**显式声明**的 bgImageSelectors 命中判定 (v0.6.7: 声明式意图优先于启发式豁免)。
+    // 刻意只测这份清单, **不**把 candidateSelector() 的另一半 ([style*="background"] 泛化发现)
+    // 混进来 —— 泛化发现正是守卫要拦的那一类, 混入会让守卫永不生效。
+    matchesDeclaredSelector(el) {
+      try {
+        const profile = getSiteProfile();
+        const list = (profile && Array.isArray(profile.bgImageSelectors)) ? profile.bgImageSelectors : null;
+        if (!list || !list.length) return false;
+        for (const sel of list) {
+          if (!sel || typeof sel !== 'string') continue;
+          try { if (el.matches(sel)) return true; } catch (e) { /* 非法选择器按未命中 */ }
+        }
+      } catch (e) { /* ignore */ }
+      return false;
+    }
+
     init() {
       try {
         this.mo = new MutationObserver((records) => this.onMutations(records));
@@ -10284,6 +10347,31 @@
 
       const urls = extractCssUrls(bg);
       if (!urls.length) return;
+
+      // v0.6.7: 封面/骨架豁免 —— 与 <img> 路径**同源** (passesCoverGuard 唯一定义处)。
+      // 本引擎此前只有上面那道 ≥32×32 尺寸门, 于是卡片封面 / 网格缩略图 / 页面骨架装饰
+      // (中文站点普遍用 background-image 渲染) 一律按像素亮暗直接整张反色, 与 <img> 路径
+      // "封面与页面骨架跳过" 的策略完全不一致 —— 同一张图换个渲染方式结论就翻。
+      //
+      // **声明式优先**: 命中站点档案 bgImageSelectors 说明该站显式声明"这些背景图就是要反的"
+      // (如 B站评论缩略图 .b-img__inner), 显式意图压过启发式豁免。
+      // 位置刻意在"已确认本元素确有背景图"之后: 纯装饰元素不白付检测开销。
+      if (!this.matchesDeclaredSelector(el)) {
+        let firstAbs = urls[0];
+        try { firstAbs = new URL(urls[0], location.href).href; } catch (e) { /* 相对 URL 失败则原样 */ }
+        // decide-once: 同一元素同一 URL 已体检过 → 直接返回 (既省 DOM 读取, 也避免计数重复 ——
+        // 合批刷新与补扫可能在同一批里二次触达同一元素)
+        if (this.elLastUrl.get(el) === firstAbs) return;
+        const g = buildBgGuardInfo(el, firstAbs);
+        // 头像/图标目录特征: 与 <img> 路径的 META_ICON_RE 同义; 正文上下文不套用 (同 classifySmallElement 的例外)
+        const metaIconReject = g.metaIcon && !g.contentContext;
+        if (metaIconReject || !passesCoverGuard(g)) {
+          StatsManager.count('bgCoverGuarded');
+          // decide-once (与 <img> 路径同语义): 同一元素同一 URL 不再重复体检
+          this.elLastUrl.set(el, firstAbs);
+          return;
+        }
+      }
 
       for (const raw of urls) {
         let abs = raw;
@@ -10888,6 +10976,15 @@
       const key = profileKey() + '|' + abs;
       if (video.dataset.sviPosterChecked === abs) return;
       video.dataset.sviPosterChecked = abs;
+      // v0.6.7: 与 <img> / 背景图路径**同源**的封面/骨架豁免。列表页里的 <video poster> 就是封面
+      // (视频卡片、合集面板、播放列表), 不豁免就会整片封面被反色 —— 与 <img> 路径"封面网格与页面
+      // 骨架跳过"的既有策略相左。独立播放器上的海报不在卡片/网格/骨架上下文里, 结论不变。
+      const pg = buildBgGuardInfo(video, abs);
+      if ((pg.metaIcon && !pg.contentContext) || !passesCoverGuard(pg)) {
+        StatsManager.count('posterCoverGuarded');
+        delete video.dataset.sviPoster;
+        return;
+      }
       let decision = this.posterCache.has(key) ? this.posterCache.get(key) : null;
       if (decision === null) {
         if (this._posterInflight && this._posterInflight.has(abs)) return;
@@ -12152,6 +12249,10 @@
         imagesAnalyzed: 0,
         imagesInverted: 0,
         bgImagesInverted: 0,
+        // v0.6.7: 背景图被"封面/骨架豁免"拦下的次数 (必须可观测 —— 静默跳过等于用户无从知晓)
+        bgCoverGuarded: 0,
+        // v0.6.7: 视频海报被"封面/骨架豁免"拦下的次数 (列表页里 <video poster> 即封面)
+        posterCoverGuarded: 0,
         taintFallbacks: 0,
         videoAutoActivations: 0,
         bgReplacePages: 0,
@@ -12270,6 +12371,7 @@
         { label: '图片分析', value: String(c.imagesAnalyzed || 0) },
         { label: '已反色', value: String(c.imagesInverted || 0) },
         { label: '背景图', value: String(c.bgImagesInverted || 0) },
+        { label: '封面豁免', value: String((c.bgCoverGuarded || 0) + (c.posterCoverGuarded || 0)) },
         { label: '跨域回退', value: String(c.taintFallbacks || 0) },
         { label: '视频自动', value: String(c.videoAutoActivations || 0) },
         { label: '背景替换页', value: String(c.bgReplacePages || 0) },
@@ -16559,6 +16661,9 @@
     // v3.1 纯函数与引擎导出 (单测契约): 图片策略门 / 网格分组计数 / 统一决策管线引擎
     passesImagePolicy,
     countGridGroup,
+    // v0.6.7 两条判定路径共用的封面/骨架豁免 (单测契约; <img> 与 background-image 同源)
+    passesCoverGuard,
+    buildBgGuardInfo,
     // v4.5 纯函数导出 (单测契约): 上下文命中忽略文档根
     closestContextHit,
     // v4.6 纯函数导出 (单测契约): 暗色遮罩上下文检测 (任务 v4.6-4)

@@ -1,7 +1,7 @@
 # 全网通用智能视频与图片反色 (Universal Smart Video & Image Invert)
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.6.6-blue.svg?style=flat-square" alt="Version">
+  <img src="https://img.shields.io/badge/version-0.6.7-blue.svg?style=flat-square" alt="Version">
   <img src="https://img.shields.io/badge/license-AGPL--3.0-green.svg?style=flat-square" alt="License">
   <img src="https://img.shields.io/badge/Tampermonkey-Supported-orange.svg?style=flat-square" alt="Tampermonkey">
   <img src="https://img.shields.io/badge/ScriptCat-Supported-purple.svg?style=flat-square" alt="ScriptCat">
@@ -610,7 +610,7 @@ DRM 视频同样能反色（克隆层方案在这些场景会直接失败）。
 若在 GitHub README 上感觉脚本"没生效"，**按下面的顺序自检**（前两步就能定位绝大多数情况）：
 
 1. **先看版本**：油猴面板 →「已安装脚本」→ 看「全网通用智能视频与图片反色」的版本号，
-   应与本仓 `universal-smart-invert.user.js` 顶部 `@version` 一致（当前 **0.6.6**）。
+   应与本仓 `universal-smart-invert.user.js` 顶部 `@version` 一致（当前 **0.6.7**）。
    过旧的版本会缺少 GitHub README / camo 图的强制反色规则。
 2. **自动更新会静默失败**：脚本经 `raw.githubusercontent.com` 检查更新——该域名在你的网络下不可达时
    （或旧版脚本指向的仓库已私有/更名，Raw 404），油猴会**静默保留旧版本**，不会有任何提示。

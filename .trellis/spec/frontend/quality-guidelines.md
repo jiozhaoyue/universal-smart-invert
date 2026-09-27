@@ -910,3 +910,46 @@ pollUntil(                                          // 条件成立即走; 超�
 另：**固定等待是概率，不是时长**（把 30ms 加到 300ms 仍是偶发）——凡「等某个异步写入/装载」，
 一律用有界轮询等**状态**（谓词取断言依赖的**完整状态**，如「能重组出 `brightness=0.77` 的 `svi:prefs`」），
 超时后走同一组断言、如实报红。
+
+## 0.6.7 Additions（结构性豁免的单一实现点 · 有界轮询的谓词完备性）
+
+### 1. 「按像素亮暗落反色」的每一条路径都必须过同一套结构性豁免
+
+**契约**：任何"看像素亮暗 → 决定反不反色"的入口，在像素判定之前必须过**同一份**结构性豁免；
+判据只有一份实现（`passesCoverGuard`），入口不得各写一份。
+
+**为什么**：两条路径各写一份策略必然漂移，而漂移的表现是**用户可见且难以归因**的——
+同一张浅色图用 `<img>` 渲染被判「封面→跳过」，换个渲染方式（`background-image` / `<video poster>`）
+就按像素亮暗整张反色。B 站收藏夹/播放列表的封面整片被反色正是这条漂移（2026-09-27 修复）。
+
+| 入口 | 必须过豁免 |
+| :--- | :--- |
+| `ImageInvertEngine.decideImage`（img / SVG image / input[type=image]） | 是（`classifySmallElement` + `passesImagePolicy`） |
+| `BgImageEngine.processEl`（`background-image`） | 是（`passesCoverGuard` + `buildBgGuardInfo`） |
+| `MediaCoverageEngine.processPoster`（`<video poster>`） | 是（同上；列表页里海报即封面） |
+| `MediaCoverageEngine.processCanvas`（`<canvas>`） | **刻意不豁免**：canvas 内容是程序化图表/示意图，不是摄影封面；且 8×8 探针本就要求不透明像素 ≥ 8 |
+
+**声明式优先**：站点档案 `bgImageSelectors` 是显式声明（"这些背景图就是要反的"，如 B站评论缩略图
+`.b-img__inner`），**压过**启发式豁免。判定时必须只对该清单求 `matches`，
+不得把 `[style*="background"]` 泛化发现混进去 —— 泛化发现正是豁免要拦的那一类，混入会让豁免永不生效。
+
+**已知不对称（刻意保留，勿"顺手修"）**：背景图路径**没有**最小尺寸/重复贴图门
+（`classifySmallElement` 的 `tiny` / `below-min` / `repeated-small`）。
+原因是背景图路径的尺寸语义与 `<img>` 不同（评论缩略图刻意要反）。要收紧必须作为独立任务**两条路径一起**收。
+
+**可观测**：豁免必须计数（`bgCoverGuarded` / `posterCoverGuarded`）并有中文原因码
+（`SKIP_REASON_ZH['bg-cover']`）。静默跳过等于用户无从知晓。
+
+### 2. 有界轮询的谓词必须取**终态**，不能取"某个标记出现了"
+
+上一条说「有界轮询等状态」；本条的教训是**等的必须是终态**：
+
+- 本项目有"临时结论"这一层（档 B 的 `keep/local-context`，带 `provisional: true`），
+  它**也会写 `data-svi-checked-src`**。以"有标记"为谓词 ⇒ 把**升级窗口**读成产品缺陷，
+  连续产出多种形态的假红（2026-09-27 实测三次不同红因）。
+- 正确谓词 = 断言真正依赖的**权威**状态：`decisionBySrc` 里**非 provisional** 的结论
+  （或已登记失败），外加另一条异步链的权威证据（如背景图引擎的 URL 结论缓存）。
+
+推论：**报告必须能区分"没有属性"与"元素不在 DOM"、"空串属性值"与"无属性"**，
+并把引擎内部态（理由码 / provisional 标记 / pending 集合 / `complete`+`naturalWidth`）打进出错现场。
+只打印一个布尔，等于把红因留给下一轮猜。
