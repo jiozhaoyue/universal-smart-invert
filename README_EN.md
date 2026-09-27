@@ -88,6 +88,40 @@ Specifically designed to tame **blinding white PowerPoint/PDF lecture slides in 
 > (see `dev/probe-github-readme.js` and the v6.5 real-extension E2E).
 ---
 
+## 🎛 Unified UI rebuild (v6.4)
+
+The three surfaces — **toolbar popup**, **standalone options page**, and the **in-page settings panel** —
+now share a single set of design tokens and a single control library, instead of three hand-written
+stylesheets. The information architecture and control vocabulary follow Dark Reader (its deep-teal
+palette is copied value for value).
+
+| Surface | How to open | What it carries |
+| :--- | :--- | :--- |
+| Toolbar popup | Click the extension icon | Three tabs: `Filter` (high-frequency items) / `Site list` (per-site switches + site lists) / `More` (open options, reset, version) |
+| Options page | Popup → "More → Open settings", or "Extension options" on the extensions page | **All 93 settings**, grouped and collapsible |
+| In-page panel | Bottom-right capsule → open settings panel | All settings (same controls and same copy as the options page) + current-page media triage + data & backup |
+
+- **Single source of truth**: the settings manifest (groups / labels / ranges / control kinds) and the
+  design tokens live in `universal-smart-invert.user.js` and are extracted at build time for the
+  extension pages — so one setting is never written twice. Unit tests compare the three surfaces
+  byte for byte.
+- **Live cross-surface sync**: change something anywhere and the other two surfaces — **including pages
+  that are already open** — follow immediately, no reload needed; the writeback while a page unloads no
+  longer pushes a stale value back over a newer one.
+- **Icons are inline SVG only** (colored via `currentColor`); the code paths contain **zero emoji glyphs**.
+- New "**Region inversion**" settings block: the v6 automatic partial-inversion kernel used to be
+  unreachable from the UI (storage edits only). Every switch and diagnostic for segmentation,
+  rendering, correction and self-calibration now lives there.
+
+> How it is verified: the real-extension end-to-end suite (9 scenarios: unpacked extension + isolated
+> world + persistence + options page + cross-surface sync), the panel screenshot probe
+> `scripts/panel-shot.js` (`--full` captures the whole panel in one shot), and the icon contact sheet
+> (`dev/shots/icon-sheet.html`, at 12/16/22/32px). UI changes are not "done" when assertions are green —
+> the panel gets **screenshotted and looked at**, which is how three defects invisible to both
+> assertions and unit tests were found and fixed this round.
+
+---
+
 ## 🧪 v6.0 in progress (automatic partial inversion · kernel landed)
 
 > **Status: the kernel has landed and its contract is frozen, but the whole feature is OFF by

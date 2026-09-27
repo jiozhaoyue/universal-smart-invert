@@ -129,8 +129,18 @@ removed after it bound loopback-only and was unreachable via LAN/proxied browser
 - **Design tokens have exactly one source** (the `v6.4-TOKENS-START/END` block in the userscript),
   injected into `popup.html` / `options.html` at build time. Never hand-write a colour in panel CSS
   or in either HTML artifact; the only allowed literal is the flash-guard `background:#000`.
-  All UI controls are built by the single `SviControls` library (`ui` is a zero-DOM delegation
-  shim) — one implementation per control, verified by unit test.
+  All UI controls are built by the single `SviControls` library — one implementation per control,
+  verified by unit test. The v5-era `ui` alias is **gone** (R2a); a unit test keeps `ui.*` call
+  sites at zero, so do not reintroduce it.
+- **Icons come from one table and are inline SVG only.** Every glyph is an entry in
+  `SviControls.ICONS` rendered as `<svg fill="currentColor">` — never an emoji character, and never a
+  hand-written `<svg>` literal at a call site. The R3 unit test scans three path sets (userscript /
+  `extension/` / `scripts/extension-src/`) against two code-point tiers: a **zero tier**
+  (graphic-emoji blocks, misc symbols, Dingbats, regional indicators, `U+FE0F`, `U+20E3`) that must
+  never appear anywhere, and a **typographic tier** (arrows, circled numerals, box-drawing) allowed in
+  comments and copy but **not** inside the panel region. Code points in `extension/` only clear after
+  `node scripts/build-extension.js` rebuilds it from source — a stale build reports already-fixed
+  glyphs as still present.
 - **Style nodes have exactly one mount point** (`mountStyleNode`) and root-dependent startup has
   exactly one deferral point (`whenRootReady`). Mount immediately when `document.head` /
   `documentElement` exists, otherwise **queue and attach the moment a root appears** (three

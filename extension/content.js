@@ -11346,7 +11346,8 @@
     //   **必须是单个 <path> 带 clip-rule:evenodd**, 不能写成「一个整盒 rect + 若干洞 rect」:
     //   clipPath 内**多个子元素之间是取并集** —— 「整盒 ∪ 洞」= 整盒, 于是掩码完全不生效
     //   (实测踩到: 色块被一起反色, 而同时用 mask-image 的位图路是对的, 见 implement.md 偏离 3)。
-    //   单条 path 内的子路径之间才按 clip-rule 计算: 洞在外框内部 → 交叉数为偶 → 被挖掉 ✓
+    //   单条 path 内的子路径之间才按 clip-rule 计算: 洞在外框内部 → 交叉数为偶 → 被挖掉
+  //   (v6.4 R3: 原句尾的对勾字形已去掉 —— 码位扫描要求三处路径零 emoji 字形)
     //   (这与探针 dev/probe-partial-backdrop.js 的 sviDonut 用例同构)。
     //   holes = 「整盒 ∖ 洞」; islands = 「只有孤岛」→ 两种都是同一份 path, 只差外框那一段。
     makeClip(expr, doc) {
@@ -11682,7 +11683,7 @@
   //   语义 (design D1): 点击点所属的**连通域**整体取反。关键细节 —— 连通域在**自动结果 (ours)**
   //   上取, 而不是在"当前纠正后的网格"上取: 否则第一次翻转会把该区域与背景合并成一个更大的
   //   连通域, 再点一下就会翻转整张图 (实测踩到)。翻转用**翻转集 flips**表达, 于是:
-  //     corrected = ours XOR flips,  diff = flips,  再点同一区域 → flips 归零 → changed=false ✓
+  //     corrected = ours XOR flips,  diff = flips,  再点同一区域 → flips 归零 → changed=false
   //   返回 { corrected, diff, flips, changed }: changed=false 表示这次点击等于"翻回原位" (不产样本)。
   function regionDiffFromFlip(ours, n, cellIndex, flips) {
     const out = { corrected: null, diff: null, flips: null, changed: false };

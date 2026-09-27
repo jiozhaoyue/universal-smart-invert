@@ -821,14 +821,39 @@ function makeTestStore(mock) {
   localStore.set('unitBig', big);
   assert.ok(JSON.stringify(big).length > localStore.CHUNK_SIZE, 'test value exceeds chunk size');
   localStore.flush();
-  // 等待时长说明 (v4.6.1 修复): chrome 后端的写入走 writeLogicalAsync,
+  // 等待方式说明 (v6.4 R4 收尾修复): chrome 后端的写入走 writeLogicalAsync,
   // 其内部对每个分片键串行 await 一次 mock 往返 (各 1ms); 20000 字符 → 3 片,
   // 加上先前的 meta 清理读取与 remove, 总共需要十余次 1ms 往返。
-  // 原值 30ms 在慢机器/高负载下会被耗尽的边缘, 导致 meta 尚未落盘就断言 (稳定复现失败:
-  // "chunked write emits meta manifest" actual=undefined)。
-  // 这是**测试等待时长不足**, 非产品缺陷 —— 已用同源补丁副本 (仅把 30 改 800) 验证全绿。
-  // 改为 300ms, 相对所需往返次数有充足余量, 同时不拖慢整体测试。
-  setTimeout(() => {
+  // 历史: 原值 30ms (v4.6.1 起) → 改 300ms, 两次都是**加大固定等待**。
+  // 但固定等待的正确性依赖「本文件的同步执行时间 + 全局负载不越过该值」——
+  // 实测 v6.4 第二轮往本文件里加了 R2e / R3 两个断言块后, 这一条又偶发红了一次
+  // ("chunked write emits meta manifest" actual=undefined), 复跑 5/5 绿。
+  // **根因是等待方式, 不是时长**: 固定等待永远只是概率, 加多大都能被下一次挤压越过去
+  // (与本文件上方那条配额降级用例踩的是同一个坑: 「本文件的同步执行时间超过等待窗口, 用例必挂」)。
+  // 改为**有界轮询**: 条件一满足就立刻往下走 (绿路径反而更快), 上限 3000ms 兜住真失败。
+  // 这不是放宽断言 —— 期望值一个没动, 只是把测试自己的计时器修准 (同 R2b 偏离 17 的手法)。
+  // 本块内三处同类等待 (meta 清单 / 防抖落盘 / remove 落盘) 一并改, 它们全是**条件式**等待。
+  // 轮询条件刻意取「断言真正依赖的完整状态」而不是最小的那一个键:
+  //   meta 先落、分片后落, 只看 meta 就会把抖动从第 1 条断言挪到第 3 条 (以及后面的重组),
+  //   故条件写成「meta 在 且 它声明的每一片都在」——这正是后续 `#0` 断言与重新装载的前提。
+  const waitUntil = (pred, cb) => {
+    const deadline = Date.now() + 3000;
+    const tick = () => {
+      if (pred()) return cb();
+      if (Date.now() > deadline) return cb(); // 交给断言如实报红 (actual=undefined), 不吞失败
+      setTimeout(tick, 10);
+    };
+    tick();
+  };
+  const bigChunked = () => {
+    const s = mock.__snapshot();
+    if (!s['svi:unitBig.meta']) return false;
+    let n;
+    try { n = JSON.parse(s['svi:unitBig.meta']).chunks; } catch (e) { return false; }
+    for (let i = 0; i < n; i++) if (!s['svi:unitBig#' + i]) return false;
+    return true;
+  };
+  waitUntil(bigChunked, () => {
     const snap = mock.__snapshot();
     const metaKey = 'svi:unitBig.meta';
     assert.ok(snap[metaKey], 'chunked write emits meta manifest');
@@ -852,7 +877,7 @@ function makeTestStore(mock) {
         localStore.set('deb', 3);
         assert.ok(localStore.pending.has('deb'), 'multiple sets collapse to one pending key');
         localStore.flush();
-        setTimeout(() => {
+        waitUntil(() => 'svi:deb' in mock.__snapshot(), () => {
           assert.strictEqual(localStore.get('deb'), 3, 'debounced flush keeps latest value');
           const snap2 = mock.__snapshot();
           assert.strictEqual(JSON.parse(snap2['svi:deb']), 3, 'debounce collapses to single write');
@@ -867,14 +892,14 @@ function makeTestStore(mock) {
           // remove 落盘
           localStore.remove('unitA');
           localStore.flush();
-          setTimeout(() => {
+          waitUntil(() => !('svi:unitA' in mock.__snapshot()), () => {
             assert.ok(!('svi:unitA' in mock.__snapshot()), 'removed key disappears from backend');
             console.log('✓ v3.0 Store chrome.storage.sync mock tests passed (chunking / mirror / debounce / export-import / remove)');
-          }, 30);
-        }, 600);
+          });
+        });
       });
     }, 30);
-  }, 300);
+  });
 }
 
 // —— 8e-2. Store 回归: bootSync 后 chrome 后端必须仍可 init (插件版持久化曾因 ready 提前置位而失效) ——
@@ -5340,3 +5365,63 @@ setTimeout(() => {
 
 
 
+
+// ============================================================
+// v6.4 R3 单测: emoji 码位清零 (三处路径)
+// 契约来源: .trellis/tasks/09-25-v6-ui-rebuild/prd.md R6
+//
+// **码位白名单 (R6 要求"实现时明确写下", 故此处分档列明)**:
+//   清零档 —— 下列区间的**任何**字符都不许出现在三处路径里 (含注释):
+//     U+1F000–U+1FAFF  图形 emoji 各块 (含 1F300–1F5FF / 1F600–1F64F / 1F680–1F6FF 等)
+//     U+2600–U+26FF    杂项符号 (⚡ ⚠ ⏰ ⏻ …) —— 默认即 emoji 表现
+//     U+2700–U+27BF    Dingbats (✓ ✕ ✔ ➕ ➜ …)
+//     U+2B00–U+2BFF    杂项符号与箭头 (⭐ ⬛ …)
+//     U+1F1E6–U+1F1FF  区域指示符 (国旗)
+//     U+FE0F           变体选择符-16 (强制 emoji 表现)
+//     U+20E3           组合包围键帽 (数字键帽)
+//   保留档 —— **排版符号**, 不是图标, 允许出现在注释与文案里:
+//     U+2190–U+21FF    箭头 (→ ↔ ↩)
+//     U+2460–U+24FF    带圈字母数字 (① ② ③)
+//     U+2500–U+257F    制表线 (─ ──)
+//   为什么这样分: 清零档里的字形在任何平台都会渲染成**彩色图形**, 与"界面只用内联 SVG 图标"
+//   的纪律冲突; 保留档渲染为**单色文字字形**, 与标点同类, 且在三语言注释里长期作为排版符号使用。
+//   面板区间另有一条**更严**的断言 (R2d): 那里连保留档也不许出现。
+// ============================================================
+(function () {
+  const fs = require('fs');
+  const path = require('path');
+  const ROOT = __dirname;
+
+  const EMOJI = /[\u{1F000}-\u{1FAFF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{2B00}-\u{2BFF}\u{1F1E6}-\u{1F1FF}\u{FE0F}\u{20E3}]/u;
+
+  // 三处路径 (prd.md R6): 用户脚本真源 / 扩展生成物 / 扩展页源码
+  const targets = [
+    'universal-smart-invert.user.js',
+    'scripts/extension-src/options.js', 'scripts/extension-src/popup.js',
+    'scripts/extension-src/options.html', 'scripts/extension-src/popup.html',
+    'extension/content.js', 'extension/options.js', 'extension/popup.js',
+    'extension/ui-controls.js', 'extension/settings-schema.js',
+    'extension/options.html', 'extension/popup.html', 'extension/manifest.json',
+  ];
+
+  const bad = [];
+  for (const rel of targets) {
+    const abs = path.join(ROOT, rel);
+    if (!fs.existsSync(abs)) { bad.push(rel + ': 文件不存在'); continue; }
+    const lines = fs.readFileSync(abs, 'utf8').split('\n');
+    lines.forEach((line, i) => {
+      const m = EMOJI.exec(line);
+      if (m) bad.push(rel + ':' + (i + 1) + ' [' + m[0] + '] ' + line.trim().slice(0, 70));
+    });
+  }
+  assert.deepStrictEqual(bad, [],
+    'R3: 三处路径不得出现 emoji 字形 (改用 SviControls.icon 的内联 SVG), 实测 ' + JSON.stringify(bad, null, 1));
+
+  // 白名单本身也要有落点: 图标表是唯一图标实现点 (R2d 已断言 <svg> 只来自它), 这里补一条
+  // 「图标必须是 SVG 而不是字形」的正面证据 —— 防止有人把图标"修"回 emoji 字符。
+  const src = fs.readFileSync(path.join(ROOT, 'universal-smart-invert.user.js'), 'utf8');
+  assert.ok(/SviControls\.ICONS = Object\.freeze\(\{/.test(src), 'R3: 图标表必须仍然存在 (唯一图标实现点)');
+
+  console.log('✓ v6.4 R3 单测 passed: 三处路径 ' + targets.length + ' 个文件 emoji 码位为 0'
+    + ' (清零档 7 段 / 保留档 3 段已写明理由) + 图标表仍在场');
+})();
