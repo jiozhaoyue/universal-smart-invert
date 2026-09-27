@@ -212,6 +212,39 @@ function main() {
     manifest.icons[String(size)] = `icons/icon${size}.png`;
     manifest.action.default_icon[String(size)] = `icons/icon${size}.png`;
   }
+
+  // v6-5 R2: 扩展身份固定 —— manifest.key = scripts/extension-key.json 的公钥真源。
+  //   key 决定扩展 ID, 装上之后在任何机器上都可复现 (任何机器重新构建产物 → 同一个 ID)。
+  //   **私钥不入库** (crx-private-key.pem, 已 gitignore, 只在本机并离线备份); 公钥是公开数据,
+  //   入库才能让别的机器/CI 产出同一个 ID。
+  //   自洽性在此刻校验: 若本机有私钥, 它推导出的公钥必须与 key 文件一致 ——
+  //   否则签出来的 CRX 其 ID 会与清单声明不符, 浏览器拒绝安装, 而打包那一步是静默的。
+  let extId = null;
+  const keyJsonPath = path.join(__dirname, 'extension-key.json');
+  if (fs.existsSync(keyJsonPath)) {
+    let keyInfo;
+    try {
+      keyInfo = JSON.parse(fs.readFileSync(keyJsonPath, 'utf8'));
+    } catch (e) {
+      fail('scripts/extension-key.json 不是合法 JSON: ' + e.message);
+    }
+    if (!keyInfo || !keyInfo.key) fail('scripts/extension-key.json 缺少 key 字段');
+    const { extensionIdFromKeyB64, publicKeyB64FromPrivatePem } = require('./build-crx.js');
+    extId = extensionIdFromKeyB64(keyInfo.key);
+    if (keyInfo.extensionId && keyInfo.extensionId !== extId) {
+      fail('scripts/extension-key.json 自身不自洽: extensionId=' + keyInfo.extensionId
+        + ' 但 key 推导出 ' + extId + ' (手改过?)');
+    }
+    const pemPath = path.join(ROOT, 'crx-private-key.pem');
+    if (fs.existsSync(pemPath)) {
+      const pemPub = publicKeyB64FromPrivatePem(fs.readFileSync(pemPath, 'utf8'));
+      if (pemPub !== keyInfo.key) {
+        fail('本机签名私钥与 key 文件里的公钥不匹配 (私钥侧 ID ' + extensionIdFromKeyB64(pemPub)
+          + ' ≠ 清单侧 ID ' + extId + ') —— 换过密钥就必须重新生成 key 文件, 见 build-crx.js 的 _rotate 说明');
+      }
+    }
+    manifest.key = keyInfo.key;
+  }
   fs.writeFileSync(MANIFEST_OUT, JSON.stringify(manifest, null, 2) + '\n', 'utf8');
 
   // v4.5: popup / options sources live in scripts/extension-src/ and are copied —
@@ -332,6 +365,8 @@ function main() {
 
   console.log('[build-extension] userscript : ' + path.relative(ROOT, SRC));
   console.log('[build-extension] version    : ' + version);
+  console.log('[build-extension] ext id     : ' + (extId || '(无 scripts/extension-key.json —— 扩展 ID 将由浏览器随机分配)')
+    + (extId ? ' (由公钥真源推导, 任何机器上可复现)' : ''));
   console.log('[build-extension] name       : ' + manifest.name);
   console.log('[build-extension] description: ' + manifest.description + (manifest.description.length < meta.description.length ? ' ... [clipped to ' + MAX_DESCRIPTION + ' chars]' : ''));
   console.log('[build-extension] wrote      : ' + path.relative(ROOT, CONTENT_OUT) + ' (' + content.length + ' bytes, ' + content.split('\n').length + ' lines)');

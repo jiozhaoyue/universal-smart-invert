@@ -406,10 +406,16 @@ rules below are battle-tested conventions from v1.4.0 → v2.0.0; follow them fo
 
 ### 4. 异步写入链的测试等待时长要留余量
 
-`test.js` 有两处同类断言**稳定失败**（非抖动），都是 `chrome.storage.sync` 异步 mock 的
+> **⚠ 本节的结论已在 v6.5 被推翻一半 —— 请连同 [v6.5 §1](#1-绿不是通过是没跑testjs-的三道假绿闸门) 一起读。**
+> 下表「改为 300ms」当时确实是修复（症状消失），但**根因不是时长，是等待方式**：
+> 固定等待永远只是概率，加多大都能被下一次挤压越过去。2026-09-27 那条
+> `chunked key has meta manifest` 又以 300ms 复现了。正确做法是**有界轮询**（`pollUntil`），
+> 不是把数字调大。下表保留为历史记录。
+
+`test.js` 有两处同类断言曾**稳定失败**（非抖动），都是 `chrome.storage.sync` 异步 mock 的
 分片写入需要十余次 1ms 往返，而等待时长是临界值：
 
-| 断言 | 原等待 | 结果 | 改为 |
+| 断言 | 原等待 | 当时结果 | 当时改为 |
 |---|---|---|---|
 | `chunked write emits meta manifest` | 30ms | 稳定失败 | 300ms |
 | `chunked key has meta manifest`（分片删除回归） | 60ms | 稳定失败 | 300ms |
@@ -421,6 +427,9 @@ rules below are battle-tested conventions from v1.4.0 → v2.0.0; follow them fo
 > （是产品缺陷还是测试问题），再决定改产品还是改测试 —— 不要凭断言失败就动产品代码。
 > 另：定位可疑等待时，用括号配对从 `setTimeout(` 扫到匹配的 `}` 读其真实延迟值，
 > 比按行号猜更可靠（同一个测试块里往往有多个嵌套 `setTimeout`）。
+> **续（v6.5）**：定性之后还要问一句「这个等待**方式**对不对」——固定睡眠的正确性依赖
+> 「本文件同步执行时间 + 全局负载不越过该值」，这是个**不可能被调准的数字**。判据是
+> **条件式**的（等某个属性/键到位），就该写成有界轮询。
 
 ---
 
@@ -497,9 +506,40 @@ stage 'rule'     : learned → seedProtect → faviconSkip → seedForceInvert
 
 ### 7. 测试遮罩过渡的坑
 
-遮罩 `::after` 有 `transition: opacity 140ms`。**施加遮罩后立刻 `getComputedStyle` 读到的是过渡中间值**，
-不是目标值（实测 `dim` 预设读到 `1` 而非 `0.75`）。bench 断言必须等过渡结束
-（`evalInPageAsync` + `await new Promise(r => setTimeout(r, 400))`）。
+> **⚠ 本条原先把根因写错了，v6.5 已更正（2026-09-27 实测复现 + 定位）。**
+
+遮罩 `::after` 确有 `transition: opacity 140ms`，**施加遮罩后立刻 `getComputedStyle` 读到的是过渡
+中间值**，读不到目标值 —— 这一半是对的。
+
+但当时观察到的「`dim` 预设读到 `1` 而非 `0.75`」**不是过渡中间值**：`1` 是**上一档 `solid` 的值**。
+真实根因是 **`data-svi-masked` 当时还停在 `solid`** —— 属性写入走**写点仲裁**，并不同步落地。
+原结论「等 400ms 固定睡眠即可」因此在负载下会偶发红（2026-09-27 复现一次，复跑即绿）。
+
+**正确的等待分两段，且顺序不能反**：
+
+```js
+// ① 先有界轮询"属性到位" —— 这是**必须为真**的条件, 不能靠赌
+const waitAttr = async (want) => {
+  const deadline = Date.now() + 2000;
+  while (Date.now() < deadline) {
+    if (el.getAttribute('data-svi-masked') === want) return true;
+    await new Promise((r) => setTimeout(r, 20));
+  }
+  return false;
+};
+svi.ACTIONS.mask.apply(el, { style: style }, 'manual');
+out[style] = { attrInTime: await waitAttr(style) };
+// ② 属性到位后, 再等那个**有界延时** (140ms 过渡) 结束
+await new Promise((r) => setTimeout(r, 400));
+const cs = getComputedStyle(el, '::after');
+```
+
+**把「必须为真的条件」与「有界延时」分开处理**是这条的关键。收益不只是不抖：
+诊断力也变了 —— `apply` 真没写入时报的是「attr 2s 内没变成 `dim`」（**产品缺陷**），
+而不是一个看起来像「opacity 值不对」的假象（**测试计时**）。
+
+配套要求：三档预设**各自**断言 `data-svi-masked` 等于该档 id（原先只断言了 `solid`），
+否则「读到上一档的值」这类错位会被漏掉。
 
 ### 8. 新增动作的清单
 
@@ -733,3 +773,96 @@ MutationObserver 触发）。这样"首屏不被打标"是**结构保证**而不
 **新增全局快捷键/全局 Esc 行为时必须插在既有链的合适位置，不能无条件拦截。**
 
 
+
+---
+
+## v6.5 Additions (测试脚手架契约：绿不是通过，是没跑)
+
+> 任务 v6-5 收尾期。**任何改动 `test.js` 异步用例块、或新写「等待异步落地」的断言之前，先读本节。**
+> 本节管的是**脚手架的诚实性**：断言必须真的被执行、失败必须真的变红。
+
+### 1. 「绿不是通过，是没跑」：`test.js` 的三道假绿闸门
+
+`test.js` 的收尾方式（末尾 `setTimeout(…, ASYNC_BUDGET_MS)` → `process.exit(0)`）决定了
+**任何异步用例都可能被静默丢下**。三道闸门必须同时在场，缺一条就会产生假绿。
+
+| # | 闸门 | 契约 | 缺失时的后果（都实测过） |
+| :--- | :--- | :--- | :--- |
+| ① | **预算不变量** | `ASYNC_POLL_MS < ASYNC_BUDGET_MS`，收尾处自检 | 轮询 deadline 比预算长 → 超时分支**永不执行**，是死代码 |
+| ② | **轮询台账** | 每个 `pollUntil` 开/关各记一次；收尾时 `pollFinished !== pollStarted` → `exit(1)` 点名 | 「没跑完」被读成「通过」 |
+| ③ | **同类不等长** | 新加的有界轮询**必须**走 `pollUntil`，不得自带 `deadline = Date.now() + N` | 自带 deadline 会绕过 ① 的自检（实测原有三处：2000 / 3000 / 3000ms vs 当时 1500ms 预算 —— **全是死代码**） |
+
+**实测证据（2026-09-27）**：闸门 ① 之前，`chunked key has meta manifest` 与
+`quota failure degrades backend to chrome-local` 两条断言分别以 **13% ~ 50%** 的概率
+**整块不执行**，而运行照样打印 `✓ All … passed successfully!`、退出码 0。
+补上闸门后，同一份代码立刻显形为**红的** —— 这才是它本来的样子。
+
+### 2. 固定等待 → 有界轮询：不是放宽断言
+
+判据（问一句：**我等的这件事是不是"某个条件成立"？**）
+
+- 是 → 用 `pollUntil(pred, cb)`（条件成立立刻往下走，绿路径反而更快）
+- 否（真的是有界延时，例如 140ms CSS 过渡）→ 固定睡眠可以留，但**必须放在条件到位之后**
+
+`pollUntil` 的契约：
+
+- **超时后走同一组断言**，绝不吞失败 —— 真实缺陷（期望状态始终不出现）照旧变红；
+- 期望值一个都不许动。改的是测试自己的计时器，不是判据。
+
+### 3. 测试桩的存活期不能按固定时长算
+
+**症状**：`quota failure degrades backend to chrome-local` 偶发红。
+**根因**：用例把桩 `global.chrome` 的清理写成
+`finally { setTimeout(() => delete global.chrome, 300) }`。桩是**配额错误被识别的前提** ——
+`_makeChromeApi.lastError()` 读的就是 `chrome.runtime.lastError`，`_degradeToLocal` 还要求
+`chrome.storage.local` 在场。而**分片写链是十几次串行的 1ms 模拟往返**，在定时器洪峰下
+单次往返实测要几十毫秒 → 它常常跑不完这 300ms：桩先被删 → `lastError()` 读不到配额错误
+→ 判定「写成功」→ **不降级**。
+**修法**：桩的存活期 = **本用例的执行期**，在轮询回调里摘
+（`try { verify(); } finally { dropChromeStub(); }`），同步阶段抛错时也要摘（外层 `catch`）。
+**不要猜时长。**
+
+### 4. 新增 / 修改异步用例块的清单
+
+1. 等待写成 `pollUntil`；自带 deadline 的写法一律不许
+2. 轮询条件取「**断言真正依赖的完整状态**」，不取最小的那个键。
+   例：等分片**删除**时不能只等逻辑键 `svi:K` —— 实测它**先**被摘掉，`meta` / `#i` 后摘；
+   条件要写成「三个键全没了」。否则轮询会提前返回，把「未摘干净」读成缺陷 —— **误报**
+   （本轮真踩到过，被新加的断言当场咬住）
+3. 用到的全局桩，存活期**绑在用例完成**上，不能是固定时长
+4. 做完负向对照（见 §5）—— 改完必须证明它**还会红**
+
+### 5. 改测试脚手架时的负向对照（必须做）
+
+| 对照 | 注入的「错」 | 期望 |
+| :--- | :--- | :--- |
+| 断言敏感度 | 产品侧停用被守护的行为（如不摘 `meta` / 不降级） | 红，且报的是**被守护的那条**断言 |
+| 轮询超时可达 | 把 `pollUntil` 的下一跳改成一个远超预算的延时 | `exit(1)` + 台账点名「N 个有界轮询没有走完」 |
+| 预算不变量 | `ASYNC_POLL_MS >= ASYNC_BUDGET_MS` | `exit(1)` + 「脚手架自身不自洽」 |
+
+**为什么必须做**：本轮四个对照里，有一个（`chunked key has meta manifest` 的元凶）
+在修复前**跑出来是绿的** —— 没有对照，这个假绿会一直躺在门禁里当"通过"。
+
+### 6. Wrong vs Correct
+
+#### Wrong
+
+```js
+// ① 固定睡眠赌"已经写完了"; ② deadline 长于收尾预算(死代码); ③ 桩按固定时长清理
+st.set('chunked', v); st.flush();
+setTimeout(() => {
+  assert.ok(snap['svi:chunked.meta'], 'chunked key has meta manifest');
+}, 300);
+const deadline = Date.now() + 3000;                 // > 预算 1500ms → 永不生效
+setTimeout(() => { delete global.chrome; }, 300);   // 写链还没跑完, 桩就没了
+```
+
+#### Correct
+
+```js
+pollUntil(                                          // 条件成立即走; 超时走同一组断言
+  () => !!mock.__snapshot()['svi:chunked.meta'],
+  () => { try { verify(); } finally { dropChromeStub(); } }   // 桩跟着用例走完
+);
+// 且 ASYNC_POLL_MS(2000) < ASYNC_BUDGET_MS(3000); 收尾处自检 + 台账核对
+```

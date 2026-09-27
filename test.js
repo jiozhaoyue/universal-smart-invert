@@ -808,6 +808,37 @@ function makeTestStore(mock) {
   st.detectBackend = () => 'chrome-sync'; // 锁定后端 (Node 无全局 chrome)
   return st;
 }
+
+// —— 异步等待口径 (v6.5 收口) ——
+//   本文件末尾靠「等满 ASYNC_BUDGET_MS 后 process.exit(0)」收尾 —— 因为启动桩里有常驻定时器
+//   (统计落盘 interval / 引擎初始化循环) 会阻止进程自然退出。
+//   这条收尾方式有个**静默陷阱**: 任何有界轮询只要把 deadline 定得比收尾预算长, 它的
+//   「超时 → 走同一组断言报红」分支就**永远跑不到** —— 进程先退了, 断言根本没执行。
+//   实测过: 本文件原有三处轮询 (Store 配额降级 2000ms / 分片写 3000ms / 分片删 3000ms) 都
+//   长于当时 1500ms 的预算, 于是真实缺陷会被读成"绿", 实为"没跑"。
+//   两条纪律:
+//     1. `ASYNC_POLL_MS` **必须** < `ASYNC_BUDGET_MS` (收尾处有断言把这条关系钉住);
+//     2. 收尾时 `pollFinished !== pollStarted` → 直接 exit(1) 并点名, 把"没跑"变成响亮的失败。
+//   取值依据 (实测): 这些轮询在空载下落定耗时 10 ~ 210ms; 但在**并发重度负载**下
+//   (同机跑 headless Chrome bench 时实测) 会越过 1000ms —— 故 deadline 取 2000ms,
+//   收尾预算 3000ms 留足"超时后仍要把断言跑完"的余量。宁可慢 1.5s, 不要假绿。
+const ASYNC_BUDGET_MS = 3000;  // 与文件末尾那个收尾 setTimeout 的时长必须一致
+const ASYNC_POLL_MS = 2000;    // 有界轮询 deadline; 与预算之间留 1000ms 余量
+let pollStarted = 0;
+let pollFinished = 0;
+const pollUntil = (pred, cb) => {
+  pollStarted++;
+  const deadline = Date.now() + ASYNC_POLL_MS;
+  const tick = () => {
+    if (pred()) { pollFinished++; cb(); return; }
+    // 超时后走**同一组断言** —— 真实缺陷 (期望状态始终没出现) 照样会红, 不吞失败。
+    // 先自增计数再回调: 若回调里的断言抛错, 也算"已跑过", 不会与收尾检查混淆。
+    if (Date.now() > deadline) { pollFinished++; cb(); return; }
+    setTimeout(tick, 10);
+  };
+  tick();
+};
+
 {
   const mock = makeChromeSyncMock();
   const localStore = makeTestStore(mock);
@@ -830,21 +861,15 @@ function makeTestStore(mock) {
   // ("chunked write emits meta manifest" actual=undefined), 复跑 5/5 绿。
   // **根因是等待方式, 不是时长**: 固定等待永远只是概率, 加多大都能被下一次挤压越过去
   // (与本文件上方那条配额降级用例踩的是同一个坑: 「本文件的同步执行时间超过等待窗口, 用例必挂」)。
-  // 改为**有界轮询**: 条件一满足就立刻往下走 (绿路径反而更快), 上限 3000ms 兜住真失败。
+  // 改为**有界轮询**: 条件一满足就立刻往下走 (绿路径反而更快), 超时兜住真失败。
   // 这不是放宽断言 —— 期望值一个没动, 只是把测试自己的计时器修准 (同 R2b 偏离 17 的手法)。
   // 本块内三处同类等待 (meta 清单 / 防抖落盘 / remove 落盘) 一并改, 它们全是**条件式**等待。
   // 轮询条件刻意取「断言真正依赖的完整状态」而不是最小的那一个键:
   //   meta 先落、分片后落, 只看 meta 就会把抖动从第 1 条断言挪到第 3 条 (以及后面的重组),
   //   故条件写成「meta 在 且 它声明的每一片都在」——这正是后续 `#0` 断言与重新装载的前提。
-  const waitUntil = (pred, cb) => {
-    const deadline = Date.now() + 3000;
-    const tick = () => {
-      if (pred()) return cb();
-      if (Date.now() > deadline) return cb(); // 交给断言如实报红 (actual=undefined), 不吞失败
-      setTimeout(tick, 10);
-    };
-    tick();
-  };
+  //   v6.5 收口: 原先这里自带一个 deadline=3000ms 的局部 waitUntil —— 比文件末尾的收尾预算
+  //   (当时 1500ms) 还长, 于是"超时 → 交给断言报红"这条路**根本不可达**, 真实缺陷会被静默读成绿。
+  //   现改用文件级 `pollUntil` (deadline=ASYNC_POLL_MS, 且收尾处会核对轮询是否走完), 语义不变。
   const bigChunked = () => {
     const s = mock.__snapshot();
     if (!s['svi:unitBig.meta']) return false;
@@ -853,7 +878,7 @@ function makeTestStore(mock) {
     for (let i = 0; i < n; i++) if (!s['svi:unitBig#' + i]) return false;
     return true;
   };
-  waitUntil(bigChunked, () => {
+  pollUntil(bigChunked, () => {
     const snap = mock.__snapshot();
     const metaKey = 'svi:unitBig.meta';
     assert.ok(snap[metaKey], 'chunked write emits meta manifest');
@@ -877,7 +902,7 @@ function makeTestStore(mock) {
         localStore.set('deb', 3);
         assert.ok(localStore.pending.has('deb'), 'multiple sets collapse to one pending key');
         localStore.flush();
-        waitUntil(() => 'svi:deb' in mock.__snapshot(), () => {
+        pollUntil(() => 'svi:deb' in mock.__snapshot(), () => {
           assert.strictEqual(localStore.get('deb'), 3, 'debounced flush keeps latest value');
           const snap2 = mock.__snapshot();
           assert.strictEqual(JSON.parse(snap2['svi:deb']), 3, 'debounce collapses to single write');
@@ -892,7 +917,7 @@ function makeTestStore(mock) {
           // remove 落盘
           localStore.remove('unitA');
           localStore.flush();
-          waitUntil(() => !('svi:unitA' in mock.__snapshot()), () => {
+          pollUntil(() => !('svi:unitA' in mock.__snapshot()), () => {
             assert.ok(!('svi:unitA' in mock.__snapshot()), 'removed key disappears from backend');
             console.log('✓ v3.0 Store chrome.storage.sync mock tests passed (chunking / mirror / debounce / export-import / remove)');
           });
@@ -980,6 +1005,11 @@ function makeTestStore(mock) {
     },
   });
   global.chrome = { runtime: runtimeStub, storage: { sync: mkApi(syncArea, true), local: mkApi(localArea, false) } };
+  // 桩的存活期 = 本用例的执行期 (为什么不能按时长算, 见下方 pollUntil 前的长注释);
+  // 定义在 try 之外, 好让"同步阶段就抛错"这条路也能把桩摘掉, 不留给后面的用例。
+  const dropChromeStub = () => {
+    try { delete global.chrome; } catch (e) { global.chrome = undefined; }
+  };
   try {
     const st = makeTestStore(makeChromeSyncMock());
     st.backend = 'chrome-sync';
@@ -1001,18 +1031,29 @@ function makeTestStore(mock) {
       assert.ok(saved && JSON.parse(saved).blob.length === 9000, 'failed value rewritten into chrome.storage.local');
       console.log('✓ v3.0 Store quota-degrade regression passed (sync → local fallback)');
     };
-    const deadline = Date.now() + 2000;
-    const poll = () => {
-      const saved = localArea.get('svi:big');
-      const settled = st.backend === 'chrome-local' && !!saved && JSON.parse(saved).blob.length === 9000;
-      if (settled) { verify(); return; }
-      if (Date.now() > deadline) { verify(); return; } // 超时后走同一组断言 → 真实缺陷仍然会红
-      setTimeout(poll, 10);
-    };
-    setTimeout(poll, 10);
-  } finally {
-    // 清理全局桩 (避免影响其它用例的 chrome 探测)
-    setTimeout(() => { try { delete global.chrome; } catch (e) { global.chrome = undefined; } }, 300);
+    // v6.5 收口: deadline 原为 2000ms —— 同样比当时的收尾预算 (1500ms) 长, 超时分支不可达。
+    // 统一改用文件级 pollUntil (deadline=ASYNC_POLL_MS; 且收尾处核对轮询是否真的走完)。
+    //
+    // v6.5 二次修复 —— **全局桩的存活期不能按固定时长算** (这是本条用例真正偶发红的根因):
+    //   桩 (global.chrome) 是配额错误被识别的前提: `_makeChromeApi.lastError()` 读的就是
+    //   `chrome.runtime.lastError`; `_degradeToLocal` 也要求 `chrome.storage.local` 在场。
+    //   原写法用 `finally { setTimeout(() => delete global.chrome, 300) }` —— 固定 300ms。
+    //   但**分片写链是十几次串行的 1ms 模拟往返**, 在定时器洪峰下单次往返实测要几十毫秒,
+    //   于是它常常跑不完这 300ms: 桩先被删 → `lastError()` 读不到配额错误 → 判定"写成功" →
+    //   **不降级**。实测 (2026-09-27) 该窗口以 13%~50% 的概率输掉。
+    //   后果在修复前是**静默**的: 轮询 deadline(2000ms) 比收尾预算(1500ms) 长, 超时分支不可达,
+    //   于是这些运行里 `verify()` 根本没执行 —— 报绿, 实为"没跑"。
+    //   修法: 桩的存活期由「固定时长」改为「跟着本用例走完」—— 在轮询回调里摘, 不再猜时间。
+    pollUntil(
+      () => {
+        const saved = localArea.get('svi:big');
+        return st.backend === 'chrome-local' && !!saved && JSON.parse(saved).blob.length === 9000;
+      },
+      () => { try { verify(); } finally { dropChromeStub(); } }
+    );
+  } catch (e) {
+    dropChromeStub();
+    throw e;
   }
 }
 
@@ -1020,34 +1061,54 @@ function makeTestStore(mock) {
 {
   const mock = makeChromeSyncMock();
   const st = makeTestStore(mock);
+  //   等待口径与上方 8e-3 同款 (那条的注释里已经写明「固定延时等法在这里踩过一次坑」):
+  //   分片写入是**多次 1ms 异步往返** (20000 字节 → 3 片 + 1 条 meta, 实测 15 次往返),
+  //   原先用 300ms / 60ms 固定睡眠等它, 等于拿概率赌「已经写完」。
+  //   2026-09-27 门禁复跑实测偶发红过一次 —— `chunked key has meta manifest` (actual undefined),
+  //   随后单跑 5 次全绿 → 判定为**测试计时**而非产品缺陷 (与遮罩那条同根因: 固定等待 vs 异步落地)。
+  //   改为**有界轮询到落定**, 超时后走**同一组断言**: 若 meta 真的没写出来, 仍然会红;
+  //   只是不再因机器负载假红。断言字句与判据均未放宽。轮询用文件级 `pollUntil`
+  //   (deadline=ASYNC_POLL_MS < 收尾预算, 故超时分支真的可达, 并由收尾处核对)。
   st.set('chunked', { blob: 'z'.repeat(20000) });
   st.flush();
-  setTimeout(() => {
-    let snap = mock.__snapshot();
-    assert.ok(snap['svi:chunked.meta'], 'chunked key has meta manifest');
-    st.remove('chunked');
-    st.flush();
-    setTimeout(() => {
-      snap = mock.__snapshot();
-      assert.ok(!('svi:chunked' in snap), 'logical key removed');
-      assert.ok(!('svi:chunked.meta' in snap), 'chunk manifest removed with key (regression: stale chunks resurrect deleted values)');
-      assert.ok(!('svi:chunked#0' in snap), 'chunk #0 removed with key');
-      // chunkRaw: 多字节内容每片 UTF-8 字节数不超预算
-      const cjk = { blob: '中'.repeat(5000) }; // 每字符 3 字节
-      const parts = svi.Store.chunkRaw.call({ CHUNK_SIZE: 7000 }, JSON.stringify(cjk));
-      assert.ok(parts.length >= 3, 'multibyte value splits into multiple chunks');
-      const enc = (s) => {
-        let n = 0;
-        for (let i = 0; i < s.length; i++) {
-          const c = s.charCodeAt(i);
-          n += c >= 0xD800 && c <= 0xDBFF && i + 1 < s.length ? 4 : (c < 0x80 ? 1 : (c < 0x800 ? 2 : 3));
+  pollUntil(
+    () => !!mock.__snapshot()['svi:chunked.meta'],
+    () => {
+      let snap = mock.__snapshot();
+      assert.ok(snap['svi:chunked.meta'], 'chunked key has meta manifest');
+      st.remove('chunked');
+      st.flush();
+      pollUntil(
+        // 落定条件 = 三个键**全部**清空。不能只等逻辑键 `svi:chunked` —— 实测它是先被摘掉的那个,
+        // 此时 meta / #0 还在, 轮询会提前返回并把"未摘干净"读成缺陷 (新断言当场咬住过一次, 属误报)。
+        // 反过来: 若 meta 真的不被摘 (本用例守护的回归), 轮询必然超时 → 断言照旧变红。
+        () => {
+          const s = mock.__snapshot();
+          return !('svi:chunked' in s) && !('svi:chunked.meta' in s) && !('svi:chunked#0' in s);
+        },
+        () => {
+          snap = mock.__snapshot();
+          assert.ok(!('svi:chunked' in snap), 'logical key removed');
+          assert.ok(!('svi:chunked.meta' in snap), 'chunk manifest removed with key (regression: stale chunks resurrect deleted values)');
+          assert.ok(!('svi:chunked#0' in snap), 'chunk #0 removed with key');
+          // chunkRaw: 多字节内容每片 UTF-8 字节数不超预算
+          const cjk = { blob: '中'.repeat(5000) }; // 每字符 3 字节
+          const parts = svi.Store.chunkRaw.call({ CHUNK_SIZE: 7000 }, JSON.stringify(cjk));
+          assert.ok(parts.length >= 3, 'multibyte value splits into multiple chunks');
+          const enc = (s) => {
+            let n = 0;
+            for (let i = 0; i < s.length; i++) {
+              const c = s.charCodeAt(i);
+              n += c >= 0xD800 && c <= 0xDBFF && i + 1 < s.length ? 4 : (c < 0x80 ? 1 : (c < 0x800 ? 2 : 3));
+            }
+            return n;
+          };
+          for (const p of parts) assert.ok(enc(p) <= 7000, 'each chunk within UTF-8 byte budget');
+          console.log('✓ v3.0 Store chunk-removal + byte-budget regression passed');
         }
-        return n;
-      };
-      for (const p of parts) assert.ok(enc(p) <= 7000, 'each chunk within UTF-8 byte budget');
-      console.log('✓ v3.0 Store chunk-removal + byte-budget regression passed');
-    }, 60);
-  }, 300);
+      );
+    }
+  );
 }
 
 // —— 8e-5. v6.4 R2e: 跨界面同步 —— 版本旁路键 + 卸载回写仲裁 ——
@@ -1699,13 +1760,31 @@ console.log('✓ v3.0 core unit tests passed: transformPixel / mergeSegments / l
 // 显式退出: 脚本启动桩中的常驻定时器 (统计落盘 interval、3s 后的引擎初始化循环) 会阻止进程自然退出
 // v3.0: 延长至 1500ms —— 等待异步 Store (chrome.storage mock) 单测链完成
 // v4.6: 本地优先判定单测 (localEvidence / 档 B / pending 唤醒 / R5 收敛) 同时限内完成
+// v6.5: 延长至 3000ms, 并把时长上提为 `ASYNC_BUDGET_MS` —— 好让有界轮询的 deadline
+//   (ASYNC_POLL_MS=2000ms) 真的短于它。原先 1500ms 让三处轮询的超时分支成了死代码。
 require('./test-local-first.js');
 
 
 setTimeout(() => {
+  // 收尾两道自检 —— 都为了堵住「绿不是通过, 是没跑」:
+  //   ① 轮询 deadline 必须真的短于本收尾预算, 否则它的超时分支是死代码;
+  //   ② 已开出的有界轮询必须全部走完。若还有没走完的, 说明断言根本没执行 —— 响亮地失败,
+  //      而不是让进程静默退出报绿 (v6.5 实测到过这个状态: 三处 deadline 2000~3000ms 的轮询
+  //      永远等不到超时, 真实缺陷会被读成通过)。
+  if (ASYNC_POLL_MS >= ASYNC_BUDGET_MS) {
+    console.error('✗ 测试脚手架自身不自洽: ASYNC_POLL_MS(' + ASYNC_POLL_MS
+      + 'ms) 必须小于 ASYNC_BUDGET_MS(' + ASYNC_BUDGET_MS + 'ms), 否则轮询的超时分支不可达');
+    process.exit(1);
+  }
+  if (pollFinished !== pollStarted) {
+    console.error('✗ 有 ' + (pollStarted - pollFinished) + ' 个有界轮询在 ' + ASYNC_BUDGET_MS
+      + 'ms 收尾预算内没有走完 (共开出 ' + pollStarted + ' 个) —— 它们的超时分支与后续断言从未执行,');
+    console.error('  这不是通过, 而是没跑。请检查是不是某处等待超过了收尾预算。');
+    process.exit(1);
+  }
   console.log('✓ All unit, benchmark, multi-light-color, and v2.0 site-engine tests passed successfully!');
   process.exit(0);
-}, 1500);
+}, ASYNC_BUDGET_MS);
 
 // —— v4.6 单测: 暗色遮罩上下文 maskedDarkContext (任务 v4.6-4) ——
 // 以局部 DOM 桩 (计算样式 + rect + 祖先链) 单测真实脚本导出的纯函数;
@@ -5340,17 +5419,75 @@ setTimeout(() => {
     }
     // 扫描仓库根目录下的文本类文件, 确认没有 PEM 内容 (私钥绝不入库)
     const roots = ['AGENTS.md', 'PUBLISHING.md', 'README.md', 'README_EN.md',
-      'universal-smart-invert.user.js', 'test.js', 'test-browser.js', 'scripts/build-crx.js'];
+      'universal-smart-invert.user.js', 'test.js', 'test-browser.js', 'scripts/build-crx.js',
+      'scripts/extension-key.json'];
     const pemRe = /-----BEGIN [A-Z ]*PRIVATE KEY-----/;
     for (const f of roots) {
       const text = fs.readFileSync(path.join(__dirname, f), 'utf8');
       assert.strictEqual(pemRe.test(text), false, 'R8: ' + f + ' 里不得出现 PEM 私钥');
     }
-    assert.strictEqual(fs.existsSync(path.join(__dirname, 'crx-private-key.pem')), false,
-      'R8: 仓库根目录不得存在签名私钥 (它应只存在于本地并离线备份)');
+    // R8 的本意是「私钥绝不**入库**」, 不是「私钥绝不存在于本机」——
+    //   私钥按设计就住在本机并离线备份 (v6-5 R2 起签名发布要用它), 所以不能断言文件不存在。
+    //   真正要守的是: ① git 不跟踪它; ② 它不出现在任何**入库产物**里。
+    //   (原断言写的是 `existsSync(pem) === false`, 与「生成密钥」这条 R2 直接打架;
+    //    改成本条后两条要求同时成立, 且比原来更严 —— 原来私钥只要挪个位置就能绕过。)
+    const { spawnSync } = require('child_process');
+    const pemPath = path.join(__dirname, 'crx-private-key.pem');
+    if (fs.existsSync(pemPath)) {
+      const tracked = spawnSync('git', ['ls-files', '--error-unmatch', 'crx-private-key.pem'],
+        { cwd: __dirname, encoding: 'utf8' });
+      assert.notStrictEqual(tracked.status, 0,
+        'R8: 本机签名私钥存在, 但 git **不得跟踪**它 (git ls-files 报它已入库 → 立刻 git rm --cached)');
+      // 私钥内容不得出现在扩展产物里 (产物是入库的)
+      const pemBody = fs.readFileSync(pemPath, 'utf8')
+        .replace(/-----[A-Z ]+-----/g, '').replace(/\s+/g, '').slice(0, 64);
+      for (const f of fs.readdirSync(path.join(__dirname, 'extension'))) {
+        const p = path.join(__dirname, 'extension', f);
+        if (!fs.statSync(p).isFile()) continue;
+        const text = fs.readFileSync(p, 'utf8');
+        assert.strictEqual(text.includes(pemBody), false,
+          'R8: extension/' + f + ' 里不得出现私钥内容 (产物是入库的)');
+      }
+      console.log('   [R8] 本机私钥在场且未被 git 跟踪, 且未泄漏进 extension/ 产物 ✓');
+    } else {
+      console.log('   [R8] 本机无私钥 (仅校验清单侧自洽; 签名发布需 scripts/build-crx.js --generate-key)');
+    }
   }
 
-  console.log('✓ v6.5 单测 passed: CRX3 结构校验(正例 + 魔数/版本/头长/截断/非ZIP 五个反例) / 密钥纪律(gitignore 三重覆盖 + 无 PEM 入库 + 无私钥文件)');
+  // ---- 4. 扩展 ID 可复现 (R2): 公钥真源 → ID 的纯函数 + 清单自洽 + 固定值回归 ----
+  //   扩展 ID = sha256(公钥 SPKI DER) 前 16 字节, 每半字节映射 a..p。
+  //   它是**纯函数** —— 与是否装有 Chrome、是否有私钥、在哪台机器上都无关, 故能在这里断言。
+  {
+    const { extensionIdFromKeyB64, readKeyFile, KEY_JSON_PATH } = require('./scripts/build-crx.js');
+    const keyFile = readKeyFile();
+    assert.ok(keyFile, 'R2: scripts/extension-key.json 必须在场 (公钥真源; 没有它扩展 ID 就是随机的)');
+    assert.ok(keyFile.key && keyFile.key.length > 100, 'R2: key 必须是完整的 base64 SPKI 公钥');
+
+    // (a) 固定值回归: ID 变了就是**故意换密钥**这种大事, 不该悄悄发生
+    assert.strictEqual(keyFile.extensionId, 'laldjilafbegbdkjoaamjpcljjmanohe',
+      'R2: 扩展 ID 变了 —— 若非有意轮换密钥, 说明 key 文件被改动过。'
+      + '轮换是破坏性动作 (已装用户无法升级), 须同时改此处的期望值并走 PUBLISHING.md 的轮换流程');
+    // (b) 文件自洽: 声明的 extensionId 必须等于 key 推导值 (防手改)
+    assert.strictEqual(extensionIdFromKeyB64(keyFile.key), keyFile.extensionId,
+      'R2: extension-key.json 自身不自洽 (extensionId ≠ key 推导值)');
+    // (c) 产物自洽: 构建出来的 manifest.key 必须就是它 (这条把「构建真的用上了公钥」钉死)
+    const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, 'extension', 'manifest.json'), 'utf8'));
+    assert.strictEqual(manifest.key, keyFile.key,
+      'R2: extension/manifest.json 的 key 必须等于公钥真源 —— 不等就是构建没接上, 或产物是旧的 (重建)');
+    assert.strictEqual(extensionIdFromKeyB64(manifest.key), keyFile.extensionId,
+      'R2: 构建产物推导出的扩展 ID 必须等于真源声明值');
+    // (d) 私钥在场时: 它推导出的公钥必须与 key 文件一致 (换密钥后忘了重新生成 key 文件 → 在这里拦下)
+    if (fs.existsSync(path.join(__dirname, 'crx-private-key.pem'))) {
+      const { publicKeyB64FromPrivatePem } = require('./scripts/build-crx.js');
+      const pemPub = publicKeyB64FromPrivatePem(fs.readFileSync(path.join(__dirname, 'crx-private-key.pem'), 'utf8'));
+      assert.strictEqual(extensionIdFromKeyB64(pemPub), keyFile.extensionId,
+        'R2: 本机签名私钥与公钥真源不匹配 —— 签出的 CRX 其 ID 会与清单声明不符, 浏览器会拒绝安装');
+    }
+    console.log('   [R2] 扩展 ID 可复现: ' + keyFile.extensionId
+      + ' (公钥真源 → ID 纯函数 / 文件自洽 / 产物自洽' + (fs.existsSync(path.join(__dirname, 'crx-private-key.pem')) ? ' / 私钥自洽' : '') + ') ✓');
+  }
+
+  console.log('✓ v6.5 单测 passed: CRX3 结构校验(正例 + 魔数/版本/头长/截断/非ZIP 五个反例) / 密钥纪律(gitignore 三重覆盖 + 无 PEM 入库 + 私钥未被 git 跟踪且未泄漏进产物) / 扩展 ID 可复现(纯函数 + 固定值回归 + 清单与产物自洽)');
 })();
 
 

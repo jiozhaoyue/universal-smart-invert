@@ -138,13 +138,22 @@ node scripts/watch-extension.js --once    # 只重建一次后退出（供门禁
 
 ### 4. 一次性配置: CRX 签名私钥 (可选)
 
+> **v6.5 R2 起：不要再用 `openssl genrsa` 现生成一把** —— 扩展 ID 由公钥决定，而公钥
+> `scripts/extension-key.json` 已随仓库固定下来了。另生成一把新私钥会让 CI 产出的 CRX
+> 其 ID 与仓库声明的不同（`scripts/build-crx.js` 现在会**前置拦截**这种不匹配）。
+> 正确做法是用本机那把你已经生成并备份过的私钥：
+
 ```bash
-openssl genrsa -out crx-private-key.pem 2048
+node scripts/build-crx.js --generate-key    # 仅当本机还没有 crx-private-key.pem 时, 一次性执行
+node scripts/build-crx.js --print-id        # 确认 ID == laldjilafbegbdkjoaamjpcljjmanohe
 ```
 
-1. 将 PEM 文件 **全文**（含 `BEGIN/END` 行）粘贴到仓库 `Settings → Secrets and variables → Actions → New repository secret`，命名 `CRX_PRIVATE_KEY`；
-2. 该私钥决定 CRX3 签名与稳定的扩展 ID，**务必离线备份**，绝不提交进仓库；
-3. CI 内步骤会把它写入 runner 临时 PEM 文件，用 `npx crx3 -p <临时PEM> -o dist/extension.crx extension/` 签名打包后立即删除。
+1. 将 `crx-private-key.pem` **全文**（含 `BEGIN/END` 行）粘贴到仓库
+   `Settings → Secrets and variables → Actions → New repository secret`，命名 `CRX_PRIVATE_KEY`；
+2. 该私钥决定 CRX3 签名，**务必离线备份**，绝不提交进仓库；
+   它与已入库的公钥必须配对 —— 不配对时本机构建/打包会直接报错并打印两侧的 ID；
+3. CI 内步骤会把它写入 runner 临时 PEM 文件，用 `npx crx3 -p <临时PEM> -o dist/extension.crx extension/`
+   签名打包后立即删除。
 
 ### 5. 一次性配置: Chrome Web Store OAuth 凭据 (可选)
 
@@ -184,7 +193,32 @@ node scripts/build-crx.js --verify-only dist/universal-smart-invert-extension.cr
   —— 这是**一次性动作**，生成后请**立即离线备份** `crx-private-key.pem`：
   它决定扩展 ID 与升级链，丢失后无法再给已安装用户推送升级。
 - 私钥永不入库（`.gitignore` 覆盖 `*.pem` / `crx-private-key.pem` / `*.crx`；
-  `node test.js` 里有「仓库内无 PEM」的断言把关）。
+  `node test.js` 里有「私钥未被 git 跟踪且未泄漏进产物」的断言把关）。
+
+#### 扩展 ID 固定与可复现（v6.5 R2）
+
+**扩展 ID 由公钥决定，不由私钥决定** —— 所以公钥可以入库，私钥不行：
+
+| 东西 | 住哪 | 入库? |
+| :--- | :--- | :--- |
+| 私钥 `crx-private-key.pem` | 只在本机（`--generate-key` 生成）+ 离线备份 | **否**（gitignore 三重覆盖） |
+| 公钥 `scripts/extension-key.json` | 随仓库 | **是**（公开数据） |
+| `manifest.key` | `extension/manifest.json`，构建时从上面那份公钥注入 | 是（产物） |
+
+- 扩展 ID = `sha256(公钥 SPKI DER)` 的前 16 字节，每半字节映射到 `a`..`p`。它是**纯函数**：
+  与是否装有 Chrome、是否有私钥、在哪台机器上都无关 —— 任何机器重新构建产物都得到同一个 ID。
+- 当前 ID：**`laldjilafbegbdkjoaamjpcljjmanohe`**。查它：
+  `node scripts/build-crx.js --print-id`
+- **两处前置拦截**（都实测咬得住）：
+  ① 构建期与打包期都校验「本机私钥推导出的公钥 == `key` 文件」—— 换过密钥却忘了重新生成
+  key 文件时，签出的 CRX 其 ID 会与清单声明不符，浏览器拒绝安装，而**打包那一步是静默的**
+  （产物结构完全合法），所以必须前置拦下；
+  ② `test.js` 有固定值回归：ID 变了就报红 —— 轮换密钥是破坏性动作（已装用户无法升级），
+  不该悄悄发生。
+- **轮换密钥**（破坏性，需同时更新固定值回归里的期望值）：
+  备份并移走 `crx-private-key.pem` → `node scripts/build-crx.js --generate-key`
+  → 用 `publicKeyB64FromPrivatePem` 重新生成 `scripts/extension-key.json`
+  （`_rotate` 字段里写着同一套流程）→ 重建 → 跑 `node test.js` 会提示要改期望值。
 
 ### 5.2 **分发限制（必须如实告知）**
 

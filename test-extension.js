@@ -422,7 +422,14 @@ function startServer() {
     })()`, extCtx.id);
     assert.strictEqual(selfCheck.id, extId, '自验失败: 求值所在世界不是 loadUnpacked 加载的那个扩展');
     assert.strictEqual(selfCheck.version, wantVersion, `自验失败: 扩展版本应为 ${wantVersion}，实测 ${selfCheck.version}`);
-    console.log('    自验通过: runtime.id 与版本一致 (' + selfCheck.version + ')');
+    // v6-5 R2: 扩展 ID 必须等于**公钥真源推导**出来的那个 —— 这一条才是「ID 确定可复现」的判据。
+    //   上面那句只证明"世界是本次加载的那个扩展", 对"ID 是否由 key 决定"一言未发:
+    //   若 manifest.key 被改动/丢失, loadUnpacked 会随机分配一个 ID, 上面那句**照样通过**。
+    const derivedId = require('./scripts/build-crx.js').extensionIdFromKeyB64(require('./scripts/extension-key.json').key);
+    assert.strictEqual(extId, derivedId,
+      '扩展 ID 应等于 scripts/extension-key.json 公钥推导出的 ID (实测 ' + extId + ' ≠ 推导 ' + derivedId
+      + ' —— manifest.key 丢了或被改动, ID 就会变成随机的)');
+    console.log('    自验通过: runtime.id 与版本一致 (' + selfCheck.version + ') | ID = 公钥真源推导值 ✓ (' + derivedId + ')');
 
     assert.strictEqual(await P.ev('typeof window.__svi', extCtx.id), 'object', '隔离世界里必须存在 window.__svi');
     assert.strictEqual(await P.ev('window.__svi.version', extCtx.id), wantVersion, '隔离世界的 __svi.version 应等于扩展版本');

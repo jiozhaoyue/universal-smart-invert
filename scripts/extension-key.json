@@ -1,0 +1,8 @@
+{
+  "_comment": "Chrome 扩展公钥真源 —— manifest.key = 本文件的 key (base64 SPKI DER)。",
+  "_why": "私钥 crx-private-key.pem 只在本机并离线备份, 绝不入库; 公钥是公开数据, 入库后任何机器都能产出同一个扩展 ID。",
+  "_rotate": "换密钥: 备份并移走 crx-private-key.pem → node scripts/build-crx.js --generate-key → 用 scripts/build-crx.js 导出的 extensionIdFromKeyB64 / publicKeyB64FromPrivatePem 重新生成本文件 → 构建会校验二者是否自洽。",
+  "_idRule": "扩展 ID = sha256(公钥 SPKI DER) 的前 16 字节, 每个半字节映射到 a..p (与浏览器实现同构)。",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA8U6How4v1V/sbv3pjAAHem9F6mNhI9nUPyCz8Lp79zYkY+ebpCZf+Y4sQfOEizlOhPyBczCTYobMLA1E8F8bLhSz3Up/wo4F5ckCmiTVKtN8m0aEFg+s8ekIRx+n3WRWC/7QcyNMPyhj1/rkSyA7w78INTqrN8JRC+HPP/k0zNoPZWq8mBUwWDIX85ndYkeTEw+F3VSe1+V6fB16yu2vBDl9Vit2So+T5pW2Sa8GUT8vUAUaMsN2BURRUua1TushXaAKU74KhZ3kP1D3vXuIUPVQWw3jhwztctjx2aWQ+1uGKycRMHrCAjNQm7V6xPWSt033LYXzUQu52TrOL54CZQIDAQAB",
+  "extensionId": "laldjilafbegbdkjoaamjpcljjmanohe"
+}

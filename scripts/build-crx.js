@@ -20,6 +20,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const { spawnSync } = require('child_process');
 const { readCentralDirectory } = require('./lib/zip');
 
@@ -74,6 +75,40 @@ function verifyCrx3(buf) {
   };
 }
 
+// ---- 扩展身份: 公钥 ↔ 扩展 ID (v6-5 R2 收口) ----
+//   公钥真源 = scripts/extension-key.json 的 `key` (入库, 公开数据);
+//   私钥 = crx-private-key.pem (只在本机, 已 gitignore, 离线备份)。
+//   把这两件事做成**纯函数**, 于是「扩展 ID 可复现」这条能单测覆盖 —— 它本质是
+//   `key` 字段与 `extensionId` 的自洽性, 而与是否装有 Chrome、是否有私钥无关。
+const KEY_JSON_PATH = path.join(ROOT, 'scripts', 'extension-key.json');
+
+// 扩展 ID = sha256(公钥 SPKI DER) 的前 16 字节, 每半字节映射到 a..p (与浏览器实现同构)
+function extensionIdFromKeyB64(b64) {
+  const der = Buffer.from(String(b64).trim(), 'base64');
+  const h = crypto.createHash('sha256').update(der).digest();
+  let id = '';
+  for (let i = 0; i < 16; i++) {
+    id += String.fromCharCode(97 + (h[i] >> 4)) + String.fromCharCode(97 + (h[i] & 0xf));
+  }
+  return id;
+}
+
+// 私钥 (.pem, PKCS#8 或 PKCS#1 皆可) → 公钥 base64 (SPKI DER)。
+// 用于「换密钥后重新生成 scripts/extension-key.json」, 以及构建期的自洽性校验。
+function publicKeyB64FromPrivatePem(pem) {
+  const pub = crypto.createPublicKey(pem);
+  return pub.export({ type: 'spki', format: 'der' }).toString('base64');
+}
+
+function readKeyFile() {
+  if (!fs.existsSync(KEY_JSON_PATH)) return null;
+  try {
+    return JSON.parse(fs.readFileSync(KEY_JSON_PATH, 'utf8'));
+  } catch (e) {
+    fail('scripts/extension-key.json 不是合法 JSON: ' + e.message);
+  }
+}
+
 function fail(msg) {
   console.error('[build-crx] 错误: ' + msg);
   process.exit(1);
@@ -101,6 +136,32 @@ function main() {
     console.error('  生成后请**立即离线备份**该 .pem —— 它决定扩展 ID 与升级链, 丢了就无法给已装用户升级。');
     console.error('  该文件已被 .gitignore 覆盖, 绝不入库。');
     process.exit(1);
+  }
+
+  // 私钥 ↔ 公钥真源必须自洽: 签名私钥推导出的 ID 与 manifest.key 推导出的 ID 必须相同。
+  //   否则签出来的 CRX 其 ID 与清单声明不一致 —— 浏览器会以"密钥不符"拒绝安装,
+  //   而那种失败在打包这一步是静默的 (产物结构完全合法)。故在这里前置拦下。
+  const keyFile = readKeyFile();
+  if (fs.existsSync(KEY_PATH) && keyFile) {
+    const pemPub = publicKeyB64FromPrivatePem(fs.readFileSync(KEY_PATH, 'utf8'));
+    if (pemPub !== keyFile.key) {
+      fail('签名私钥与 ' + path.relative(ROOT, KEY_JSON_PATH) + ' 里的公钥**不匹配** —— ' +
+        '两者推导出的扩展 ID 会不同, 浏览器会拒绝这个 CRX。\n' +
+        '  私钥侧 ID: ' + extensionIdFromKeyB64(pemPub) + '\n' +
+        '  清单侧 ID: ' + extensionIdFromKeyB64(keyFile.key) + '\n' +
+        '  换过密钥就用 publicKeyB64FromPrivatePem 重新生成 key 文件, 或把旧私钥找回来。');
+    }
+  }
+  if (keyFile && keyFile.extensionId && keyFile.extensionId !== extensionIdFromKeyB64(keyFile.key)) {
+    fail(path.relative(ROOT, KEY_JSON_PATH) + ' 自身不自洽: extensionId 与 key 推导结果不一致 (手改过?)');
+  }
+
+  const printIdIdx = argv.indexOf('--print-id');
+  if (printIdIdx >= 0) {
+    console.log('[build-crx] 扩展 ID (公钥真源推导): ' + (keyFile ? keyFile.extensionId : '(无 key 文件)'));
+    console.log('  私钥在场: ' + (fs.existsSync(KEY_PATH) ? '是' : '否') +
+      ' —— 私钥只影响签名, 不影响 ID; ID 由公钥决定, 故任何机器上都可复现。');
+    return;
   }
 
   fs.mkdirSync(DIST_DIR, { recursive: true });
@@ -141,4 +202,7 @@ function main() {
 
 if (require.main === module) main();
 
-module.exports = { verifyCrx3, KEY_PATH, DIST_DIR };
+module.exports = {
+  verifyCrx3, KEY_PATH, DIST_DIR, KEY_JSON_PATH,
+  extensionIdFromKeyB64, publicKeyB64FromPrivatePem, readKeyFile,
+};

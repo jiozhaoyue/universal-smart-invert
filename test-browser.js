@@ -2753,22 +2753,37 @@ async function main() {
     assert.notStrictEqual(hideRes.offDisplay, 'none', 'revert 后元素重新可见');
 
     // 25c. mask: 三档预设的 ::after 真实落地 (值取自 MASK_PRESETS, 唯一定义处)
+    //  v6.5 收尾修复: 原写法是「apply → 固定睡 400ms → 读计算值」。它偶发红过一次
+    //  (`dim 预设不透明度取自 MASK_PRESETS` actual=1 —— 读到的是**上一档 solid** 的 opacity),
+    //  复跑即绿。根因与 test.js 那条分片断言**同一类**: 固定等待拿概率赌"属性写入已生效",
+    //  而属性写入并非同步 (走写点仲裁)。改为**先轮询属性到位、再等 140ms 过渡结束**:
+    //  属性是"必须为真"的条件, 过渡是一个有界延时 —— 两者分开处理后就不再靠赌。
+    //  诊断力也更强了: 若 apply 真的没写入, 新断言会报「attr 2s 内没变成 dim」(产品缺陷),
+    //  而不是报一个看起来像"opacity 值不对"的假象 (测试计时)。
     const maskRes = await evalInPageAsync(`(async () => {
       const svi = window.__svi;
       const el = document.getElementById('act-target');
       svi.prefs.actions.mask.enabled = true;
       const settle = () => new Promise((r) => setTimeout(r, 400));
+      // 有界轮询: 等 data-svi-masked 真的变成目标档 (属性写入走写点仲裁, 不是同步落地的)
+      const waitAttr = async (want) => {
+        const deadline = Date.now() + 2000;
+        while (Date.now() < deadline) {
+          if (el.getAttribute('data-svi-masked') === want) return true;
+          await new Promise((r) => setTimeout(r, 20));
+        }
+        return false;
+      };
       const out = {};
       for (const style of ['solid', 'dim', 'frost']) {
         svi.ACTIONS.mask.apply(el, { style: style }, 'manual');
-        await settle(); // ::after 有 140ms opacity 过渡, 等它结束再读计算值
+        out[style] = { attrInTime: await waitAttr(style) };
+        await settle(); // 属性到位后, ::after 还有 140ms opacity 过渡, 等它结束再读计算值
         const cs = getComputedStyle(el, '::after');
-        out[style] = {
-          attr: el.getAttribute('data-svi-masked'),
-          opacity: cs.opacity,
-          blur: cs.backdropFilter || cs.webkitBackdropFilter || '',
-          content: cs.content
-        };
+        out[style].attr = el.getAttribute('data-svi-masked');
+        out[style].opacity = cs.opacity;
+        out[style].blur = cs.backdropFilter || cs.webkitBackdropFilter || '';
+        out[style].content = cs.content;
       }
       svi.ACTIONS.mask.revert(el);
       out.removed = el.getAttribute('data-svi-masked');
@@ -2776,6 +2791,11 @@ async function main() {
       return out;
     })()`);
     assert.strictEqual(maskRes.solid.attr, 'solid', 'mask 写入预设 id');
+    // 三档各自断言属性 (原先只断言了 solid) —— 顺带把上面那个偶发红的诊断钉死
+    for (const st of ['solid', 'dim', 'frost']) {
+      assert.ok(maskRes[st].attrInTime, 'mask 预设 ' + st + ' 的属性写入应在 2s 内有界等待内到位 (写点仲裁未落地的判据)');
+      assert.strictEqual(maskRes[st].attr, st, 'mask 预设 ' + st + ' 的 data-svi-masked 应等于该档 id');
+    }
     assert.strictEqual(parseFloat(maskRes.solid.opacity), 1, 'solid = 全遮挡 (opacity 1)');
     assert.strictEqual(parseFloat(maskRes.dim.opacity), 0.75, 'dim 预设不透明度取自 MASK_PRESETS');
     assert.strictEqual(parseFloat(maskRes.frost.opacity), 0.35, 'frost 预设不透明度取自 MASK_PRESETS');

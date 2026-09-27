@@ -120,18 +120,35 @@
 
 ## Acceptance Criteria（汇总）
 
-- [ ] 真扩展 E2E 套件加载真实扩展并断言「确实加载成功」
-- [ ] 扩展 ID 确定可复现（`key` 字段方案），无 PEM 入库
-- [ ] 隔离世界断言：主世界无 `__svi`，DOM 属性可见
-- [ ] `document_start` 首屏零白闪断言（补 v5-5 欠账）+ 用户脚本形态降级断言
-- [ ] `chrome.storage` 跨重载持久化断言
-- [ ] popup 页三条消息协议端到端断言
-- [ ] `scripts/build-crx.js` 一条命令产出可结构校验的 CRX3
-- [ ] `.gitignore` 覆盖私钥与产物；`grep` 核查无 PEM
-- [ ] CI：无 secret 不阻断，真扩展 E2E 必过
-- [ ] 文档写明 CRX 非商店分发的真实限制
-- [ ] 四绿门禁扩为五绿：`node --check` / `test.js` / `test-browser.js` /
-  `test-extension.js` / build+pack
+- [x] 真扩展 E2E 套件加载真实扩展并断言「确实加载成功」—— 场景 1 断言
+      `Extensions.loadUnpacked` 返回扩展 ID；场景 3 在**内容脚本所在世界**自验
+      `chrome.runtime.id` 与 `getManifest().version`（绝不退化成「页面渲染出来了」）
+- [x] 扩展 ID 确定可复现（`key` 字段方案），无 PEM 入库 —— **2026-09-27 由用户裁决后交付**：
+      公钥真源 `scripts/extension-key.json`（入库）→ 构建注入 `manifest.key`；
+      ID = `sha256(公钥 SPKI DER)` 前 16 字节映射 a..p = **`laldjilafbegbdkjoaamjpcljjmanohe`**
+      （纯函数，任何机器可复现）。私钥只在本机并离线备份，gitignore 三重覆盖。
+      断言三层：`test.js` 固定值回归 + 文件/产物/私钥四向自洽；`test-extension.js` 场景 3
+      在真实浏览器里断言 runtime.id == 公钥推导值。**两条负向对照实测咬得住**
+      （篡改 key 一个字符 → 红；把私钥强行入索引 → 红）
+- [x] 隔离世界断言：主世界无 `__svi`，DOM 属性可见 —— 场景 3（主世界
+      `typeof window.__svi === 'undefined'`；DOM 两世界共享，主世界可见全部 img）
+- [x] `document_start` 首屏零白闪断言（补 v5-5 欠账）+ 用户脚本形态降级断言 —— 场景 2
+      （首屏探针住在自己的 `worldName`）+ 场景 0 的 README 形态边界断言 + 无浏览器时的
+      「未验证」降级路径（`SVI_CHROME_PATH` 是唯一候选，故该路径可达）
+- [x] `chrome.storage` 跨重载持久化断言 —— 场景 5（清 localStorage 后仍存活）
+- [x] popup 页三条消息协议端到端断言 —— 场景 6（三条协议往返 + 真实效果）
+- [x] `scripts/build-crx.js` 一条命令产出可结构校验的 CRX3 —— 实测
+      `node scripts/build-crx.js` → `dist/*.crx`（281562 bytes / 13 entries / Cr24+CRX3+内嵌 ZIP 可解析）；
+      另有 `--verify-only` 与 `--print-id` 两个子模式
+- [x] `.gitignore` 覆盖私钥与产物；`grep` 核查无 PEM —— `test.js` R8（gitignore 三重覆盖 +
+      入库文件无 PEM 内容 + **私钥未被 git 跟踪** + 私钥未泄漏进 `extension/` 产物）
+- [x] CI：无 secret 不阻断，真扩展 E2E 必过 —— `ci.yml` 跑 `node test-extension.js`（必需）；
+      `release.yml` 的 CRX/CWS 步骤用 `$GITHUB_ENV` 布尔门控（`secrets` 上下文不得用于 `if:`）
+- [x] 文档写明 CRX 非商店分发的真实限制 —— `PUBLISHING.md` §5.2（Windows/macOS Chrome 默认
+      阻止非商店 CRX；适用场景是企业分发/离线部署；不得描述成「双击即可安装」）
+- [x] 四绿门禁扩为五绿：`node --check` / `test.js` / `test-browser.js` /
+      `test-extension.js` / build+pack —— 已写进 `AGENTS.md` 的命令清单；CI 另跑
+      `scripts/check-panel-overflow.js`
 
 ## Notes
 

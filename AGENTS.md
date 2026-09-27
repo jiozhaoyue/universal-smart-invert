@@ -77,6 +77,17 @@ Bench gotchas: uses a FIXED profile dir `.chrome-test-profile/` (gitignored) tha
 wipes at start; needs `--enable-unsafe-swiftshader` for WebGL scenarios; scenarios 2b/18 rely on
 in-run persistence, so never add global storage cleanup mid-run.
 
+`test.js` async budget — **"green" must mean "the assertions ran", not "the process exited first"**.
+The file ends with `setTimeout(…, ASYNC_BUDGET_MS)` → `process.exit(0)` (resident shim timers block a
+natural exit), so any async block can be dropped silently. Three gates keep that honest and none may be
+"simplified" away: `ASYNC_POLL_MS < ASYNC_BUDGET_MS` (self-checked at exit), a `pollUntil` start/finish
+ledger that exits 1 naming any poll that never completed, and **all** bounded polling going through
+`pollUntil` (a hand-rolled `deadline = Date.now() + N` bypasses the self-check — three such deadlines used
+to exceed the old 1500 ms budget and were dead code, silently skipping whole assertion blocks at a
+measured 13–50 % rate). Same rule for test stubs: a `global.chrome` stub's lifetime must be **tied to the
+block finishing**, never a fixed delay — chunked writes are a dozen serial 1 ms mock round-trips and
+genuinely lose that race. See `.trellis/spec/frontend/quality-guidelines.md` §"v6.5 Additions".
+
 Injection-form coverage: every page template **inlines** the userscript into HTML and defines **no**
 `GM_*` shims — so `document.head` always exists and `GM_addStyle` never does. That blind spot hid a
 real defect (silently dropped stylesheet). Scenarios 32 (GM-shim form) and 33 (`Page.addScriptToEvaluateOnNewDocument`,
@@ -120,6 +131,14 @@ removed after it bound loopback-only and was unreachable via LAN/proxied browser
   UI built exclusively with the `ui.*` component builders.
 - Userscript and extension coexist via the `dataset.sviOwner` handshake — first booter claims the
   page, the other goes dormant. Bump `@version` and run `build-extension.js` in the same change.
+- **The extension ID is decided by the public key, not the private one** — so the public key is
+  committed (`scripts/extension-key.json`, injected into `manifest.key` at build time) and only the
+  private key stays local (`crx-private-key.pem`, gitignored + offline-backup). Any machine rebuilding
+  the artifacts therefore gets the same ID: `laldjilafbegbdkjoaamjpcljjmanohe`. Both the build and the
+  pack step refuse to proceed when the local private key does not match the committed public key
+  (a mismatched pair signs a CRX whose ID contradicts its own manifest — and Chrome rejects it while
+  the pack step still reports success). Rotating the key is destructive (installed users can no longer
+  upgrade); the pinned value in `test.js` makes it a deliberate act, not an accident.
 - **Region masks have exactly one constructor and one validator** (`makeRegionMask` /
   `validateRegionMask`). v6-2 (rendering) and v6-3 (correction loop) **consume, never re-implement**
   segmentation or reshape the mask. The contract is FROZEN in
