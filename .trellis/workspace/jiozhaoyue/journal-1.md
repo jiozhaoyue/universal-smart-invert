@@ -758,3 +758,36 @@ Session 19: v6-4 第二轮交付完成（R3 清零 + R4 文档）并归档；修
 ### Status
 
 [OK] **Completed**
+
+
+## Session 21: v6 发版收口（0.6.6 版本号重置 + 文档改写）+ 元素遮罩永不武装修复 + 脚手架假红源收敛
+<!-- trellis-session: v=2 fp=39e39f6ad2e1f139 -->
+
+**Date**: 2026-09-27
+**Task**: v6 发版收口（0.6.6 版本号重置 + 文档改写）+ 元素遮罩永不武装修复 + 脚手架假红源收敛
+**Branch**: `main`
+
+### Summary
+
+本轮三件事：① 按用户裁决把版本号从 5.0.0 重置为 0.6.6（批次号与版本号合一：第 N 批 = 0.6.N），真源只改 @version 与 SCRIPT_VERSION 两处，其余由构建或运行时派生；四份用户文档 43 处 v6.x → 0.6.x 改写（保留 4 处会断引用的例外 + 65 处历史发布记录不动），新增「版本号说明」段与降级提示。② 六绿门禁反复无法达成，逐层追出第三处未决观察的真根因：扩展形态下 setupPendingMask() 只在根就绪时跑一次、读到的是引导期默认档 'document'，而远端 prefs 装载完成后的钩子不重放它 → 用户选了「文档黑底 + 元素遮罩」档也永不武装（maskArmed 恒 false，含基线每次跑动）。与版本号无关已三重取证（基线同样失败 + 受控 A/B 交替实验 A/B 各有红有绿 + SCRIPT_VERSION 不进首屏路径）。修法：就绪后重放（幂等三重守卫）+ 清 siteMediaStore 预引导空记忆；测试侧显式配档、显式播种样本、按 README §13 把「复访整体零白闪」收敛为「武装后新插入媒体零白闪」并加非空真守卫。③ 顺带修两类脚手架假红源：test-extension.js:334 裸空指针（打断等待，占某批 3/6）、test.js 8e-2 固定等待 + .catch 掩盖层（基线 5 跑 2 绿 → 修后 5/5）；确立门禁三分口径（真红/SKIP 未验证/基础设施抖动不得混算）。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `58bd960` | fix(mask): 扩展形态元素遮罩永不武装 —— 远端 prefs 就绪后重放 setupPendingMask |
+| `d341b17` | fix(harness): 脚手架两类假红源 —— 裸空指针打断等待 + 掩盖层伪装断言失败 |
+| `f3a8fe0` | test(mask): 武装断言超时打印现场值 —— 让失败自己说出原因 |
+| `6dbebec` | release(0.6.6): 版本号重置 5.0.0 → 0.6.6 + 文档 v6.x → 0.6.x 改写 + 产物重建 |
+
+### Testing
+
+- [OK] 六道门禁逐条实跑：node --check ✅ / test.js ✅（5/5）/ test-browser ✅（33 场景，多次绿，偶发一次 White diagram）/ test-extension ✅（含新增遮罩武装断言，4/4）/ build-extension ✅（version 0.6.6）/ pack ✅（v0.6.6.zip CRC OK）。五条负向对照：NC-A SCRIPT_VERSION 不一致→test.js 报 script version must track the @version header；NC-B @version beta→构建报 cannot derive an MV3 version（并更正原预期：0.6.beta 被 sanitizeVersion 宽容归一为 0.6、构建成功，该不一致由 CI 等值断言兜住）；NC-C 未修复+遮罩断言→reason 打印「本站尚无历史记录（首访不遮）」；NC-D 隔离对照→注入的图裸奔 49 帧；NC-E 新测试×未修复代码→武装轮询超时。审计：文档 v6 记号 4 处（全为登记例外）、裸 v6 归零、历史 v1-v5 69 处未动、spec 33 / scripts 29 / userscript 注释 132 行不变。
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- ① 按用户裁决**不打 tag、不触发 release 流水线**：版本号已就位（0.6.6），发版动作等单独下令（注意 0.6.6 数值低于 5.0.0，管理器不视作升级、老用户需手动覆盖安装一次；若接入 CWS，商店要求版本严格递增）。② 残留抖动仍在同一族（固定等待同步防抖/分片写）：test-extension 的 CDP 超时 / rAF 60 帧停滞 / 场景 8 与站点重置竞态、test-browser:981 White diagram 偶发、一次未复现的武装轮询超时（现已带现场值可诊断）——建议整族换成有界轮询再收。③ 真正做到「首屏插入前遮罩」需要同步信号（localStorage 门判定镜像），本轮已裁决排除，日后可单独立项。④ 旁注：工作区曾出现一个不属于本会话的 scripts/probe-media.js（通用媒体探针），一度被 git add -A 扫入提交，已从提交中撤出、原样留为未跟踪。
