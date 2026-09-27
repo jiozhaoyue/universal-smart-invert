@@ -1,0 +1,6 @@
+{"file": ".trellis/tasks/09-27-v6-release-closeout/prd.md", "reason": "R1-R9 需求与 AC1-AC11 验收线；含用户八项裁决记录（重置为 0.6.6 / 批次号=版本号 / 范围限用户文档+AGENTS / 不打 tag）与 R6b 历史记录保留待确认项"}
+{"file": ".trellis/tasks/09-27-v6-release-closeout/design.md", "reason": "§1 版本号联动与断言图（改两处真源的原因）；§2 批次号=版本号单一轴 + 改写范围/例外/代价；§2.1 命名别名说明段；§4 五类判定口径（含历史记录必须保留）；§5 验证与两组负向对照"}
+{"file": ".trellis/tasks/09-27-v6-release-closeout/implement.md", "reason": "P0-P5 有序清单：检索门禁 → 六份基线快照（43 待改 / 65 保留 / 33-21-132 不变）→ 真源重置 → 产物重建 → 文档改写（含 2 处例外与别名段）→ 六绿+负向对照 → 评审门与提交"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "既有断言不得放宽、单文件真源与构建产物纪律（本片 R7 与 P4 负向对照的依据）"}
+{"file": ".trellis/spec/frontend/ui-design-tokens.md", "reason": "「设计 token 单一真源 + 构建注入」的同族纪律参照——本片版本号是同一类「单点真源、禁止手写」问题"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "跨层一致性核对方法（真源→派生→断言三层），本片校验清单照此编排"}

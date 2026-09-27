@@ -1,0 +1,5 @@
+{"file": ".trellis/tasks/09-27-v6-release-closeout/prd.md", "reason": "AC1-AC11 逐条核对，尤其 AC7（四份文档 v6 记号归零 + 43 条分类）、AC8（未越界：spec 33 / 脚本 21 / 历史 65 / userscript 注释零改动）、AC11（冻结契约零改动）"}
+{"file": ".trellis/tasks/09-27-v6-release-closeout/design.md", "reason": "§5 验证方法（真源/派生/断言三层 + 轮询台账核实 + NC-A/NC-B 两组负向对照）；§4 五类判定口径决定「改写项」与「保留项」是否合法"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "检查是否放宽断言、是否手改构建产物、是否与既有质量纪律冲突"}
+{"file": ".trellis/spec/frontend/region-mask-contract.md", "reason": "AC10 冻结契约零改动核对（REGION_MASK_VERSION 必须仍为 1，掩码契约不得重实现）"}
+{"file": ".trellis/spec/frontend/style-mount-contract.md", "reason": "AGENTS.md 记载的静默丢样式缺陷契约——本轮若动 README 自检章节需与既有表述一致，避免文档回退"}

@@ -30,9 +30,9 @@ Chrome extension DERIVED from it. Key paths:
   decision pipeline, background replace, WebGL video FX, Store, RuleLearner, TimelineLearner, UI,
   and the v5.0 **Action Registry** = ordered `SOURCES` table + `resolveStage` + `arbitrate` +
   `ACTIONS` executors, with the switch matrix read only through `actionEnabled(id)`), plus the
-  v6.0 **region-segmentation kernel** (section 12.5: `RegionMask` frozen contract + two performance
+  0.6 **region-segmentation kernel** (section 12.5: `RegionMask` frozen contract + two performance
   gates + morphology/connected-components/area gate + exact rectangle decomposition + LRU cache)
-  and the v6.2 **region render layer** (section 20.5 `RegionRenderEngine`: backdrop-filter overlay +
+  and the 0.6.2 **region render layer** (section 20.5 `RegionRenderEngine`: backdrop-filter overlay +
   bitmap/vector mask + `object-fit` geometry mapping + backdrop-root degradation + fullscreen/PiP
   suspend + video/GIF recalculation; off by default)
 - `extension/` — GENERATED output (content.js + manifest.json + icons). **Never hand-edit**;
@@ -86,7 +86,7 @@ ledger that exits 1 naming any poll that never completed, and **all** bounded po
 to exceed the old 1500 ms budget and were dead code, silently skipping whole assertion blocks at a
 measured 13–50 % rate). Same rule for test stubs: a `global.chrome` stub's lifetime must be **tied to the
 block finishing**, never a fixed delay — chunked writes are a dozen serial 1 ms mock round-trips and
-genuinely lose that race. See `.trellis/spec/frontend/quality-guidelines.md` §"v6.5 Additions".
+genuinely lose that race. See `.trellis/spec/frontend/quality-guidelines.md` §"v6.5 Additions" (a spec section title — not renamed by the version reset).
 
 Injection-form coverage: every page template **inlines** the userscript into HTML and defines **no**
 `GM_*` shims — so `document.head` always exists and `GM_addStyle` never does. That blind spot hid a
@@ -140,12 +140,12 @@ removed after it bound loopback-only and was unreachable via LAN/proxied browser
   the pack step still reports success). Rotating the key is destructive (installed users can no longer
   upgrade); the pinned value in `test.js` makes it a deliberate act, not an accident.
 - **Region masks have exactly one constructor and one validator** (`makeRegionMask` /
-  `validateRegionMask`). v6-2 (rendering) and v6-3 (correction loop) **consume, never re-implement**
+  `validateRegionMask`). 0.6.2 (rendering) and 0.6.3 (correction loop) **consume, never re-implement**
   segmentation or reshape the mask. The contract is FROZEN in
   `.trellis/spec/frontend/region-mask-contract.md` — any change goes back to planning first.
   `buildRegionMask` must stay a pure function; side effects (cache/counters/timing) live only in the
   `regionMaskTake` shell. With `regionSegment` off, no region code may run, cache, or write anything.
-- **Design tokens have exactly one source** (the `v6.4-TOKENS-START/END` block in the userscript),
+- **Design tokens have exactly one source** (the `v6.4-TOKENS-START/END` block in the userscript — a build-time marker name, not renamed by the version reset),
   injected into `popup.html` / `options.html` at build time. Never hand-write a colour in panel CSS
   or in either HTML artifact; the only allowed literal is the flash-guard `background:#000`.
   All UI controls are built by the single `SviControls` library — one implementation per control,

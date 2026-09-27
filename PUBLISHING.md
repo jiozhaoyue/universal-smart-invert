@@ -13,7 +13,7 @@
 | **脚本名称 (中文)** | 全网通用智能视频与图片反色 |
 | **脚本名称 (英文)** | Universal Smart Video & Image Invert |
 | **开源协议** | AGPL-3.0-or-later |
-| **当前版本** | 3.0.0 |
+| **当前版本** | 0.6.6 |
 | **主页 / 源码仓库** | `https://github.com/jiozhaoyue/universal-smart-invert` |
 | **Issue 反馈地址** | `https://github.com/jiozhaoyue/universal-smart-invert/issues` |
 | **主代码文件** | `universal-smart-invert.user.js` |
@@ -89,7 +89,7 @@ node scripts/pack.js             # 自研 stored-mode ZIP 打包器 → dist/uni
 - 构建是 **确定且幂等** 的：相同源码产出逐字节相同的 content.js / manifest.json / zip；
 - `manifest.json` 的 `name` / `version` / `description` 自动同步自脚本头部元数据（描述超 132 字符时按 Chrome 限制裁剪）；
 - `manifest.json` 形态：MV3，`content_scripts` 匹配 `<all_urls>` + `file://*/*`、`document_start`、`all_frames`，权限仅 `["storage"]`，含 4 尺寸图标；
-  （`document_start` 意味着内容脚本可能在 `<html>` 创建**之前**执行 —— 见 v6.6 的样式挂载契约：所有样式节点必须走唯一挂载入口，根未就绪时排队补挂，禁止裸 `document.head || documentElement` 挂载。）
+  （`document_start` 意味着内容脚本可能在 `<html>` 创建**之前**执行 —— 见 0.6.6 的样式挂载契约：所有样式节点必须走唯一挂载入口，根未就绪时排队补挂，禁止裸 `document.head || documentElement` 挂载。）
 - 前奏垫片：`EXT_MODE`（wrapper 作用域，核心据此认领 owner kind `ext`）、`GM_xmlhttpRequest`（fetch 实现，blob/onload/onerror/ontimeout 契约与核心 gmFetchBlob 对齐）、`GM.xmlHttpRequest` 别名、`GM_addStyle`（style 元素）。存储无需垫片 —— 核心 Store 原生探测 `chrome.storage.sync`（含 sync 单条 8KB 配额分片、配额满自动降级 `chrome.storage.local`）。注意: MV3 内容脚本中的 `fetch` 不能绕过页面 CORS —— 跨域图片走脚本自带的优雅降级链, 与油猴 `GM_xmlhttpRequest` 可跨域的行为不同。
 
 ### 1. 本地安装与调试 (Load Unpacked)
@@ -100,7 +100,7 @@ node scripts/pack.js             # 自研 stored-mode ZIP 打包器 → dist/uni
 4. 需要 `file://` 反色时，在扩展详情页打开 **「允许访问文件网址」**（对应 manifest 的 `file://*/*` 匹配，与油猴的文件访问开关互不影响）；
 5. 修改 `universal-smart-invert.user.js` 后重新运行 `node scripts/build-extension.js`，再刷新页面即可生效。
 
-#### 1.1 让 `extension/` 始终最新（v6.6）
+#### 1.1 让 `extension/` 始终最新（0.6.6）
 
 「加载已解压」绑定的是一个**固定目录**，所以「始终最新」= **让那个目录始终是最新构建**：
 
@@ -138,7 +138,7 @@ node scripts/watch-extension.js --once    # 只重建一次后退出（供门禁
 
 ### 4. 一次性配置: CRX 签名私钥 (可选)
 
-> **v6.5 R2 起：不要再用 `openssl genrsa` 现生成一把** —— 扩展 ID 由公钥决定，而公钥
+> **0.6.5 R2 起：不要再用 `openssl genrsa` 现生成一把** —— 扩展 ID 由公钥决定，而公钥
 > `scripts/extension-key.json` 已随仓库固定下来了。另生成一把新私钥会让 CI 产出的 CRX
 > 其 ID 与仓库声明的不同（`scripts/build-crx.js` 现在会**前置拦截**这种不匹配）。
 > 正确做法是用本机那把你已经生成并备份过的私钥：
@@ -177,7 +177,7 @@ git tag v3.0.1 && git push origin v3.0.1
 
 ---
 
-## 5. 本地 CRX 打包与分发限制（v6.5 新增）
+## 5. 本地 CRX 打包与分发限制（0.6.5 新增）
 
 ### 5.1 打包
 
@@ -195,7 +195,7 @@ node scripts/build-crx.js --verify-only dist/universal-smart-invert-extension.cr
 - 私钥永不入库（`.gitignore` 覆盖 `*.pem` / `crx-private-key.pem` / `*.crx`；
   `node test.js` 里有「私钥未被 git 跟踪且未泄漏进产物」的断言把关）。
 
-#### 扩展 ID 固定与可复现（v6.5 R2）
+#### 扩展 ID 固定与可复现（0.6.5 R2）
 
 **扩展 ID 由公钥决定，不由私钥决定** —— 所以公钥可以入库，私钥不行：
 

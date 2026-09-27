@@ -1,0 +1,5 @@
+{"file": ".trellis/tasks/09-27-mask-arm-revisit-flash/prd.md", "reason": "AC1-AC7 逐条核对：武装断言、首访不遮、零回归、≥5 次连跑、三道保险、注释含根因、推送"}
+{"file": ".trellis/tasks/09-27-mask-arm-revisit-flash/design.md", "reason": "§2 幂等三重守卫与 §3 记忆化修法是否真的成立（检查是否新增状态、是否扰动单测契约）；§4 判据是否被如实使用"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "检查是否放宽断言、是否手改构建产物、偶发红是否被定性而非掩盖"}
+{"file": ".trellis/spec/frontend/region-mask-contract.md", "reason": "AC: 区域掩码契约零改动（REGION_MASK_VERSION 仍为 1；本片只动元素 pending 遮罩，与区域掩码无关，需 diff 证明未混入）"}
+{"file": ".trellis/tasks/09-27-v6-release-closeout/notes.md", "reason": "§P4 行尾陷阱：改后若跑门禁，须确认工作区为 LF 且 extension/ 已由该源重建"}

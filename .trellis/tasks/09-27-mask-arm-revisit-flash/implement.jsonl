@@ -1,0 +1,6 @@
+{"file": ".trellis/tasks/09-27-mask-arm-revisit-flash/prd.md", "reason": "R1-R6 要求与 AC1-AC7 验收线；含四项用户裁决（先修再提交 / 产品修+夹具配档 / 断言收敛口径）"}
+{"file": ".trellis/tasks/09-27-mask-arm-revisit-flash/design.md", "reason": "§1 根因链（带行号的调用图与三类异步状态先例）；§2 修点与幂等论证；§3 siteMediaStore 记忆化修法；§4 武装时点 vs 首屏插入的判据；§5 验证方法"}
+{"file": ".trellis/tasks/09-27-mask-arm-revisit-flash/implement.md", "reason": "D0 基线取证 → D1 产品修 → D2 夹具配档（含负向对照）→ D3 ≥5 次连跑与断言决策 → D4 门禁提交 → D5 回填收口"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "单文件真源/构建产物纪律、断言不得放宽、偶发红必须定性（本片 AC4/AC6 与 D3 的依据）"}
+{"file": ".trellis/spec/frontend/style-mount-contract.md", "reason": "同族「启动动作必须挂到唯一延迟点、根未就绪时排队补挂」契约——本片是同一约定的漏项（异步 store 就绪后未重放），写法与判据照此对照"}
+{"file": ".trellis/tasks/09-27-v6-release-closeout/notes.md", "reason": "§P4 门禁 4 归因取证（基线对照 + 受控 A/B 交替实验 + maskArmed 恒 false）与行尾陷阱配方"}
