@@ -1379,6 +1379,29 @@ assert.strictEqual(t1.textStroke, 1, 'textStroke 上限 1 (与 Dark Reader 的 0
 // 引擎探测在无全局的桩环境下必须优雅返回 null (缺席即降级, 不抛)
 assert.strictEqual(svi.darkReaderGlobal(), null, '无 DarkReader 全局时 darkReaderGlobal() 必须返回 null 而不是抛');
 
+// —— 9c-5. 媒体侧协作接缝: 交给 Dark Reader 的 fixes ——
+// 它自己也会分析图片/背景图, 我们也分析 —— 两套同时动手就是双重反色。
+// 这组断言钉住"属于我们的媒体被明确交给它别碰", 以及"绝不借它的手做反色"。
+const drFixes = svi.mapPrefsToDarkReaderFixes;
+assert.strictEqual(typeof drFixes, 'function', 'mapPrefsToDarkReaderFixes must be exported');
+const fx0 = drFixes({}, {});
+assert.ok(Array.isArray(fx0.ignoreImageAnalysis), 'ignoreImageAnalysis 必须是数组 (Dark Reader 的契约字段)');
+for (const sel of ['[data-svi-inverted]', '[data-svi-bginv]', '[data-svi-fx]', '[data-svi-poster]', '[data-svi-masked]']) {
+  assert.ok(fx0.ignoreImageAnalysis.indexOf(sel) !== -1, '已下结论的媒体必须列入 ignoreImageAnalysis: ' + sel);
+}
+assert.deepStrictEqual(fx0.invert, [], 'invert 必须留空 —— 反色由我们自己的引擎施加, 不借它的手');
+assert.deepStrictEqual(fx0.ignoreInlineStyle, ['[data-svi-bginv]'], 'ignoreInlineStyle 只列我们改过行内背景的那类元素');
+// 站点档案的声明式选择器要流进去 (与背景图路径的"声明式优先"同源)
+const fx1 = drFixes({}, { bgImageSelectors: ['.b-img__inner', '.reply-image .b-img'], protect: ['.Avatar'] });
+for (const sel of ['.b-img__inner', '.reply-image .b-img', '.Avatar']) {
+  assert.ok(fx1.ignoreImageAnalysis.indexOf(sel) !== -1, '站点档案声明式选择器必须流进 fixes: ' + sel);
+}
+// 缺 profile / 脏数据不得抛
+assert.ok(Array.isArray(drFixes({}, null).ignoreImageAnalysis), '缺 profile 时也要给出可用 fixes');
+assert.ok(Array.isArray(drFixes({}, { bgImageSelectors: [null, 42, ''] }).ignoreImageAnalysis), '脏选择器数组不得抛');
+assert.strictEqual(drFixes({}, { bgImageSelectors: [null, 42, ''] }).ignoreImageAnalysis.length, 5,
+  '非字符串选择器必须被丢弃 (只剩 5 条内建媒体标记)');
+
 // —— 9c-4. 第三方固化产物的完整性 (vendor/darkreader) ——
 // 「冻结」要成立就必须可验证: 文件被手改、或溯源表与文件对不上, 都在这里红。
 // 上游是活跃的扩展项目, 我们不跟随它 —— 换取这份确定性的代价就是这条断言。

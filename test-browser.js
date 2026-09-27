@@ -3912,6 +3912,17 @@ async function main() {
     assert.strictEqual(b0.hasDr, true, '34b: 注入后必须探测到引擎 (真实 bundle 挂上了全局)');
     assert.strictEqual(b0.drEnabled, false, '34b: 基线 —— 引擎此刻不在跑');
     assert.strictEqual(b0.bgReplaceActive, false, '34b: 基线 —— 自有页级暗化此刻是关的');
+    // 抓 enable 的实参: 断言我们真正传下去的 theme 与 fixes (而不是"接上了但什么都没传")
+    await sendCdp('Runtime.evaluate', {
+      returnByValue: true,
+      expression: `(() => {
+        const dr = window.__svi.darkReaderGlobal();
+        window.__drCalls = [];
+        const orig = dr.enable.bind(dr);
+        dr.enable = function (t, f) { window.__drCalls.push({ theme: t, fixes: f }); return orig(t, f); };
+        return true;
+      })()`,
+    });
     const b1 = (await sendCdp('Runtime.evaluate', {
       returnByValue: true,
       expression: `(() => { try { window.__svi.applyPageDarkForSite(true); return { ok: true }; } catch (e) { return { ok: false, err: String(e && e.message) }; } })()`,
@@ -3919,6 +3930,18 @@ async function main() {
     assert.strictEqual(b1.ok, true, '34b: 委托路径不得抛');
     await new Promise((r) => setTimeout(r, 800));
     const b2 = await readArb();
+    const drArgs = (await sendCdp('Runtime.evaluate', {
+      returnByValue: true,
+      expression: `(() => { const c = window.__drCalls || []; return c.length ? { n: c.length, theme: c[0].theme, fixes: c[0].fixes } : { n: 0 }; })()`,
+    })).result.value;
+    assert.strictEqual(drArgs.n, 1, '34b: 必须恰好调用一次引擎 enable (实测 ' + drArgs.n + ' 次)');
+    assert.strictEqual(drArgs.theme.darkSchemeBackgroundColor, '#0f161b',
+      '34b: 传下去的底色必须是我们的 --svi-bg-deep (实测 ' + JSON.stringify(drArgs.theme.darkSchemeBackgroundColor) + ')');
+    assert.strictEqual(drArgs.theme.brightness, 100, '34b: brightness 必须恒等 100 (我们的亮度已烘进颜色)');
+    assert.ok(drArgs.fixes && Array.isArray(drArgs.fixes.ignoreImageAnalysis),
+      '34b: 必须把媒体侧的 fixes 传下去 (ignoreImageAnalysis)');
+    assert.ok(drArgs.fixes.ignoreImageAnalysis.indexOf('[data-svi-inverted]') !== -1,
+      '34b: 已下结论的媒体必须明确交给它别碰 (避免双重反色)');
     assert.strictEqual(b2.drEnabled, true, '34b: 需要暗化且引擎在场 → 必须由引擎接管 (isEnabled 为真)');
     assert.strictEqual(b2.delegated - b0.delegated, 1, '34b: 委托计数 +1 (可观测; 基线 ' + b0.delegated + ' → ' + b2.delegated + ')');
     assert.notStrictEqual(b2.bodyBg, 'rgb(255, 255, 255)', '34b: 页面真的被引擎改暗了 (' + b2.bodyBg + ')');

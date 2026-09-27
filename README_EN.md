@@ -1,7 +1,7 @@
 # Universal Smart Video & Image Invert
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-0.6.8-blue.svg?style=flat-square" alt="Version">
+  <img src="https://img.shields.io/badge/version-0.6.9-blue.svg?style=flat-square" alt="Version">
   <img src="https://img.shields.io/badge/license-AGPL--3.0-green.svg?style=flat-square" alt="License">
   <img src="https://img.shields.io/badge/Tampermonkey-Supported-orange.svg?style=flat-square" alt="Tampermonkey">
   <img src="https://img.shields.io/badge/ScriptCat-Supported-purple.svg?style=flat-square" alt="ScriptCat">
@@ -678,7 +678,7 @@ If the script appears inactive on GitHub READMEs, **check in this order** (the f
 resolve the vast majority of cases):
 1. **Check the version first**: Tampermonkey dashboard → "Installed userscripts" → compare the
    version with `@version` at the top of this repo's `universal-smart-invert.user.js`
-   (currently **0.6.8**). Very old builds lack the forced-invert rules for GitHub READMEs / camo images;
+   (currently **0.6.9**). Very old builds lack the forced-invert rules for GitHub READMEs / camo images;
 2. **Silent update failures**: updates are fetched from `raw.githubusercontent.com` — if that host is
    unreachable (or an older install pointed at a private/renamed repository and the raw URL 404s),
    Tampermonkey **silently keeps the old version** with no warning at all. Fix: dashboard →

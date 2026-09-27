@@ -3,7 +3,7 @@
  * universal-smart-invert — browser extension content script
  * GENERATED FILE — DO NOT EDIT.
  * Built by scripts/build-extension.js from universal-smart-invert.user.js
- * Source version: 0.6.8
+ * Source version: 0.6.9
  *
  * Prelude contract (see scripts/build-extension.js header):
  *   - EXT_MODE (wrapper scope)   → core claims coexistence kind 'ext'
@@ -75,7 +75,7 @@
   // ==========================================
   // 1. 配置与常量定义
   // ==========================================
-  const SCRIPT_VERSION = '0.6.8';
+  const SCRIPT_VERSION = '0.6.9';
   const PREFS_KEY = 'universal_smart_invert_v4';   // v2.0 遗留偏好键 (迁移源, 迁移后原样保留以便回滚)
   const LEGACY_KEY = 'universal_smart_invert_v3';  // v1.x 旧键 (仅读取迁移, 保留不删以便回滚)
   const STATS_KEY = 'universal_smart_invert_stats_v1'; // v2.0 遗留统计键 (保留写入以兼容回滚)
@@ -10904,6 +10904,36 @@
     };
   }
 
+  // 纯函数 (单测契约): 交给 Dark Reader 的 fixes —— **媒体侧的协作接缝**。
+  //   它自己也会分析图片/背景图来决定要不要反色, 而我们的媒体引擎同样在做这件事 ——
+  //   两套同时动手就是双重反色。这里把"属于我们的媒体"明确交给它别碰:
+  //     ① 站点档案里**显式声明**的 bgImageSelectors / protect (声明式意图, 与背景图路径的
+  //        "声明式优先"同源 —— 用户/内置档案说这些图归我们管);
+  //     ② 我们已下过结论的元素 (data-svi-* 标记) —— 兜底, 覆盖"判定先于它分析"的时序。
+  //   invert 刻意留空: 该字段是"这些选择器要额外反色", 我们的反色由自己的引擎施加, 不借它的手。
+  function mapPrefsToDarkReaderFixes(prefs, profile) {
+    const ignore = [];
+    try {
+      const p = profile || {};
+      const push = (arr) => {
+        if (!Array.isArray(arr)) return;
+        for (const s of arr) if (typeof s === 'string' && s) ignore.push(s);
+      };
+      push(p.bgImageSelectors);
+      push(p.protect);
+    } catch (e) { /* ignore */ }
+    ignore.push('[data-svi-inverted]', '[data-svi-bginv]', '[data-svi-fx]', '[data-svi-poster]', '[data-svi-masked]');
+    return {
+      invert: [],
+      css: '',
+      // 只把"我们改过行内背景的那类元素"列进来; 其余媒体靠 ignoreImageAnalysis 覆盖即可
+      ignoreInlineStyle: ['[data-svi-bginv]'],
+      ignoreImageAnalysis: ignore,
+      disableStyleSheetsProxy: false,
+      ignoreCSSUrl: [],
+    };
+  }
+
   // 站点级页级暗化的**唯一入口** (取代原先各调用点直呼 applyBackgroundReplace)
   function applyPageDarkForSite(want) {
     const dr = darkReaderGlobal();
@@ -10917,7 +10947,7 @@
     pageDarkState.engine = plan;
     try {
       if (plan === 'delegate') {
-        dr.enable(mapPrefsToDarkReaderTheme(state));
+        dr.enable(mapPrefsToDarkReaderTheme(state), mapPrefsToDarkReaderFixes(state, getSiteProfile()));
         pageDarkState.owned = true;
         applyBackgroundReplace(false);       // 让位: 关掉自己的页级改色, 绝不同时跑两套
         StatsManager.count('pageDarkDelegated');
@@ -16819,6 +16849,7 @@
     // v0.6.8 页级暗化引擎仲裁 (单测契约; 第三方引擎缺席时逐字节等价于旧行为)
     pickPageDarkPlan,
     mapPrefsToDarkReaderTheme,
+    mapPrefsToDarkReaderFixes,
     darkReaderGlobal,
     applyPageDarkForSite,
     // v4.5 纯函数导出 (单测契约): 上下文命中忽略文档根

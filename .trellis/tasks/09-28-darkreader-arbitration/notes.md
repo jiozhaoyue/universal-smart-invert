@@ -74,3 +74,27 @@ EXCEPTIONS: []
 - 用户脚本形态内联引擎（约 +355 KB）同样未做，理由同上（体积与 UMD-on-打包站 的边界）。
 - **不影响已交付的价值**：用户自己装了 Dark Reader 时，本插件现在就会正确协作 ——
   收益最大、代价为零的那一半已经在跑。
+
+## 追加（0.6.9）：媒体侧协作接缝 `fixes`
+
+`enable(theme, fixes)` 的第二个实参里有 `ignoreImageAnalysis` —— 正是"别碰这些图"的开关。
+Dark Reader 自己也会分析图片/背景图，我们也分析；两套同时动手就是**双重反色**。于是委托时
+一并传下去（`mapPrefsToDarkReaderFixes`）：
+
+- `ignoreImageAnalysis` = 站点档案**显式声明**的 `bgImageSelectors` + `protect`
+  （与背景图路径的"声明式优先"同源）+ 我们已下结论的元素（`[data-svi-inverted]` /
+  `[data-svi-bginv]` / `[data-svi-fx]` / `[data-svi-poster]` / `[data-svi-masked]`，兜底覆盖时序）；
+- `invert` 刻意留空 —— 反色由我们自己的引擎施加，**不借它的手**。
+
+验证方式是**抓 enable 的实参**（把 `dr.enable` 包一层记录参数再调用原实现），
+而不是去观测引擎内部行为 —— 后者既慢又不可靠：
+
+```
+34b: 必须恰好调用一次引擎 enable (实测 1 次)
+34b: 传下去的底色必须是我们的 --svi-bg-deep (#0f161b)
+34b: brightness 必须恒等 100
+34b: 必须把媒体侧的 fixes 传下去 (ignoreImageAnalysis)
+34b: 已下结论的媒体必须明确交给它别碰 (避免双重反色)
+```
+
+单测另覆盖：脏选择器数组（`null`/`42`/`''`）必须被丢弃、缺 profile 不得抛。

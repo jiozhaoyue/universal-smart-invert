@@ -3,10 +3,10 @@
 // @name:zh-CN   全网通用智能视频与图片反色
 // @name:en      Universal Smart Video & Image Invert
 // @namespace    https://github.com/jiozhaoyue/universal-smart-invert
-// @version      0.6.8
-// @description  全网通用智能视频与图片反色脚本 (0.6.8, AGPL-3.0 开源)。视频/图片/背景图/Canvas 智能反色, 判定以连通区域为单位; 0.6 线新增区域反色 (按连通区域自动判定, 默认关闭)、界面全量同源重构与扩展形态。 保留v5.0页面媒体治理层(统一元素动作表 invert/keep/hide/mask/dim/peek、元素屏蔽 Alt+Shift+点击、遮罩 Alt+M 三档风格可调、全页压暗、悬停复原通用门, 全部默认关闭且可开关)与v4.6全部能力(本地优先判定/Alt+点击一次生效/暗色遮罩感知)。
-// @description:zh-CN 全网通用智能视频与图片反色脚本 (0.6.8, AGPL-3.0 开源)。新增: 区域反色 (按连通区域自动判定, 默认关闭)、界面全量同源重构、扩展形态与发版流水线; 保留 v5.0 页面媒体治理层与 v4.6 全部能力。
-// @description:en Universal smart video and image invert userscript (0.6.8, AGPL-3.0 licensed). Smart inversion for video, images, background images and canvas, decided at connected-region granularity. The 0.6 line adds region inversion (per connected region, off by default), a fully unified UI rebuild, and the browser-extension form with its release pipeline. Retains the v5.0 page-media governance layer (unified element-action table invert/keep/hide/mask/dim/peek, element blocking Alt+Shift+click, masks Alt+M with three adjustable styles, whole-page dimming, generic hover-restore gate — all off by default and individually switchable) and every v4.6 capability (local-first decisions, once-per-click Alt+click, dark-veil awareness).
+// @version      0.6.9
+// @description  全网通用智能视频与图片反色脚本 (0.6.9, AGPL-3.0 开源)。视频/图片/背景图/Canvas 智能反色, 判定以连通区域为单位; 0.6 线新增区域反色 (按连通区域自动判定, 默认关闭)、界面全量同源重构与扩展形态。 保留v5.0页面媒体治理层(统一元素动作表 invert/keep/hide/mask/dim/peek、元素屏蔽 Alt+Shift+点击、遮罩 Alt+M 三档风格可调、全页压暗、悬停复原通用门, 全部默认关闭且可开关)与v4.6全部能力(本地优先判定/Alt+点击一次生效/暗色遮罩感知)。
+// @description:zh-CN 全网通用智能视频与图片反色脚本 (0.6.9, AGPL-3.0 开源)。新增: 区域反色 (按连通区域自动判定, 默认关闭)、界面全量同源重构、扩展形态与发版流水线; 保留 v5.0 页面媒体治理层与 v4.6 全部能力。
+// @description:en Universal smart video and image invert userscript (0.6.9, AGPL-3.0 licensed). Smart inversion for video, images, background images and canvas, decided at connected-region granularity. The 0.6 line adds region inversion (per connected region, off by default), a fully unified UI rebuild, and the browser-extension form with its release pipeline. Retains the v5.0 page-media governance layer (unified element-action table invert/keep/hide/mask/dim/peek, element blocking Alt+Shift+click, masks Alt+M with three adjustable styles, whole-page dimming, generic hover-restore gate — all off by default and individually switchable) and every v4.6 capability (local-first decisions, once-per-click Alt+click, dark-veil awareness).
 // @author       jiozhaoyue
 // @license      AGPL-3.0-or-later
 // @icon         data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><circle cx=%2250%22 cy=%2250%22 r=%2246%22 fill=%22%23141e24%22 stroke=%22%2353a1b3%22 stroke-width=%228%22/><path d=%22M50 4 A46 46 0 0 1 50 96 Z%22 fill=%22%2353a1b3%22/></svg>
@@ -40,7 +40,7 @@
   // ==========================================
   // 1. 配置与常量定义
   // ==========================================
-  const SCRIPT_VERSION = '0.6.8';
+  const SCRIPT_VERSION = '0.6.9';
   const PREFS_KEY = 'universal_smart_invert_v4';   // v2.0 遗留偏好键 (迁移源, 迁移后原样保留以便回滚)
   const LEGACY_KEY = 'universal_smart_invert_v3';  // v1.x 旧键 (仅读取迁移, 保留不删以便回滚)
   const STATS_KEY = 'universal_smart_invert_stats_v1'; // v2.0 遗留统计键 (保留写入以兼容回滚)
@@ -10869,6 +10869,36 @@
     };
   }
 
+  // 纯函数 (单测契约): 交给 Dark Reader 的 fixes —— **媒体侧的协作接缝**。
+  //   它自己也会分析图片/背景图来决定要不要反色, 而我们的媒体引擎同样在做这件事 ——
+  //   两套同时动手就是双重反色。这里把"属于我们的媒体"明确交给它别碰:
+  //     ① 站点档案里**显式声明**的 bgImageSelectors / protect (声明式意图, 与背景图路径的
+  //        "声明式优先"同源 —— 用户/内置档案说这些图归我们管);
+  //     ② 我们已下过结论的元素 (data-svi-* 标记) —— 兜底, 覆盖"判定先于它分析"的时序。
+  //   invert 刻意留空: 该字段是"这些选择器要额外反色", 我们的反色由自己的引擎施加, 不借它的手。
+  function mapPrefsToDarkReaderFixes(prefs, profile) {
+    const ignore = [];
+    try {
+      const p = profile || {};
+      const push = (arr) => {
+        if (!Array.isArray(arr)) return;
+        for (const s of arr) if (typeof s === 'string' && s) ignore.push(s);
+      };
+      push(p.bgImageSelectors);
+      push(p.protect);
+    } catch (e) { /* ignore */ }
+    ignore.push('[data-svi-inverted]', '[data-svi-bginv]', '[data-svi-fx]', '[data-svi-poster]', '[data-svi-masked]');
+    return {
+      invert: [],
+      css: '',
+      // 只把"我们改过行内背景的那类元素"列进来; 其余媒体靠 ignoreImageAnalysis 覆盖即可
+      ignoreInlineStyle: ['[data-svi-bginv]'],
+      ignoreImageAnalysis: ignore,
+      disableStyleSheetsProxy: false,
+      ignoreCSSUrl: [],
+    };
+  }
+
   // 站点级页级暗化的**唯一入口** (取代原先各调用点直呼 applyBackgroundReplace)
   function applyPageDarkForSite(want) {
     const dr = darkReaderGlobal();
@@ -10882,7 +10912,7 @@
     pageDarkState.engine = plan;
     try {
       if (plan === 'delegate') {
-        dr.enable(mapPrefsToDarkReaderTheme(state));
+        dr.enable(mapPrefsToDarkReaderTheme(state), mapPrefsToDarkReaderFixes(state, getSiteProfile()));
         pageDarkState.owned = true;
         applyBackgroundReplace(false);       // 让位: 关掉自己的页级改色, 绝不同时跑两套
         StatsManager.count('pageDarkDelegated');
@@ -16784,6 +16814,7 @@
     // v0.6.8 页级暗化引擎仲裁 (单测契约; 第三方引擎缺席时逐字节等价于旧行为)
     pickPageDarkPlan,
     mapPrefsToDarkReaderTheme,
+    mapPrefsToDarkReaderFixes,
     darkReaderGlobal,
     applyPageDarkForSite,
     // v4.5 纯函数导出 (单测契约): 上下文命中忽略文档根

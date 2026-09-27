@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "全网通用智能视频与图片反色 (Universal Smart Video & Image Invert)",
-  "version": "0.6.8",
-  "description": "全网通用智能视频与图片反色脚本 (0.6.8, AGPL-3.0 开源)。视频/图片/背景图/Canvas 智能反色, 判定以连通区域为单位; 0.6 线新增区域反色 (按连通区域自动判定, 默认关闭)、界面全量同源重构与扩展形态。",
+  "version": "0.6.9",
+  "description": "全网通用智能视频与图片反色脚本 (0.6.9, AGPL-3.0 开源)。视频/图片/背景图/Canvas 智能反色, 判定以连通区域为单位; 0.6 线新增区域反色 (按连通区域自动判定, 默认关闭)、界面全量同源重构与扩展形态。",
   "icons": {
     "16": "icons/icon16.png",
     "32": "icons/icon32.png",
