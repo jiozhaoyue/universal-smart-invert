@@ -454,18 +454,29 @@ function startServer() {
     //   默认档 'document'，就绪后无人重放；当时零白闪靠「判定够快」侥幸成立，故断言时红时绿。
     //   注意是**有界轮询**而非瞬时读：武装发生在 Store 远端装载完成之后（就绪后重放），瞬时读会与
     //   被测的引导时序赛跑 —— 那是测试的竞态，不是产品的。修复前永远不会武装，故轮询超时即红。
-    const armed = await waitFor(async () => {
-      const v = await P.ev(`(() => ({
-        armed: !!window.__svi.pendingMask.armed,
-        masking: document.documentElement.hasAttribute('data-svi-masking'),
-        tier: window.__svi.prefs.flashGuardLevel,
-        reason: (window.__svi.runtime && window.__svi.runtime.pendingMaskReason) || null
-      }))()`, ctxT.id);
-      return v && v.tier === 'media' && v.armed && v.masking ? v : null;
-    }, 8000, 'media 档 + 样本达门 → 元素遮罩武装');
-    console.log('    遮罩已武装: ' + JSON.stringify(armed));
-    assert.strictEqual(armed.armed, true, '扩展形态下 media 档必须武装元素遮罩');
-    assert.strictEqual(armed.masking, true, 'data-svi-masking 属性必须在场（遮罩生效的可观测标志）');
+    //   超时**打印现场值**（含 `reason`）：否则「超时」这一句无法区分「产品没武装」与「样本没到位」。
+    const armRead = () => P.ev(`(() => ({
+      armed: !!window.__svi.pendingMask.armed,
+      masking: document.documentElement.hasAttribute('data-svi-masking'),
+      tier: window.__svi.prefs.flashGuardLevel,
+      seen: window.__svi.siteMediaStore.stats(location.hostname).seen,
+      pending: window.__svi.Store.pending.has('siteMedia'),
+      reason: (window.__svi.runtime && window.__svi.runtime.pendingMaskReason) || null
+    }))()`, ctxT.id);
+    let armState = null;
+    const armDeadline = Date.now() + 8000;
+    for (;;) {
+      armState = await armRead();
+      if (armState && armState.tier === 'media' && armState.armed && armState.masking) break;
+      if (Date.now() > armDeadline) break;
+      await sleep(250);
+    }
+    console.log('    遮罩状态: ' + JSON.stringify(armState));
+    assert.strictEqual(armState.tier, 'media', '配档必须真的生效（远端 svi:prefs 已装载）');
+    assert.strictEqual(armState.armed, true,
+      '扩展形态下 media 档必须武装元素遮罩（实测 reason=' + armState.reason
+      + ', seen=' + armState.seen + ', pending=' + armState.pending + '）');
+    assert.strictEqual(armState.masking, true, 'data-svi-masking 属性必须在场（遮罩生效的可观测标志）');
 
     // 结论断言（按 README §13 的**文档化契约**收敛）：
     //   旧版这里断言「复访整体零白闪」（flashed == []），但文档化的保证是「首访一律不遮」+
