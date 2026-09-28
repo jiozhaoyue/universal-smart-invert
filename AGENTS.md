@@ -53,6 +53,8 @@ node --check universal-smart-invert.user.js
 node test.js
 node test-browser.js                       # needs Chrome; CDP port 9222
 node test-extension.js                     # needs Chrome; CDP port 9333 + http 8791
+node test-firefox.js                       # needs geckodriver (dev/tools/, gitignored) + Firefox; WebDriver
+npx web-ext lint --source-dir=extension    # MUST report 0 errors (Mozilla official addons-linter)
 node scripts/build-extension.js && node scripts/pack.js
 ```
 
@@ -150,6 +152,15 @@ removed after it bound loopback-only and was unreachable via LAN/proxied browser
   (a mismatched pair signs a CRX whose ID contradicts its own manifest — and Chrome rejects it while
   the pack step still reports success). Rotating the key is destructive (installed users can no longer
   upgrade); the pinned value in `test.js` makes it a deliberate act, not an accident.
+- **Firefox identity is a second source of truth in the same file** — `scripts/extension-key.json`
+  also carries `geckoId` (`universal-smart-invert@dark-viewer`), injected as
+  `browser_specific_settings.gecko.id`. Chromium ignores that block and Firefox ignores `manifest.key`,
+  so one manifest serves both engines — **never** fork the artifact directory. A missing `geckoId` must
+  `fail` the build: without it Firefox hands out a random temporary id and `storage.sync` goes unstable.
+  `data_collection_permissions` has been mandatory for AMO submissions since 2025-11-03, and
+  `strict_min_version` must be ≥ 140 (the field landed in Firefox 140 / Android 142). The extension
+  display name comes from `@name:ext` (45-char Firefox cap) — **`@name` itself must not change**.
+  Full contract: `.trellis/spec/frontend/cross-browser-extension-contract.md`.
 - **Region masks have exactly one constructor and one validator** (`makeRegionMask` /
   `validateRegionMask`). 0.6.2 (rendering) and 0.6.3 (correction loop) **consume, never re-implement**
   segmentation or reshape the mask. The contract is FROZEN in

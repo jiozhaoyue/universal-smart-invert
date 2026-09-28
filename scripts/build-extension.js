@@ -43,6 +43,7 @@ const MANIFEST_OUT = path.join(OUT_DIR, 'manifest.json');
 const ICON_SIZES = [16, 32, 48, 128];
 const MAX_DESCRIPTION = 132; // Chrome limit for manifest.description
 const MAX_NAME = 75;         // Chrome limit for manifest.name
+const MAX_NAME_FIREFOX = 45; // Firefox limit for manifest.name (stricter than Chrome)
 
 function fail(msg) {
   console.error('[build-extension] ERROR: ' + msg);
@@ -55,12 +56,14 @@ function parseMetadata(source) {
   const m = source.match(/\/\/ ==UserScript==([\s\S]*?)\/\/ ==\/UserScript==/);
   if (!m) fail('userscript metadata block (==UserScript==) not found');
   const out = {};
-  const re = /^\/\/\s*@([^\s:]+)\s+(.*)$/gm;
+  // Key may contain ':' (e.g. @name:ext, @name:zh-CN) — the whole token before
+  // the first whitespace is the key, so localized / variant keys stay distinct.
+  const re = /^\/\/\s*@([^\s]+)\s+(.*)$/gm;
   let match;
   while ((match = re.exec(m[1])) !== null) {
     const key = match[1].trim();
     const value = match[2].trim();
-    if (out[key] === undefined) out[key] = value; // first occurrence wins (@name before @name:en)
+    if (out[key] === undefined) out[key] = value; // first occurrence wins
   }
   return out;
 }
@@ -179,7 +182,14 @@ function main() {
   fs.mkdirSync(OUT_DIR, { recursive: true });
   fs.writeFileSync(CONTENT_OUT, content, 'utf8');
 
-  const extName = clip(meta.name, MAX_NAME);
+  // 扩展显示名:优先取 header 中的 @name:ext(显式短名,便于同时满足两个引擎);
+  // 回退时按 **Firefox** 上限裁剪 —— 单份 manifest 同时服务 Chromium 与 Firefox,
+  // 故取两者中更严的上限 (Chrome 75 / Firefox 45)。
+  const extName = meta['name:ext'] || clip(meta.name, MAX_NAME_FIREFOX);
+  if (extName.length > MAX_NAME_FIREFOX) {
+    fail('扩展显示名超过 Firefox 上限 ' + MAX_NAME_FIREFOX + ' 字符 (当前 ' + extName.length
+      + '): "' + extName + '" —— 请修短 header 里的 @name:ext');
+  }
   const manifest = {
     manifest_version: 3,
     name: extName,
@@ -220,6 +230,7 @@ function main() {
   //   自洽性在此刻校验: 若本机有私钥, 它推导出的公钥必须与 key 文件一致 ——
   //   否则签出来的 CRX 其 ID 会与清单声明不符, 浏览器拒绝安装, 而打包那一步是静默的。
   let extId = null;
+  let geckoId = null;
   const keyJsonPath = path.join(__dirname, 'extension-key.json');
   if (fs.existsSync(keyJsonPath)) {
     let keyInfo;
@@ -244,7 +255,32 @@ function main() {
       }
     }
     manifest.key = keyInfo.key;
+    geckoId = keyInfo.geckoId || null;
   }
+  if (!geckoId) {
+    fail('scripts/extension-key.json 缺少 geckoId —— Firefox MV3 签名必需'
+      + ' (见 .trellis/tasks/09-28-firefox-support/prd.md)');
+  }
+
+  // Firefox 身份与合规字段。Chrome 完全忽略 browser_specific_settings,故单份
+  // manifest 同时服务两个引擎。
+  //   gecko.id                    MV3 签名必需;缺失时 Firefox 会分配随机临时 id,
+  //                               并连带让 chrome.storage.sync 在 Firefox 下不稳定。
+  //   data_collection_permissions 2025-11-03 起 AMO 新提交强制要求;
+  //                               本扩展无任何自动网络遥测,故 required 为 none。
+  //   strict_min_version          该字段可用的最低 Firefox 线 (140 / Android 142),见块内说明。
+  manifest.browser_specific_settings = {
+    gecko: {
+      id: geckoId,
+      data_collection_permissions: { required: ['none'] },
+      // data_collection_permissions 由 Firefox 140 引入 —— 低版本无从表达该字段,
+      // 故 strict_min_version 必须 >= 140 (lint 的 KEY_FIREFOX_UNSUPPORTED_BY_MIN_VERSION)。
+      strict_min_version: '140.0',
+    },
+    // 显式声明 Android 门槛:该字段在 Firefox for Android 需 142,
+    // 不声明则回退到 gecko 的 140 并持续告警。
+    gecko_android: { strict_min_version: '142.0' },
+  };
   fs.writeFileSync(MANIFEST_OUT, JSON.stringify(manifest, null, 2) + '\n', 'utf8');
 
   // v4.5: popup / options sources live in scripts/extension-src/ and are copied —

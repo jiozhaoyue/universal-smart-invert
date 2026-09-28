@@ -23,6 +23,7 @@ This directory contains guidelines for frontend development. Fill in each file w
 | [设计 token 与控件库](./ui-design-tokens.md) | v6-4：设计 token 唯一真源 + 构建注入到 popup/options + `SviControls` 单一构造点（20 项）+ 零手写颜色 | Filled（中文） |
 | [区域掩码契约 RegionMask](./region-mask-contract.md) | **冻结**（2026-09-25）：区域掩码的唯一权威契约 + 不变量 I0~I8 + 消费纪律。v6-2/v6-3 只消费不修改 | Filled（中文，见文件内说明） |
 | [样式挂载契约 StyleMount](./style-mount-contract.md) | **冻结**（2026-09-26）：样式节点唯一挂载入口 `mountStyleNode` + 根就绪重放 `whenRootReady` + 不变量 I1~I5。修的是「根为 null 时整张样式表被静默丢弃」 | Filled（中文） |
+| [跨浏览器扩展契约 CrossBrowser](./cross-browser-extension-contract.md) | **冻结**（2026-09-28）：单份 manifest 双引擎规则 + Firefox 身份字段（`gecko.id`／`data_collection_permissions`／`strict_min_version` ≥ 140）+ 显示名 45 上限与 `@name:ext` 真源 + 装载通道矩阵 + 门禁命令 | Filled（中文） |
 
 ---
 

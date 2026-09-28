@@ -2,11 +2,12 @@
 // @name         全网通用智能视频与图片反色 (Universal Smart Video & Image Invert)
 // @name:zh-CN   全网通用智能视频与图片反色
 // @name:en      Universal Smart Video & Image Invert
+// @name:ext     全网通用智能视频与图片反色 (Universal Smart Invert)
 // @namespace    https://github.com/jiozhaoyue/universal-smart-invert
-// @version      0.6.9
-// @description  全网通用智能视频与图片反色脚本 (0.6.9, AGPL-3.0 开源)。视频/图片/背景图/Canvas 智能反色, 判定以连通区域为单位; 0.6 线新增区域反色 (按连通区域自动判定, 默认关闭)、界面全量同源重构与扩展形态。 保留v5.0页面媒体治理层(统一元素动作表 invert/keep/hide/mask/dim/peek、元素屏蔽 Alt+Shift+点击、遮罩 Alt+M 三档风格可调、全页压暗、悬停复原通用门, 全部默认关闭且可开关)与v4.6全部能力(本地优先判定/Alt+点击一次生效/暗色遮罩感知)。
-// @description:zh-CN 全网通用智能视频与图片反色脚本 (0.6.9, AGPL-3.0 开源)。新增: 区域反色 (按连通区域自动判定, 默认关闭)、界面全量同源重构、扩展形态与发版流水线; 保留 v5.0 页面媒体治理层与 v4.6 全部能力。
-// @description:en Universal smart video and image invert userscript (0.6.9, AGPL-3.0 licensed). Smart inversion for video, images, background images and canvas, decided at connected-region granularity. The 0.6 line adds region inversion (per connected region, off by default), a fully unified UI rebuild, and the browser-extension form with its release pipeline. Retains the v5.0 page-media governance layer (unified element-action table invert/keep/hide/mask/dim/peek, element blocking Alt+Shift+click, masks Alt+M with three adjustable styles, whole-page dimming, generic hover-restore gate — all off by default and individually switchable) and every v4.6 capability (local-first decisions, once-per-click Alt+click, dark-veil awareness).
+// @version      0.6.10
+// @description  全网通用智能视频与图片反色脚本 (0.6.10, AGPL-3.0 开源)。视频/图片/背景图/Canvas 智能反色, 判定以连通区域为单位; 0.6 线新增区域反色 (按连通区域自动判定, 默认关闭)、界面全量同源重构与扩展形态。 保留v5.0页面媒体治理层(统一元素动作表 invert/keep/hide/mask/dim/peek、元素屏蔽 Alt+Shift+点击、遮罩 Alt+M 三档风格可调、全页压暗、悬停复原通用门, 全部默认关闭且可开关)与v4.6全部能力(本地优先判定/Alt+点击一次生效/暗色遮罩感知)。
+// @description:zh-CN 全网通用智能视频与图片反色脚本 (0.6.10, AGPL-3.0 开源)。新增: 区域反色 (按连通区域自动判定, 默认关闭)、界面全量同源重构、扩展形态与发版流水线; 保留 v5.0 页面媒体治理层与 v4.6 全部能力。
+// @description:en Universal smart video and image invert userscript (0.6.10, AGPL-3.0 licensed). Smart inversion for video, images, background images and canvas, decided at connected-region granularity. The 0.6 line adds region inversion (per connected region, off by default), a fully unified UI rebuild, and the browser-extension form with its release pipeline. Retains the v5.0 page-media governance layer (unified element-action table invert/keep/hide/mask/dim/peek, element blocking Alt+Shift+click, masks Alt+M with three adjustable styles, whole-page dimming, generic hover-restore gate — all off by default and individually switchable) and every v4.6 capability (local-first decisions, once-per-click Alt+click, dark-veil awareness).
 // @author       jiozhaoyue
 // @license      AGPL-3.0-or-later
 // @icon         data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><circle cx=%2250%22 cy=%2250%22 r=%2246%22 fill=%22%23141e24%22 stroke=%22%2353a1b3%22 stroke-width=%228%22/><path d=%22M50 4 A46 46 0 0 1 50 96 Z%22 fill=%22%2353a1b3%22/></svg>
@@ -40,7 +41,7 @@
   // ==========================================
   // 1. 配置与常量定义
   // ==========================================
-  const SCRIPT_VERSION = '0.6.9';
+  const SCRIPT_VERSION = '0.6.10';
   const PREFS_KEY = 'universal_smart_invert_v4';   // v2.0 遗留偏好键 (迁移源, 迁移后原样保留以便回滚)
   const LEGACY_KEY = 'universal_smart_invert_v3';  // v1.x 旧键 (仅读取迁移, 保留不删以便回滚)
   const STATS_KEY = 'universal_smart_invert_stats_v1'; // v2.0 遗留统计键 (保留写入以兼容回滚)

@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "全网通用智能视频与图片反色 (Universal Smart Video & Image Invert)",
-  "version": "0.6.9",
-  "description": "全网通用智能视频与图片反色脚本 (0.6.9, AGPL-3.0 开源)。视频/图片/背景图/Canvas 智能反色, 判定以连通区域为单位; 0.6 线新增区域反色 (按连通区域自动判定, 默认关闭)、界面全量同源重构与扩展形态。",
+  "name": "全网通用智能视频与图片反色 (Universal Smart Invert)",
+  "version": "0.6.10",
+  "description": "全网通用智能视频与图片反色脚本 (0.6.10, AGPL-3.0 开源)。视频/图片/背景图/Canvas 智能反色, 判定以连通区域为单位; 0.6 线新增区域反色 (按连通区域自动判定, 默认关闭)、界面全量同源重构与扩展形态。",
   "icons": {
     "16": "icons/icon16.png",
     "32": "icons/icon32.png",
@@ -11,7 +11,7 @@
   },
   "action": {
     "default_popup": "popup.html",
-    "default_title": "全网通用智能视频与图片反色 (Universal Smart Video & Image Invert)",
+    "default_title": "全网通用智能视频与图片反色 (Universal Smart Invert)",
     "default_icon": {
       "16": "icons/icon16.png",
       "32": "icons/icon32.png",
@@ -39,5 +39,19 @@
       "all_frames": true
     }
   ],
-  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA8U6How4v1V/sbv3pjAAHem9F6mNhI9nUPyCz8Lp79zYkY+ebpCZf+Y4sQfOEizlOhPyBczCTYobMLA1E8F8bLhSz3Up/wo4F5ckCmiTVKtN8m0aEFg+s8ekIRx+n3WRWC/7QcyNMPyhj1/rkSyA7w78INTqrN8JRC+HPP/k0zNoPZWq8mBUwWDIX85ndYkeTEw+F3VSe1+V6fB16yu2vBDl9Vit2So+T5pW2Sa8GUT8vUAUaMsN2BURRUua1TushXaAKU74KhZ3kP1D3vXuIUPVQWw3jhwztctjx2aWQ+1uGKycRMHrCAjNQm7V6xPWSt033LYXzUQu52TrOL54CZQIDAQAB"
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA8U6How4v1V/sbv3pjAAHem9F6mNhI9nUPyCz8Lp79zYkY+ebpCZf+Y4sQfOEizlOhPyBczCTYobMLA1E8F8bLhSz3Up/wo4F5ckCmiTVKtN8m0aEFg+s8ekIRx+n3WRWC/7QcyNMPyhj1/rkSyA7w78INTqrN8JRC+HPP/k0zNoPZWq8mBUwWDIX85ndYkeTEw+F3VSe1+V6fB16yu2vBDl9Vit2So+T5pW2Sa8GUT8vUAUaMsN2BURRUua1TushXaAKU74KhZ3kP1D3vXuIUPVQWw3jhwztctjx2aWQ+1uGKycRMHrCAjNQm7V6xPWSt033LYXzUQu52TrOL54CZQIDAQAB",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "universal-smart-invert@dark-viewer",
+      "data_collection_permissions": {
+        "required": [
+          "none"
+        ]
+      },
+      "strict_min_version": "140.0"
+    },
+    "gecko_android": {
+      "strict_min_version": "142.0"
+    }
+  }
 }
