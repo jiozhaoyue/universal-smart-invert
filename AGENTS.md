@@ -215,20 +215,26 @@ the archived task design docs under `.trellis/tasks/archive/<month>/` for the ar
 For live-site debugging use `node scripts/probe-github.js <url>` (injects the current script into
 any page via CDP and dumps engine state).
 
-## 子代理与派发（强制，用户 2026-09-23 明令）
+## 子代理与派发（强制，用户 2026-09-28 明令重启）
 
 完整规则见 `.trellis/spec/guides/subagent-model-policy.md`。要点：
 
 1. **派发前必须问用户用哪个模型**，得到确认后才允许派发；禁止静默用主代理模型。
-2. **模型名一律不视为全称**（用户写的、历史记的、文档里的都算近似名）：必须到平台实际可用
-   清单里找**最匹配候选**，把候选+推荐呈给用户点选，**禁止**把近似名当正确名写进命令。
-3. 本项目**已确认默认模型**：`GLM-5.3 Flash`。该默认值不等于免询问。
-4. 子代理选**能力最低且最匹配**的档位（读多写少的检索/提炼/核验）；旗舰模型留给主脑。
+2. **模型名一律不视为全称**（用户写的、历史记的、文档里的都算近似名）：必须到**对应通道**
+   的实际可用清单里取精确串，把候选+推荐呈给用户点选，**禁止**把近似名当正确名写进命令。
+3. **本仓当前已确认配置**（用户 2026-09-28 点选）：**Claude 原生 Agent 工具** + **`model: sonnet`**
+   + `run_in_background` 后台真并行。该确认不等于免询问——换通道/换模型仍须重新问。
+4. **旧的「默认 `GLM-5.3 Flash`」已失效**：该 slug 不在代理 `/v1/models` 清单内
+   （2026-09-28 实测仅 7 个模型）。文档里的模型名同样不可信——`.codex/agents/*.toml` 注释里的
+   `gpt-5.6-terra` 就是错的（实际清单只有 `gpt-5.6-sol`）。
 5. **禁止用 `Kimi K3` 做子代理**（用户 2026-09-21 起长期有效）。
-6. 用户要求「并行做、主代理不等待」时，必须用 `trellis channel spawn --model "<已确认模型>"`
-   后台 worker；阻塞式子代理（如 VS Code `runSubagent`）**不得**冒充并行。
+6. 原生 Agent 的 `run_in_background` **即真并行**；只有**阻塞式** `runSubagent`
+   （VS Code / Copilot）不得冒充并行。用户要求「并行做、主代理不等待」时用前者。
 7. 每次派发 prompt 首行必须是 `Active task: <task.py current 的任务路径>`。
 8. 派发 prompt 必须自包含（范围/问题/期望产出/是否允许写代码）。
+9. **产出即弃**；跨阶段记忆由主代理维护。「互相检查」按链式交叉落实：A 产出 → B 审 → C 复核，
+   不靠多个子代理共享上下文。只读研究子代理只许写任务 `research/` 目录。
+10. 子代理上下文上限不可设（由模型窗口决定）；落实用户意图靠「一事一代理 + 通读不做片段抽样」。
 
 > 本小节写在 `TRELLIS:START/END` 标记块**之外**，因此不会被 Trellis 重新生成覆盖。
 

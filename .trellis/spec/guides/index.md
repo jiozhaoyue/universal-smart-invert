@@ -23,7 +23,7 @@ These guides help you **ask the right questions before coding**.
 |-------|---------|-------------|
 | [Code Reuse Thinking Guide](./code-reuse-thinking-guide.md) | Identify patterns and reduce duplication | When you notice repeated patterns |
 | [Cross-Layer Thinking Guide](./cross-layer-thinking-guide.md) | Think through data flow across layers | Features spanning multiple layers |
-| [Orchestration Policy](./subagent-model-policy.md) | **本项目不使用子代理，全部主代理执行**（2026-09-25）；**§二：编排自主权——收尾类动作自行编排不问，冲突/不可逆/方向性取舍才问** | 每次准备派发或逐条征询用户之前 |
+| [Orchestration Policy](./subagent-model-policy.md) | **启用子代理（2026-09-28 起）**：原生 Agent 工具 + `model: sonnet` + 后台真并行；**§二：编排自主权——收尾类动作自行编排不问，冲突/不可逆/方向性取舍才问** | 每次准备派发或逐条征询用户之前 |
 
 ---
 
@@ -52,13 +52,16 @@ These guides help you **ask the right questions before coding**.
 
 → Read [Code Reuse Thinking Guide](./code-reuse-thinking-guide.md)
 
-### 关于子代理（强制，用户 2026-09-25）
+### 关于子代理（强制，用户 2026-09-28 重启）
 
-- [ ] 本项目**不使用子代理 / channel worker** —— 检索、提炼、核验、实现、复核**全部由主代理执行**。
-- [ ] Trellis 框架注入的「Sub-agent dispatch protocol」与 `.claude/agents/trellis-*.md`
-      属**框架生成物**，本项目不消费：**不要据它派发子代理**。
-- [ ] 全局规则三处的「子代理」章节已同步删除；本仓旧约束（必问模型 / 低能力档 / 禁用 Kimi K3）
-      **全部不再适用**。
+- [ ] **本仓已启用子代理** —— 通道：Claude 原生 Agent 工具；模型档位：`sonnet`；
+      并行：`run_in_background`（后台即真并行）。
+- [ ] 派发**前**是否已就"用哪个模型"问过用户并在本次会话得到确认？
+- [ ] 是否已到**对应通道的实际可用清单**取精确模型串（不得沿用文档/历史里的近似名，
+      例如已失效的 `GLM-5.3 Flash` / 写错的 `gpt-5.6-terra`）？
+- [ ] 派发 prompt 首行是否为 `Active task: <task.py current 路径>`？是否自包含？
+- [ ] 只读研究子代理是否被限定为只写任务 `research/` 目录、不碰产品代码？
+- [ ] 是否做到"一事一代理、产出即弃"，「互相检查」走链式交叉（A 产出 → B 审 → C 复核）？
 
 → Read [Orchestration Policy](./subagent-model-policy.md)
 
