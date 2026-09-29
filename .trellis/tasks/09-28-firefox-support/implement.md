@@ -77,16 +77,16 @@ POST /session/:sessionId/moz/addon/install
 - [ ] `npx web-ext sign --source-dir=extension --api-key <> --api-secret <>`
 - [x] 凭据缺失已显式记录为**唯一阻塞项**(PRD Open Questions)
 
-### F. 收尾 —— 进行中
+### F. 收尾 —— 完成
 
-- [ ] 沉淀 spec:`.trellis/spec/frontend/` 跨浏览器扩展契约(单份 manifest 双引擎规则 + Firefox 身份字段 + 门禁命令)
-- [ ] 更新 AGENTS.md 的门禁命令清单
-- [ ] 提交并推送 `origin main`
+- [x] 沉淀 spec:`.trellis/spec/frontend/cross-browser-extension-contract.md`(并在 `frontend/index.md` 注册)
+- [x] 更新 AGENTS.md:门禁命令清单 + 一条 Firefox 身份硬规则
+- [x] 提交并推送 `origin main`(`be9af97..5ec22ad`)
 
 ## 实测记录(踩到的坑,供 spec 沉淀)
 
 1. **陈旧 zip 陷阱**:`test-firefox.js` 起初只在 zip 不存在时才打包。版本号未变时会复用**上一版 manifest** 打出的 zip,而装载载荷正是这个 zip —— Firefox 于是分配随机 `@temporary-addon` id,F1 直接失败,且报错信息看起来像"身份字段不被采纳",极易误判为产品缺陷。已改为**每次重跑 `pack.js`**。
-2. **`grep -c $'\r'` 在 Git Bash 下不可用**:`$'\r'` 被展开成空模式,于是"匹配所有行",把纯 LF 文件全部误报成 CRLF(实测 `CR=0` 的文件被报成"17292/17292 行 CRLF")。判定行尾必须用 `node` 数字节(`s.match(/\r/g)`),不要用 grep。AGENTS.md 里"工作区是 CRLF"的描述在当前检出上**不成立**。
+2. **判定行尾不要用 `grep -c $'\r'`**:在 Git Bash 下 `$'\r'` 展开为空模式,"匹配所有行",把纯 LF 文件全部误报为 CRLF(实测 `CR=0` 的文件被报成"17292/17292 行 CRLF")。必须用 `node` 数字节(`s.match(/\r/g)`)。另注:当前工作区为 **LF**(上一次会话已 normalize);AGENTS.md 所述"git 触碰后回写 CRLF"依然成立,只是此刻尚未被 git 触碰。
 3. **装载 id 是身份是否被采纳的唯一证据**:只断言"扩展装上了"会漏掉随机 id —— 那正是 storage.sync 在 Firefox 不稳的根因。
 
 ## 回滚点
