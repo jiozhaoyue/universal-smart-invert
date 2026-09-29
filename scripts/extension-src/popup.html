@@ -6,7 +6,13 @@
   <style>
     /* 构建时由 scripts/build-extension.js 从用户脚本的 v6.4-TOKENS-START/END 块逐字注入。
        绝不要在这里手写颜色 —— 三处 token 的逐字节一致性由 test.js 把关。 */
+    /* 注入的是**裸声明列表**，必须包在 :root 里：样式表顶层的无选择器声明不成立，
+       CSS 解析器会整块丢弃（并连带吞掉紧随其后的那条规则）。此前这里没包，导致 popup
+       的 token 全部未解析、body 背景透明、自定义色系整个失效 —— 真浏览器断言见
+       test-extension.js 场景 6 的「token 实际生效」守卫。 */
+    :root {
     /* SVI_TOKEN_INJECT */
+    }
     :root { color-scheme: dark; }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body {

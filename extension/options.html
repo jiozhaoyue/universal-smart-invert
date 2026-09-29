@@ -6,6 +6,9 @@
   <style>
     /* 构建时由 scripts/build-extension.js 从用户脚本的 v6.4-TOKENS-START/END 块逐字注入。
        绝不要在这里手写颜色 —— 三处 token 的逐字节一致性由 test.js 把关。 */
+    /* 注入的是**裸声明列表**，必须包在 :root 里：样式表顶层的无选择器声明不成立，
+       CSS 解析器会整块丢弃（并连带吞掉紧随其后的那条规则）—— 本页此前因此整页无主题。 */
+    :root {
     /* ==========================================
            v6.4 设计 token —— **全仓唯一真源**（用户 2026-09-26 裁决: 照搬 Dark Reader 深青调）
            三处消费点: 用户脚本内嵌面板 / 扩展 popup / 扩展 options 页。
@@ -60,6 +63,7 @@
         --svi-gap: .75rem;
         --svi-tr-fast: 125ms;
         --svi-tr-slow: 250ms;
+    }
     /* 控件样式（.svi-modal-* / .svi-chip / .svi-msg / .svi-collapsible-* …）整份来自用户脚本
        的面板 CSS，同样在构建时注入 —— 这里不许手写第二套控件样式（build + test.js 有断言把关）。 */
     

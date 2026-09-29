@@ -43,6 +43,16 @@ const HTTP_PORT = Number(process.env.SVI_EXT_HTTP_PORT || 8791);
 const BOOT_TIMEOUT_MS = 25000;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// --shots [dir]：额外产出 popup / options 两个扩展页的 PNG 基线（视觉验收物）。
+// 默认关闭 —— 只多写文件，不改变任何断言语义。用户脚本的面板截图由 scripts/panel-shot.js 产出，
+// 三处界面合起来才构成任务 design-assets/ 里的「三处界面截图基线」。
+const SHOTS_IDX = process.argv.indexOf('--shots');
+const SHOTS_DIR = SHOTS_IDX < 0
+  ? null
+  : path.resolve((process.argv[SHOTS_IDX + 1] && !process.argv[SHOTS_IDX + 1].startsWith('--'))
+    ? process.argv[SHOTS_IDX + 1]
+    : path.join(ROOT, 'dev', 'shots', 'ext-' + new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)));
+
 // —— Chrome 探测：与 test-browser.js 同语义 —— 设了 SVI_CHROME_PATH 就是**唯一**候选
 // （这样才让「无 Chrome → 未验证」这条降级路径可被负向对照真正触发）
 const CHROME_CANDIDATES = process.env.SVI_CHROME_PATH
@@ -190,6 +200,24 @@ function startServer() {
     try { if (chrome) chrome.kill(); } catch (e) { /* ignore */ }
     try { if (httpSrv) httpSrv.close(); } catch (e) { /* ignore */ }
     try { fs.rmSync(userDataDir, { recursive: true, force: true }); } catch (e) { /* ignore */ }
+  };
+
+  // 截图（只在 --shots 时生效）。captureBeyondViewport 用于长长的 options 页。
+  // 注意 send() 解析的是**完整 CDP 封装** `{id, result}`，不是 result 本身（此处曾取错层级，
+  // 报错是 Buffer.from(undefined)，看起来像写入问题、其实是协议形状问题）。
+  const saveShot = async (conn, name, full) => {
+    if (!SHOTS_DIR) return null;
+    const r = await conn.send('Page.captureScreenshot',
+      full ? { format: 'png', captureBeyondViewport: true } : { format: 'png' });
+    if (r.error) throw new Error('CDP ' + (r.error.message || JSON.stringify(r.error)));
+    const data = (r.result || {}).data;
+    assert.ok(typeof data === 'string' && data.length > 0,
+      '截图必须返回 PNG 数据: ' + name + ' got ' + typeof data);
+    fs.mkdirSync(SHOTS_DIR, { recursive: true });
+    const file = path.join(SHOTS_DIR, name + '.png');
+    fs.writeFileSync(file, Buffer.from(data, 'base64'));
+    console.log('    [shot] ' + name + '.png (' + fs.statSync(file).size + ' bytes)');
+    return file;
   };
 
   try {
@@ -702,6 +730,26 @@ function startServer() {
     assert.strictEqual(popupReady.host, '127.0.0.1', 'popup 必须渲染本站主机名');
     assert.ok(/6/.test(popupReady.counts), 'popup 计数行必须反映本站 6 张图，实测: ' + popupReady.counts);
 
+    // 6a-2. **token 实际生效**（不是「存在」）。
+    //   注入的是**裸声明列表**，样式表顶层的无选择器声明不成立 —— CSS 解析器会整块丢弃，
+    //   于是 var(--svi-*) 全部落空、body 背景变透明、紧跟其后的 `:root{color-scheme:dark}` 也被吞掉。
+    //   扩展的 popup / options 曾长期因此**完全没有主题**（真浏览器截图与 CSSOM 双重实测）。
+    //   为什么必须放在这里：test.js 的 token 断言只能查「token 文本是否出现」(indexOf)，
+    //   对「出现但惰性」零覆盖 —— 那正是前几轮 UI 重建全部漏过的自证式盲区。
+    const THEME_PROBE = `(() => {
+      const cs = getComputedStyle(document.documentElement);
+      const b = getComputedStyle(document.body);
+      return { bg: cs.getPropertyValue('--svi-bg').trim(), bodyBg: b.backgroundColor, scheme: cs.getPropertyValue('color-scheme').trim() };
+    })()`;
+    const popupTheme = await U.ev(THEME_PROBE);
+    assert.strictEqual(popupTheme.bg, '#141e24',
+      'popup 的 --svi-bg 必须解析出真值（token 未被 :root 包裹时会得到空串），实测 ' + JSON.stringify(popupTheme.bg));
+    assert.strictEqual(popupTheme.bodyBg, 'rgb(15, 22, 27)',
+      'popup 的 body 计算背景必须是 --svi-bg-deep（#0f161b），实测 ' + popupTheme.bodyBg);
+    assert.strictEqual(popupTheme.scheme, 'dark',
+      'popup 必须声明 color-scheme: dark（否则原生 checkbox/select 在深色底上渲染成浅色），实测 ' + popupTheme.scheme);
+    console.log('    token 生效: --svi-bg=' + popupTheme.bg + ' body背景=' + popupTheme.bodyBg + ' color-scheme=' + popupTheme.scheme + ' ✓');
+
     // 6b. 三条消息协议往返 —— 由 popup 页发往真实内容脚本，并断言**真实效果**
     const snap = await relay({ type: 'svi-get-snapshot' });
     assert.ok(snap, 'svi-get-snapshot 必须从内容脚本拿到快照');
@@ -765,6 +813,14 @@ function startServer() {
     assert.strictEqual(tabsInfo.sitesSel, 'true', '被选中的页签 aria-selected 必须为 true');
     assert.deepStrictEqual(tabsInfo.afterMore, ['more'], '点「更多」应切到更多面板');
     assert.deepStrictEqual(tabsInfo.afterFilter, ['filter'], '点回「反色」应切回');
+
+    // 6d-2. --shots：三个页签各截一张（页签可切换是上面刚断言过的，这里只取视觉基线）
+    for (const tn of ['filter', 'sites', 'more']) {
+      await U.ev(`document.getElementById('tab-btn-${tn}').click()`);
+      await sleep(200);
+      await saveShot(U, 'popup-' + tn);
+    }
+    await U.ev(`document.getElementById('tab-btn-filter').click()`);
 
     // 6e. v6.4 R3：站点名单只读摘要渲染（用「本站」页签的字段，与快照新增字段对齐）
     const siteInfo = await U.ev(`(() => ({
@@ -857,6 +913,19 @@ function startServer() {
       const v = await O.ev('window.__sviOptions ? window.__sviOptions.itemCount : 0');
       return v > 0 ? v : null;
     }, BOOT_TIMEOUT_MS, 'options 页渲染完成');
+
+    // 7-0. --shots：整页（captureBeyondViewport）—— options 页很长，视口截图会丢掉大半
+    await saveShot(O, 'options-full', true);
+
+    // 7-0b. token 实际生效（同场景 6a-2 的守卫；本页此前整页无主题）
+    const optTheme = await O.ev(THEME_PROBE);
+    assert.strictEqual(optTheme.bg, '#141e24',
+      'options 的 --svi-bg 必须解析出真值（token 未被 :root 包裹时会得到空串），实测 ' + JSON.stringify(optTheme.bg));
+    assert.strictEqual(optTheme.bodyBg, 'rgb(15, 22, 27)',
+      'options 的 body 计算背景必须是 --svi-bg-deep（#0f161b），实测 ' + optTheme.bodyBg);
+    assert.strictEqual(optTheme.scheme, 'dark',
+      'options 必须声明 color-scheme: dark，实测 ' + optTheme.scheme);
+    console.log('    token 生效: --svi-bg=' + optTheme.bg + ' body背景=' + optTheme.bodyBg + ' color-scheme=' + optTheme.scheme + ' ✓');
 
     // 7a. 渲染结果与真源逐键比对
     //   v6.4 R2b: 控件词汇里出现了**复合控件**（colorList 的添加行带 1 个取色器；listEditor 的添加表单
