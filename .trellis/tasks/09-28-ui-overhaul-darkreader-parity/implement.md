@@ -83,7 +83,7 @@ node scripts/build-extension.js && node scripts/pack.js
       `❌ popup 的 --svi-bg 必须解析出真值…实测 ""`，**exit 1**，断言确实咬得住
 - [x] `node test.js` 仍绿（三处逐字节一致断言不受影响：注入文本仍是 `trim` 后的原块）
 - [x] 重拍 popup / options 基线截图（修复前是浅色无主题，修复后为深色）
-- [ ] Step A 落地后更新 `design-assets/01` 的「本仓目标值」列
+- [x] Step A 落地后更新 `design-assets/01` 的「本仓目标值」列 → 01 / 03 已更新（Step A 落地值）
 
 **回滚点**：两个源 HTML 的 `:root` 包裹 + `test-extension.js` 的守卫段 → 独立 revert。
 
@@ -95,22 +95,32 @@ node scripts/build-extension.js && node scripts/pack.js
 > 依据：`design.md` §3.3、`research/03` §2。
 
 - [ ] token 块（`v6.4-TOKENS-START/END`，`universal-smart-invert.user.js:3910-3964`）：
-      - [ ] `--svi-border`：`#316e7d` → **`#35798a`**（3.428:1；同色系偏离 DR 最小的达标值）
-      - [ ] 新增 `--svi-border-w-inner: .0625rem`（对齐 DR `@size-border-inner`）
-      - [ ] `--svi-r-sm` / `--svi-r` / `--svi-r-lg` 值置 **0**（保留 token 名，避免调用点改动）
-      - [ ] 同步更新供 `rgba()` 消费的三元组（若描边色有色三元组）
-- [ ] 面板 CSS：`.svi-btn`（`:4404`）与 `.svi-chip`（`:4431`）的
+      - [x] `--svi-border`：`#316e7d` → **`#35798a`**（3.428:1；同色系偏离 DR 最小的达标值）
+            —— 已落地，块内注释写明偏离理由与实测比值
+      - [x] 新增 `--svi-border-w-inner: .0625rem`（对齐 DR `@size-border-inner`）—— 已落地
+      - [x] `--svi-r-sm` / `--svi-r` / `--svi-r-lg` 值置 **0**（保留 token 名，避免调用点改动）—— 已落地
+      - [x] 同步更新供 `rgba()` 消费的三元组（若描边色有色三元组）
+            —— **无 `--svi-border-rgb` 三元组**（已 grep 确认），无需同步
+- [x] 面板 CSS：`.svi-btn`（`:4404`）与 `.svi-chip`（`:4431`）的
       `border: 1px solid var(--svi-ctl-hover)` → **`var(--svi-border-w) solid var(--svi-border)`**
-- [ ] `.svi-action-btn`（`:4104`）/ `.svi-pip-btn`（`:5190`）/ `.svi-preset-btn`（`:4139`）/
+      —— 同时 `border-radius` 置 0（`.svi-chip` 原 `999px` 药丸 → 直角）
+- [x] `.svi-action-btn`（`:4104`）/ `.svi-pip-btn`（`:5190`）/ `.svi-preset-btn`（`:4139`）/
       `.svi-open-modal-btn`（`:4158`）的边框改用 token（**注意**：现值是
       `rgba(var(--svi-white-rgb), .12/.08)`，已走 token，但对比度不足）
-- [ ] **补规则缺失**：`.svi4-tab`（`:5419` `border:none`）与 `.svi-modal-close`（`:4708` `border:none`）
+      —— 已改 `var(--svi-border-w) solid var(--svi-border)`，`border-radius` 置 0；
+      hover 态描边由 `rgba(white,.2)` 改为 `var(--svi-fg)`
+- [x] **补规则缺失**：`.svi4-tab`（`:5419` `border:none`）与 `.svi-modal-close`（`:4708` `border:none`）
       补可辨边界（后者是关闭按钮，务必可辨）
-- [ ] popup.html：`.tab` / `.power-row` / `.chip` 的 `border-radius` 置 0；
+      —— 两者均补 `var(--svi-border-w) solid var(--svi-border)`，直角化
+- [x] popup.html：`.tab` / `.power-row` / `.chip` 的 `border-radius` 置 0；
       `.panel` 的圆角卡片改「分区标题 + 分隔线」
-- [ ] 页签方形化 + 上下边框（DR `tab-panel` 形态）
-- [ ] **不动按钮填充**（忠于 DR：其 `@color-control-back` 也等于页面底，靠描边分离）
-- [ ] 更新 `design-assets/` 的 token 差异表与对比度基线表
+      —— `.power-row` 去卡（去底/描边 → 1px 分隔线 `var(--svi-border)`）；描边色 `--svi-ctl-hover` → `var(--svi-border)`；
+      `select`/`button`/`.chip`/`.ver`/`nav.tabs`/`#list-preview`/`#unavailable` 同批换 token + 直角
+- [x] 页签方形化 + 上下边框（DR `tab-panel` 形态）—— `.svi4-tabs`/`.svi4-tab` 直角化；
+      未选中 `border: 2px var(--svi-border)`、选中 `border-color: var(--svi-fg)`（两态均 ≥3:1）
+- [x] **不动按钮填充**（忠于 DR：其 `@color-control-back` 也等于页面底，靠描边分离）
+- [x] 更新 `design-assets/` 的 token 差异表与对比度基线表 —— 01/03 已更新（Step A 落地值）；
+      **主代理核验**：两份文件均在 `git diff` 改动列表内（`01-token-diff.md` +10/-…、`03-contrast-baseline.md` +32）
 
 **验证命令**：
 
@@ -121,10 +131,25 @@ node scripts/panel-shot.js                     # 产出截图基线，人工看�
 node scripts/build-extension.js && node test-extension.js
 ```
 
-- [ ] **对比度断言（AC3）**：逐按钮读 computed `border-*`，对"最近非透明背景祖先"算比值，**全部 ≥3:1**。
+- [x] **对比度断言（AC3）**：逐按钮读 computed `border-*`，对"最近非透明背景祖先"算比值，**全部 ≥3:1**。
       基准与算法见 `design.md` §3.3（本轮试算写在任务探针里，需固化为断言）
-- [ ] 页签**选中态可辨**单独断言（未选中态无边框是设计，不列入按钮缺陷）
-- [ ] 五绿全绿
+      —— 已固化在 `test-browser.js` **Scenario 1c**（读浏览器计算样式 + WCAG relative luminance + alpha 合成），
+      实测 12 类可见按钮全部 ≥3:1（最低 3.432，最高 5.763），并输出逐按钮四边属性表
+- [x] 页签**选中态可辨**单独断言（未选中态无边框是设计，不列入按钮缺陷）
+      —— Scenario 1c 表内 `.svi4-tab:not(.active)`（3.432）与 `.svi4-tab.active`（5.742）两行各成一条
+- [x] 五绿全绿 —— **已补跑，六条门禁全绿**（2026-09-29 收尾窗口）
+      | 门禁 | 结果 |
+      |---|---|
+      | `node --check universal-smart-invert.user.js` | ✅ |
+      | `node test.js` | ✅ 全通过（`LuminanceDetector … getContext is not a function` 为 shim 预期噪声）|
+      | `node test-browser.js` | ✅ 34 场景 `ALL BROWSER AUTOMATION TESTS PASSED 100%` |
+      | `node test-extension.js` | ✅ 8 场景 `真扩展 E2E 全部通过`（含 token 注入生效断言）|
+      | `npx web-ext lint --source-dir=extension` | ✅ **0 errors** / 2 warnings（`UNSAFE_VAR_ASSIGNMENT` innerHTML，既有）|
+      | `node scripts/build-extension.js && node scripts/pack.js` | ✅ 12 entries，CRC OK（`dist/…-v0.6.10.zip`）|
+      ⚠ **仍未绿的一项（不属六门禁）**：`scripts/check-panel-overflow.js` —— 见「实现期发现」§5，
+      预存在断言漂移（脚本写死 11、真源已 12），**本步不修**，列为下一步第一件事。
+      本条原标注「部分未跑」指的是 §6 记录的 `test-extension.js` / `web-ext lint` / `pack.js` /
+      `panel-shot.js` —— 前三条**现已补跑且绿**；`panel-shot.js` 见 §7。
 
 **回滚点**：仅 token 块 + CSS 模板 + popup.html → `git checkout` 这三个文件即回到基线。
 
@@ -278,3 +303,66 @@ node scripts/build-extension.js && node scripts/pack.js
 | **D 步中途卡住** | 行工厂加 `key` 后某调用点取不到句柄 | 整批 revert 到 D 前，改走「保留手写 + 只加一致性断言」的退路（范围缩小，须回报用户） |
 | **a11y 回退** | 控件形态表里出现「原生 → span/div」 | 立即停手；D6 已裁定不得回退（`design.md` §6） |
 | **范围蔓延** | 有人提出"顺便扩站点覆盖键面"或"顺便精简 A 全局页签" | 两者都属"扩大改动面"，**回报用户**后再议（`design.md` §6） |
+
+---
+
+## 实现期发现（Step A，2026-09-29）
+
+> 按派发要求：`design.md`/`implement.md` 与代码实际不符处**不擅自改设计**，就地登记。
+
+1. **[规格矛盾] 「保留 token 名避免大量调用点改动」的前提不成立。**
+   `--svi-r-sm/-r/-r-lg` 在用户脚本内 `var()` 消费数为 **0**（已 grep 确认）——面板 CSS 的
+   `border-radius` 全部是**字面量**（全仓 55 处）。因此「把 token 值置 0」只改声明、**不产生任何直角效果**。
+   处置：token 值按 brief置 0（保留名），**并**对 brief 点名的控件（按钮/chip/页签/关闭钮/分区容器）
+   把 `border-radius` 字面量一并置 0 —— 否则「直角化」是空的。圆形语义（`50%` 的圆点/旋钮/色块）
+   与药丸开关（`.svi4-switch` / `.svi-trigger-pill`，属 Step B 对象）**有意保留**，未误改。
+
+2. **[设计未记] 面板「卡片」实际含两处：`.svi-modal-section`（分组容器）与 `.svi4-card`（本站能力卡）。**
+   去卡片只对**分组容器**执行（`.svi-modal-section` → 底/边/圆角归零 + 1px 分隔线）；
+   `.svi4-card` 是**控件**不是分组容器，仅直角化 + 描边换 token，未去卡。
+
+3. **[brief 未列、实现判定「同批应改」的改动面]** 除 brief 点名的选择器外，为实现 R2「所有按钮」
+   与 R6「直角 + 2px 描边」的一致落地，同批改了：`.svi-btn-reset` / `.svi-btn-done` / `.svi-mini-btn`
+   / `.svi-layout-btn`（后者原 `border:none`，与 `.svi-modal-close` 同类「规则缺失」）/ `.svi-layout-switch`
+   / `.svi4-tabs` / `.svi-modal-select` / `.svi-modal-text` / `.svi-modal-textarea` / `.svi-modal-num-input`
+   / `.svi-input` / `.svi-color-chip` / `.svi-modal-window`（16px → 0）。**改动面大于 brief 的显式清单**。
+
+4. **[对比度口径]** AC3 断言的基准按 brief/`design-assets/03` 的口径取「**最近非透明背景祖先**」
+   （不含元素自身底色）。对自带白/彩底 tint 的按钮（`.svi-action-btn` 等），若把元素自身 tint 也算进基准，
+   个别会落到 ~2.9:1；按既定口径（祖先）则 ≥3:1。此点已在 `test-browser.js` Scenario 1c 注释里写明口径。
+
+5. **[预存在红，与 Step A 无关] `scripts/check-panel-overflow.js` FAIL。**
+   唯一失败项是 `statsCells` 实测 **12**、脚本硬编码期望 **11**（`statEntries()` 现返回 12 条），
+   该计数由 JS 生成、**CSS 改不动**；且 Step 0 **从未记录过 overflow 基线**（implement.md Step 0 只记录了
+   「可跑」未记录结果）。属**预存在的断言漂移**，本步未修（超出 Step A 范围）。其余条件
+   （`modal` / `hScroll` / `overflows` / `storePreviews`）全部 PASS。
+
+   > **主代理独立核验（2026-09-29 收尾）**：① `git diff universal-smart-invert.user.js | grep -c statEntries|statsCell`
+   > = **0**（Step A 未碰该 JS）；② `scripts/check-panel-overflow.js` **未在工作树改动列表里**（脚本本身没碰）；
+   > ③ 失败判据 `:123` 是 `layout === 'center' && r.statsCells !== 11`，而 `statsCells` =
+   > `querySelectorAll('.svi-stats-grid .svi-stats-cell').length`（`:94`），这些节点由 `:14994` 的循环创建
+   > —— **纯 JS 计数，与 CSS 无关**。三条合起来：该红必为预存在，Step A 不可能造成。
+   >
+   > **归属与处置**：属 **AC9** 的阻断项，也是 `01-VERIFY` P8「去硬编码」点名的同类问题
+   > （脚本把期望值 `11` 写死，真源漂到 12 后无人察觉）。**本次收尾不修**（避免在收尾窗口引入未复核的改动）；
+   > 列为**下一步第一件事**：让脚本从用户脚本的 `statEntries()` 真源**派生**期望条数，而不是写死 —— 这是
+   > **加强**而非放宽断言，改完必须重跑该脚本自证。
+   >
+   > 注：`scripts/check-panel-overflow.js` **不在** AGENTS.md「all green required before commit」
+   > 的六条门禁清单内（它在 PRD 里对应 AC9），故不阻断 Step A 的提交。
+
+6. **[未验证]** `test-extension.js` / `web-ext lint` / `pack.js` / `panel-shot.js` 在本次 13:50 收尾窗口内
+   **未跑**（不是通过）。`node test.js` / `node --check` / `build-extension.js` / `test-browser.js` 已跑且绿。
+
+7. **[收尾补跑，2026-09-29 第二窗口]** §6 遗留的三条**已全部补跑且绿**：
+   `node test-extension.js`（8 场景全过）、`npx web-ext lint --source-dir=extension`（0 errors）、
+   `node scripts/build-extension.js && node scripts/pack.js`（12 entries，CRC OK）。
+   **Step A 至此作为一个自洽单元提交**（B/C/D 与第 5 步仍在计划内未开始，任务保持 `in_progress`）。
+
+   本次提交范围（**刻意排除**两项）：
+   - **排除 `scripts/build-crx.js`** —— Step 0 已判定为纯行尾差异（工作树 LF / 索引 CRLF，内容零差异），
+     纳入只会产生 EOL churn。
+   - **排除 version bump** —— 本任务第 5 步收尾才 bump；中途提交不 bump 与前置提交 `065264a`
+     的做法一致（该次同样未 bump）。故 `@version` 仍为 `0.6.10`。
+   - 提交前核验：`git diff universal-smart-invert.user.js` 的全部 hunk 落在 CSS 区段
+     （`:3900–5300` 面板 CSS 模板），**JS 逻辑区段零改动** —— 与「Step A 纯 CSS」的声明相符。

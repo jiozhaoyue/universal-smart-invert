@@ -3,7 +3,7 @@
 > 任务：`.trellis/tasks/09-28-ui-overhaul-darkreader-parity` · 基线 SHA：见 `04-screenshot-baseline.md`
 > 真源：`universal-smart-invert.user.js` 的 `v6.4-TOKENS-START/END` 块（三处消费点：用户脚本面板 / popup / options）
 > DR 侧依据：`research/02-darkreader-ui-anatomy.md` + `research/02-VERIFY.md`（上游 tag `v4.9.133`，MIT）
-> 状态：**首版**（Step 0 建基线）。Step A 落地后就地更新「本仓目标值」列为「已落地」。
+> 状态：**Step A 已落地**（2026-09-29）。下表「本仓目标值」= 已落地值。
 
 | 角色 | DR 原值（`src/ui/theme.less`） | 本仓现值 | 本仓目标值 | 偏离理由 |
 |---|---|---|---|---|
@@ -11,11 +11,11 @@
 | 控件底 `--svi-ctl-bg` | `#141e24`（= 页面底） | `#141e24`（= `--svi-bg`） | **不变** | 忠于 DR：其 `@color-control-back` 亦等于 `@color-back`，靠**描边**分离；改填充反而偏离 DR |
 | 控件悬停 `--svi-ctl-hover` | `#193945` | `#193945` | 不变（但**不再当描边用**） | 对底 1.380:1，作描边不达标（见 ③） |
 | 控件激活 `--svi-ctl-active` | `#316e7d` | `#316e7d` | 不变 | 逐值照搬 |
-| 描边色 `--svi-border` | `#316e7d` | `#316e7d`（**死 token：面板 CSS 0 消费**） | **`#35798a`** | **本表唯一故意偏离 DR 的颜色**：DR 值对面板底 `#141e24` = **2.947:1 < 3:1**（WCAG 1.4.11）。`#35798a` = 面板底 **3.428:1** / popup 底 **3.696:1**，是同色系里偏离 DR 最小的达标值（`#3a8091` = 3.769/4.063，偏离更大） |
+| 描边色 `--svi-border` | `#316e7d` | `#35798a` | **已落地 `#35798a`** | **本表唯一故意偏离 DR 的颜色**：DR 值对面板底 `#141e24` = **2.947:1 < 3:1**（WCAG 1.4.11）。`#35798a` = 面板底 **3.428:1** / popup 底 **3.696:1**，是同色系里偏离 DR 最小的达标值。**浏览器 computed 实测见 ③（Scenario 1c）** |
 | 前景 / 强调 `--svi-fg` | `#53a1b3` | `#53a1b3` | 不变 | 逐值照搬 |
-| 描边宽（外）`--svi-border-w` | `2px`（`@size-border: .125rem`） | `.125rem`（**死 token**） | `.125rem`（**启用**：落到按钮/页签/输入真实生效） | DR 值已对，缺的是消费点 |
-| 描边宽（内） | `1px`（`@size-border-inner: .0625rem`） | **无此 token** | **新增 `--svi-border-w-inner: .0625rem`** | 对齐 DR 的双层描边词汇（N4 类改造需要） |
-| 圆角 `--svi-r-sm/-r/-r-lg` | **无 radius 变量**（仅 `border-radius:50%` 圆形语义 + 个别 2px/7px） | `.25rem` / `.375rem` / `.75rem` | **全部 `0`**（保留 token 名，避免调用点改动） | DR 全 UI 直角；本仓圆角方向相反。注：`02-VERIFY` ③-2 已证「DR 唯一圆角是 50%」属**过头表述**（至少 7 处非 50%），但「无全局 radius token」成立 |
+| 描边宽（外）`--svi-border-w` | `2px`（`@size-border: .125rem`） | `.125rem`（**曾为死 token**） | **已落地并启用**：落到按钮 / 页签 / 关闭钮 / 输入（真实生效） | DR 值已对，缺的是消费点 |
+| 描边宽（内） | `1px`（`@size-border-inner: .0625rem`） | **无此 token** | **已落地 `--svi-border-w-inner: .0625rem`** | 对齐 DR 的双层描边词汇（分隔线用） |
+| 圆角 `--svi-r-sm/-r/-r-lg` | **无 radius 变量** | **已落地全部 `0`**（token 名保留） | **全部 `0`** | DR 全 UI 直角。**实现期发现**：面板 `var(--svi-r*)` 消费数为 0 → 仅改 token 无效果，逐控件字面量一并置 0（见 implement.md 「实现期发现」#1） |
 | 其余 12 个颜色角色（title/error/success/派生量） | 逐值 | 逐值照搬（v6.4） | 不变 | 无偏离 |
 | 字体 | Open Sans（外链 TTF） | `system-ui, "Segoe UI", "Microsoft YaHei"` | **不变** | N6：外链 TTF 撞 nocdn/单文件约束 |
 | 图标 | `background-image:url(assets/images/*.svg)` | `SviControls.ICONS` 内联 `<svg fill="currentColor">` | 不变 | N7：图标唯一来源 + 禁 emoji |

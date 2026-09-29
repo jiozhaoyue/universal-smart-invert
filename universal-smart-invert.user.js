@@ -3925,7 +3925,12 @@
         --svi-input-fg: #53a1b3;        /* 输入前景 */
         --svi-input-active: #ffffff;    /* 输入激活前景 */
         --svi-input-ph: #316e7d;        /* 输入占位 */
-        --svi-border: #316e7d;          /* 描边 */
+        /* 注意：本表唯一一处**故意偏离 Dark Reader** 的颜色（其余颜色逐值照搬）：
+           DR 的 @color-border 取值为 #316e7d，对面板底 #141e24 仅 2.947:1，低于 WCAG 1.4.11 的 3:1 下限，
+           故照搬不足以达标（验收 AC3）。#35798a 是同色系里偏离 DR 最小的达标值：
+           对面板底 #141e24 = 3.428:1、对 popup 底 #0f161b = 3.696:1 —— 单一描边色即可覆盖三处界面。
+           该比值由 test-browser.js 的「按钮边界对比度」场景读**浏览器计算样式**复算把关。 */
+        --svi-border: #35798a;          /* 描边（达标值；唯一偏离 DR 的颜色，理由见上） */
         --svi-title: #e96c4c;           /* 标题 / 警告 */
         --svi-error: #db4245;           /* 错误 */
         --svi-success: #317c4e;         /* 成功 */
@@ -3953,10 +3958,13 @@
         --svi-lh-sm: .875rem;
         --svi-lh: 1rem;
         --svi-border-w: .125rem;
+        --svi-border-w-inner: .0625rem; /* 内部分隔线（对齐 DR @size-border-inner，1px） */
         --svi-ctl-h: 1.5rem;
-        --svi-r-sm: .25rem;
-        --svi-r: .375rem;
-        --svi-r-lg: .75rem;
+        /* —— 直角化（对齐 DR：DR 全 UI 无全局 radius 变量，仅 50% 圆形语义）——
+           Step A：三个 radius token 值全部置 0（**保留 token 名**，避免调用点改动）。 */
+        --svi-r-sm: 0;
+        --svi-r: 0;
+        --svi-r-lg: 0;
         --svi-gap-sm: .5rem;
         --svi-gap: .75rem;
         --svi-tr-fast: 125ms;
@@ -4101,10 +4109,10 @@
       .svi-action-btn {
         flex: 1;
         padding: 6px 4px;
-        border: 1px solid rgba(var(--svi-white-rgb), 0.12);
+        border: var(--svi-border-w) solid var(--svi-border);
         background: rgba(var(--svi-white-rgb), 0.06);
         color: var(--svi-text-strong);
-        border-radius: 8px;
+        border-radius: 0;
         cursor: pointer;
         font-size: 11px;
         font-weight: 500;
@@ -4116,7 +4124,7 @@
       }
       .svi-action-btn:hover {
         background: rgba(var(--svi-white-rgb), 0.12);
-        border-color: rgba(var(--svi-white-rgb), 0.2);
+        border-color: var(--svi-fg);
       }
       .svi-action-btn.active {
         background: var(--svi-fg);
@@ -4136,10 +4144,10 @@
       .svi-preset-btn {
         flex: 1;
         padding: 4px 6px;
-        border: 1px solid rgba(var(--svi-white-rgb), 0.08);
+        border: var(--svi-border-w) solid var(--svi-border);
         background: rgba(var(--svi-white-rgb), 0.04);
         color: var(--svi-text-dim);
-        border-radius: 6px;
+        border-radius: 0;
         font-size: 11px;
         cursor: pointer;
         text-align: center;
@@ -4155,10 +4163,10 @@
       .svi-open-modal-btn {
         width: 100%;
         padding: 6px 8px;
-        border: 1px solid rgba(var(--svi-fg-rgb), 0.3);
+        border: var(--svi-border-w) solid var(--svi-border);
         background: rgba(var(--svi-fg-rgb), 0.12);
         color: var(--svi-text-strong);
-        border-radius: 8px;
+        border-radius: 0;
         font-size: 11px;
         font-weight: 500;
         cursor: pointer;
@@ -4226,8 +4234,9 @@
       .svi-modal-select {
         background: rgba(var(--svi-bg-rgb), 0.9);
         color: var(--svi-text-strong);
-        border: 1px solid rgba(var(--svi-white-rgb), 0.15);
-        border-radius: 6px;
+        border: var(--svi-border-w) solid var(--svi-border);
+        border-radius: 0;
+        box-sizing: border-box;
         font-size: 12px;
         padding: 4px 6px;
         outline: none;
@@ -4240,8 +4249,8 @@
         min-height: 52px;
         background: rgba(var(--svi-bg-rgb), 0.8);
         color: var(--svi-text-strong);
-        border: 1px solid rgba(var(--svi-white-rgb), 0.12);
-        border-radius: 6px;
+        border: var(--svi-border-w) solid var(--svi-border);
+        border-radius: 0;
         font-size: 11px;
         font-family: monospace;
         padding: 6px 8px;
@@ -4303,19 +4312,20 @@
       .svi-mini-btn {
         padding: 5px 10px;
         background: rgba(var(--svi-fg-rgb), 0.12);
-        border: 1px solid rgba(var(--svi-fg-rgb), 0.3);
+        border: var(--svi-border-w) solid var(--svi-border);
         color: var(--svi-text-strong);
-        border-radius: 6px;
+        border-radius: 0;
         font-size: 11px;
         cursor: pointer;
         transition: all 0.15s ease;
       }
       .svi-mini-btn:hover {
         background: rgba(var(--svi-fg-rgb), 0.25);
+        border-color: var(--svi-fg);
       }
       .svi-mini-btn.danger {
         background: rgba(var(--svi-error-rgb), 0.10);
-        border-color: rgba(var(--svi-error-rgb), 0.3);
+        border-color: var(--svi-error-bright);
         color: var(--svi-error-bright);
       }
       .svi-mini-btn.danger:hover {
@@ -4403,8 +4413,8 @@
          ========================================== */
       .svi-btn {
         padding: 6px 12px;
-        border-radius: 8px;
-        border: 1px solid var(--svi-ctl-hover);
+        border-radius: 0;
+        border: var(--svi-border-w) solid var(--svi-border);
         background: var(--svi-ctl-bg);
         color: var(--svi-text-strong);
         font-family: inherit;
@@ -4430,8 +4440,8 @@
       }
       .svi-chip {
         padding: 5px 11px;
-        border-radius: 999px;
-        border: 1px solid var(--svi-ctl-hover);
+        border-radius: 0;
+        border: var(--svi-border-w) solid var(--svi-border);
         background: var(--svi-ctl-bg);
         color: var(--svi-text-dim);
         font-family: inherit;
@@ -4507,8 +4517,9 @@
       }
       .svi-input {
         padding: 5px 8px;
-        border-radius: 6px;
-        border: 1px solid rgba(var(--svi-white-rgb), 0.15);
+        border-radius: 0;
+        border: var(--svi-border-w) solid var(--svi-border);
+        box-sizing: border-box;
         background: rgba(var(--svi-bg-rgb), 0.8);
         color: var(--svi-fg);
         font-family: inherit;
@@ -4564,7 +4575,7 @@
         background: rgba(var(--svi-bg-rgb), 0.98);
         border: 1px solid rgba(var(--svi-white-rgb), 0.14);
         box-shadow: 0 24px 64px rgba(var(--svi-black-rgb), 0.65);
-        border-radius: 16px;
+        border-radius: 0;
         display: flex;
         flex-direction: column;
         overflow: hidden;
@@ -4647,18 +4658,18 @@
       .svi-layout-switch {
         display: flex;
         gap: 2px;
-        background: rgba(var(--svi-white-rgb), 0.06);
-        border: 1px solid rgba(var(--svi-white-rgb), 0.1);
-        border-radius: 8px;
+        background: var(--svi-ctl-bg);
+        border: var(--svi-border-w-inner) solid var(--svi-border);
+        border-radius: 0;
         padding: 2px;
       }
       .svi-layout-btn {
-        border: none;
+        border: var(--svi-border-w-inner) solid var(--svi-border);
         background: transparent;
         color: var(--svi-text-dim);
         font-size: 11px;
         padding: 3px 9px;
-        border-radius: 6px;
+        border-radius: 0;
         cursor: pointer;
         transition: all 0.15s ease;
         white-space: nowrap;
@@ -4666,6 +4677,7 @@
       .svi-layout-btn:hover { color: var(--svi-text-strong); }
       .svi-layout-btn.active {
         background: var(--svi-fg);
+        border-color: var(--svi-fg);
         color: var(--svi-text-strong);
         font-weight: 600;
       }
@@ -4705,16 +4717,17 @@
       }
       .svi-modal-close {
         background: none;
-        border: none;
+        border: var(--svi-border-w) solid var(--svi-border);
         color: var(--svi-text-dim);
         font-size: 18px;
         cursor: pointer;
         padding: 2px 6px;
-        border-radius: 6px;
-        transition: color 0.15s ease, background 0.15s ease;
+        border-radius: 0;
+        transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
       }
       .svi-modal-close:hover {
         color: var(--svi-text-strong);
+        border-color: var(--svi-fg);
         background: rgba(var(--svi-white-rgb), 0.1);
       }
       .svi-modal-body {
@@ -4740,11 +4753,14 @@
       .svi-modal-body::-webkit-scrollbar-thumb:hover {
         background: rgba(var(--svi-dim-rgb), 0.55);
       }
+      /* Step A「去卡片」: DR 全 UI **没有**「圆角卡片 + 阴影」这套词汇（research/02 N9），
+         分组容器改为「分区标题 + 分隔线」—— 去掉底色 / 描边 / 圆角，只留一条 token 分隔线。 */
       .svi-modal-section {
-        background: rgba(var(--svi-white-rgb), 0.03);
-        border: 1px solid rgba(var(--svi-white-rgb), 0.06);
-        border-radius: 10px;
-        padding: 12px;
+        background: none;
+        border: none;
+        border-bottom: var(--svi-border-w-inner) solid var(--svi-border);
+        border-radius: 0;
+        padding: 4px 0 14px;
         display: flex;
         flex-direction: column;
         gap: 10px;
@@ -4821,8 +4837,9 @@
         flex: 1;
         min-width: 140px;
         background: rgba(var(--svi-bg-rgb), 0.8);
-        border: 1px solid rgba(var(--svi-white-rgb), 0.15);
-        border-radius: 6px;
+        border: var(--svi-border-w) solid var(--svi-border);
+        border-radius: 0;
+        box-sizing: border-box;
         color: var(--svi-text-strong);
         font-size: 11px;
         padding: 5px 8px;
@@ -4855,8 +4872,9 @@
         width: 60px;
         padding: 4px 6px;
         background: rgba(var(--svi-bg-rgb), 0.8);
-        border: 1px solid rgba(var(--svi-white-rgb), 0.15);
-        border-radius: 6px;
+        border: var(--svi-border-w) solid var(--svi-border);
+        border-radius: 0;
+        box-sizing: border-box;
         color: var(--svi-fg);
         font-size: 12px;
         font-family: monospace;
@@ -4895,22 +4913,23 @@
       .svi-btn-reset {
         padding: 6px 12px;
         background: rgba(var(--svi-error-rgb), 0.12);
-        border: 1px solid rgba(var(--svi-error-rgb), 0.3);
+        border: var(--svi-border-w) solid var(--svi-border);
         color: var(--svi-error-bright);
-        border-radius: 8px;
+        border-radius: 0;
         font-size: 12px;
         cursor: pointer;
         transition: all 0.15s ease;
       }
       .svi-btn-reset:hover {
         background: rgba(var(--svi-error-rgb), 0.25);
+        border-color: var(--svi-error-bright);
       }
       .svi-btn-done {
         padding: 6px 14px;
         background: var(--svi-fg);
-        border: 1px solid var(--svi-fg);
+        border: var(--svi-border-w) solid var(--svi-fg);
         color: var(--svi-text-strong);
-        border-radius: 8px;
+        border-radius: 0;
         font-size: 12px;
         cursor: pointer;
         font-weight: 500;
@@ -4933,8 +4952,8 @@
         gap: 8px;
         padding: 8px 10px;
         background: rgba(var(--svi-white-rgb), 0.04);
-        border: 1px solid rgba(var(--svi-white-rgb), 0.1);
-        border-radius: 8px;
+        border: var(--svi-border-w) solid var(--svi-border);
+        border-radius: 0;
         cursor: pointer;
         transition: all 0.15s ease;
         user-select: none;
@@ -5187,10 +5206,10 @@
       .svi-pip-btn {
         flex: 1;
         padding: 6px 4px;
-        border: 1px solid rgba(var(--svi-white-rgb), 0.12);
+        border: var(--svi-border-w) solid var(--svi-border);
         background: rgba(var(--svi-white-rgb), 0.06);
         color: var(--svi-text-strong);
-        border-radius: 8px;
+        border-radius: 0;
         cursor: pointer;
         font-size: 11px;
         font-weight: 500;
@@ -5202,7 +5221,7 @@
       }
       .svi-pip-btn:hover {
         background: rgba(var(--svi-white-rgb), 0.12);
-        border-color: rgba(var(--svi-white-rgb), 0.2);
+        border-color: var(--svi-fg);
       }
 
       /* 存储管理键列表 */
@@ -5411,24 +5430,26 @@
         grid-template-columns: 1fr 1fr;
         gap: 4px;
         background: rgba(var(--svi-bg-rgb), 0.75);
-        border: 1px solid rgba(var(--svi-white-rgb), 0.08);
-        border-radius: 12px;
+        border: var(--svi-border-w-inner) solid var(--svi-border);
+        border-radius: 0;
         padding: 4px;
       }
+      /* Step A: 页签方形化 + 上下边框 —— DR tab-panel 形态（未选与选中两态都必须可辨） */
       .svi4-tab {
-        border: none;
+        border: var(--svi-border-w) solid var(--svi-border);
         background: transparent;
         color: var(--svi-text-dim);
         font-size: 13px;
         font-weight: 600;
         padding: 8px 0;
-        border-radius: 9px;
+        border-radius: 0;
         cursor: pointer;
         transition: all 0.15s ease;
       }
-      .svi4-tab:hover { color: var(--svi-text-strong); }
+      .svi4-tab:hover { color: var(--svi-text-strong); border-color: var(--svi-fg); }
       .svi4-tab.active {
         background: var(--svi-fg);
+        border-color: var(--svi-fg);
         color: var(--svi-text-strong);
       }
       .svi4-cards {
@@ -5443,14 +5464,14 @@
         gap: 4px;
         padding: 12px 6px 10px;
         background: rgba(var(--svi-bg-rgb), 0.55);
-        border: 1px solid rgba(var(--svi-white-rgb), 0.10);
-        border-radius: 12px;
+        border: var(--svi-border-w) solid var(--svi-border);
+        border-radius: 0;
         cursor: pointer;
         transition: all 0.15s ease;
         min-width: 0;
       }
       .svi4-card:hover {
-        border-color: rgba(var(--svi-fg-rgb), 0.5);
+        border-color: var(--svi-fg);
       }
       .svi4-card-icon {
         font-size: 20px;

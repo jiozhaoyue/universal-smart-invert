@@ -29,7 +29,12 @@
         --svi-input-fg: #53a1b3;        /* 输入前景 */
         --svi-input-active: #ffffff;    /* 输入激活前景 */
         --svi-input-ph: #316e7d;        /* 输入占位 */
-        --svi-border: #316e7d;          /* 描边 */
+        /* 注意：本表唯一一处**故意偏离 Dark Reader** 的颜色（其余颜色逐值照搬）：
+           DR 的 @color-border 取值为 #316e7d，对面板底 #141e24 仅 2.947:1，低于 WCAG 1.4.11 的 3:1 下限，
+           故照搬不足以达标（验收 AC3）。#35798a 是同色系里偏离 DR 最小的达标值：
+           对面板底 #141e24 = 3.428:1、对 popup 底 #0f161b = 3.696:1 —— 单一描边色即可覆盖三处界面。
+           该比值由 test-browser.js 的「按钮边界对比度」场景读**浏览器计算样式**复算把关。 */
+        --svi-border: #35798a;          /* 描边（达标值；唯一偏离 DR 的颜色，理由见上） */
         --svi-title: #e96c4c;           /* 标题 / 警告 */
         --svi-error: #db4245;           /* 错误 */
         --svi-success: #317c4e;         /* 成功 */
@@ -57,10 +62,13 @@
         --svi-lh-sm: .875rem;
         --svi-lh: 1rem;
         --svi-border-w: .125rem;
+        --svi-border-w-inner: .0625rem; /* 内部分隔线（对齐 DR @size-border-inner，1px） */
         --svi-ctl-h: 1.5rem;
-        --svi-r-sm: .25rem;
-        --svi-r: .375rem;
-        --svi-r-lg: .75rem;
+        /* —— 直角化（对齐 DR：DR 全 UI 无全局 radius 变量，仅 50% 圆形语义）——
+           Step A：三个 radius token 值全部置 0（**保留 token 名**，避免调用点改动）。 */
+        --svi-r-sm: 0;
+        --svi-r: 0;
+        --svi-r-lg: 0;
         --svi-gap-sm: .5rem;
         --svi-gap: .75rem;
         --svi-tr-fast: 125ms;
@@ -87,16 +95,16 @@
     header h1 { font-size: 14px; font-weight: 600; }
     header .ver {
       margin-left: auto; font-size: 10px; color: var(--svi-text-dim);
-      border: 1px solid var(--svi-ctl-hover); border-radius: 8px; padding: 1px 7px;
+      border: var(--svi-border-w) solid var(--svi-border); border-radius: 0; padding: 1px 7px;
     }
     /* —— 页签栏（v6.4 R3：反色 / 本站 / 更多，对齐 Dark Reader 的三页签信息架构） —— */
     nav.tabs {
       display: flex; gap: 4px; padding: 0 10px 8px;
-      border-bottom: 1px solid var(--svi-ctl-hover);
+      border-bottom: var(--svi-border-w-inner) solid var(--svi-border);
     }
     .tab {
       flex: 1; padding: 6px 0; text-align: center; font-size: 12px; cursor: pointer;
-      color: var(--svi-text-dim); border: 1px solid transparent; border-radius: 9px;
+      color: var(--svi-text-dim); border: 1px solid transparent; border-radius: 0;
       background: none; font-family: inherit;
     }
     .tab:hover { color: var(--svi-text-strong); }
@@ -107,13 +115,14 @@
     .panel { padding: 10px 14px 4px; }
     .panel[hidden] { display: none; }
     .sec-title { font-size: 10px; letter-spacing: 1px; color: var(--svi-text-dim); margin: 4px 0 6px; }
-    /* —— 本站开关卡 —— */
+    /* —— 本站开关行（Step A「去卡片」：DR 无圆角卡片词汇 → 分区标题 + 分隔线） —— */
     .power-row {
       display: flex; align-items: center; justify-content: space-between;
-      margin: 0 0 8px; padding: 10px 12px;
-      background: var(--svi-bg); border: 1px solid var(--svi-ctl-hover); border-radius: 12px;
+      margin: 0 0 8px; padding: 8px 0 10px;
+      background: none; border: none; border-bottom: var(--svi-border-w-inner) solid var(--svi-border);
+      border-radius: 0;
     }
-    .power-row.off { border-color: rgba(var(--svi-error-rgb), 0.33); }
+    .power-row.off { border-bottom-color: var(--svi-error-bright); }
     .power-row .label b { display: block; font-size: 13px; }
     .power-row .label span { display: block; font-size: 10px; color: var(--svi-text-dim); }
     .switch { position: relative; width: 40px; height: 22px; flex: none; }
@@ -135,8 +144,8 @@
     }
     .row label { color: var(--svi-text-strong); font-size: 12px; }
     select {
-      background: var(--svi-bg); color: var(--svi-text-strong); border: 1px solid var(--svi-ctl-hover);
-      border-radius: 8px; padding: 4px 8px; font-size: 12px; max-width: 150px;
+      background: var(--svi-bg); color: var(--svi-text-strong); border: var(--svi-border-w) solid var(--svi-border);
+      border-radius: 0; padding: 4px 8px; font-size: 12px; max-width: 150px;
     }
     .mini { display: flex; align-items: center; justify-content: space-between; padding: 7px 0; }
     .mini label { color: var(--svi-text-strong); font-size: 12px; }
@@ -144,7 +153,7 @@
     .chips { display: flex; gap: 8px; }
     .chip {
       flex: 1; padding: 8px 0; text-align: center; font-size: 12px;
-      background: var(--svi-bg); border: 1px solid var(--svi-ctl-hover); border-radius: 10px;
+      background: var(--svi-bg); border: var(--svi-border-w) solid var(--svi-border); border-radius: 0;
       cursor: pointer; color: var(--svi-text-strong);
     }
     .chip.on { border-color: var(--svi-fg); color: var(--svi-fg); background: rgba(var(--svi-fg-rgb), 0.1); }
@@ -160,21 +169,21 @@
     #counts { padding: 6px 0; font-size: 11px; color: var(--svi-text-dim); }
     #list-preview {
       font-size: 11px; color: var(--svi-text-dim); line-height: 1.6;
-      background: var(--svi-bg); border: 1px dashed var(--svi-ctl-active); border-radius: 10px;
+      background: var(--svi-bg); border: 1px dashed var(--svi-border); border-radius: 0;
       padding: 8px 10px; margin-top: 4px; word-break: break-all;
     }
     footer { padding: 8px 0 12px; display: flex; flex-direction: column; gap: 6px; }
     button {
       width: 100%; padding: 9px 0; font-size: 12px; font-family: inherit;
-      background: var(--svi-bg); color: var(--svi-text-strong); border: 1px solid var(--svi-ctl-hover);
-      border-radius: 10px; cursor: pointer;
+      background: var(--svi-bg); color: var(--svi-text-strong); border: var(--svi-border-w) solid var(--svi-border);
+      border-radius: 0; cursor: pointer;
     }
     button:hover { border-color: var(--svi-fg); }
-    button.danger:hover { border-color: rgba(var(--svi-error-rgb), 0.6); color: var(--svi-error); }
+    button.danger:hover { border-color: var(--svi-error-bright); color: var(--svi-error); }
     #unavailable {
       margin: 6px 14px 14px; padding: 14px; text-align: center;
       color: var(--svi-text-dim); font-size: 12px; background: var(--svi-bg);
-      border: 1px dashed var(--svi-ctl-active); border-radius: 12px;
+      border: 1px dashed var(--svi-border); border-radius: 0;
     }
     body.unavailable nav.tabs, body.unavailable .panel { display: none; }
     body.available #unavailable { display: none; }

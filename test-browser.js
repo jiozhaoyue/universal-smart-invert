@@ -1162,6 +1162,109 @@ async function main() {
     assert.strictEqual(report.statsKey.exportSchema, 1, 'export JSON envelope schema must be 1');
 
     // ============================================================
+    // Scenario 1c (Step A / AC3): 按钮边界对比度 —— 读**浏览器计算样式**逐按钮断言 >=3:1
+    //   判据: WCAG 1.4.11 非文本对比度 >= 3:1 (PRD AC3)。
+    //   基准: 控件的**最近非透明背景祖先**(01-VERIFY P1 要求消歧的口径; design-assets/03 同一算法)。
+    //   反对照: 修前 .svi-action-btn 描边 rgba(white,.12) -> 1.44:1; .svi4-tab/.svi-modal-close
+    //           `border:none` -> 0; .svi-btn 描边 --svi-ctl-hover -> 1.38:1 —— 全部必红。
+    //   这里的算法是 WCAG relative luminance + alpha 合成, 与 design-assets/03 的静态复算同源。
+    //   绝不自证式验收(不是"存在某条 CSS 规则"), 而是"边界真实可辨"。
+    // ============================================================
+    console.log('[Test] Scenario 1c: button border contrast (WCAG non-text >= 3:1) ...');
+    // 先把可测控件都摆到"有布局"的状态: 打开设置模态 + 切到 全局 页签 + 展开页内胶囊面板。
+    //   (面板控件是惰性构建的; 只"在场"不算, 必须有 client rects 才是真实的可见边界。)
+    await sendCdp('Runtime.evaluate', {
+      expression: `(() => { try { window.__svi.ui.openSettingsModal(); } catch (e) {} return true; })()`,
+      returnByValue: true
+    });
+    await new Promise((r) => setTimeout(r, 400));
+    await sendCdp('Runtime.evaluate', {
+      expression: `(() => { try { const t = Array.from(document.querySelectorAll('.svi4-tab')).find(function (b) { return b.textContent === '全局'; }); if (t) t.click(); } catch (e) {} return true; })()`,
+      returnByValue: true
+    });
+    await new Promise((r) => setTimeout(r, 300));
+    await sendCdp('Runtime.evaluate', {
+      expression: `(() => { try { const p = document.querySelector('.svi-panel-card'); if (p && !p.classList.contains('show')) { const pill = document.querySelector('.svi-trigger-pill'); if (pill) pill.click(); } } catch (e) {} return true; })()`,
+      returnByValue: true
+    });
+    await new Promise((r) => setTimeout(r, 300));
+    const contrastReport = (await sendCdp('Runtime.evaluate', {
+      returnByValue: true,
+      expression: `(() => {
+        function parseRGBA(s) {
+          const m = String(s).match(/rgba?\\(([^)]+)\\)/);
+          if (!m) return null;
+          const p = m[1].split(',').map(function (x) { return parseFloat(x.trim()); });
+          return { r: p[0], g: p[1], b: p[2], a: p.length > 3 ? p[3] : 1 };
+        }
+        function over(fg, bg) {
+          const a = fg.a + bg.a * (1 - fg.a);
+          if (a <= 0) return { r: 0, g: 0, b: 0, a: 0 };
+          return {
+            r: (fg.r * fg.a + bg.r * bg.a * (1 - fg.a)) / a,
+            g: (fg.g * fg.a + bg.g * bg.a * (1 - fg.a)) / a,
+            b: (fg.b * fg.a + bg.b * bg.a * (1 - fg.a)) / a,
+            a: a
+          };
+        }
+        function chan(v) { v = v / 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }
+        function lum(c) { return 0.2126 * chan(c.r) + 0.7152 * chan(c.g) + 0.0722 * chan(c.b); }
+        function ratio(a, b) { const l1 = lum(a), l2 = lum(b); const hi = Math.max(l1, l2), lo = Math.min(l1, l2); return (hi + 0.05) / (lo + 0.05); }
+        // 最近的非透明背景祖先: 从**父元素**起向上收集非透明底色, 合成到不透明为止 (白画布兜底)。
+        function baseBehind(el) {
+          const stack = [];
+          let n = el.parentElement;
+          while (n && n.nodeType === 1) {
+            const c = parseRGBA(getComputedStyle(n).backgroundColor);
+            if (c && c.a > 0) { stack.push(c); if (c.a >= 1) break; }
+            n = n.parentElement;
+          }
+          let acc = { r: 255, g: 255, b: 255, a: 1 };
+          for (let i = stack.length - 1; i >= 0; i--) acc = over(stack[i], acc);
+          return acc;
+        }
+        const SELECTORS = ['.svi-btn', '.svi-btn-nav', '.svi-btn-reset', '.svi-btn-done',
+          '.svi-chip', '.svi-action-btn', '.svi-preset-btn', '.svi-open-modal-btn', '.svi-pip-btn',
+          '.svi-mini-btn', '.svi-modal-close', '.svi-layout-btn', '.svi4-tab:not(.active)', '.svi4-tab.active'];
+        const rows = [];
+        for (const sel of SELECTORS) {
+          const els = Array.from(document.querySelectorAll(sel)).filter(function (el) { return el.getClientRects().length > 0; });
+          if (!els.length) { rows.push({ sel: sel, present: 0, note: 'absent-or-hidden' }); continue; }
+          const el = els[0];
+          const cs = getComputedStyle(el);
+          const base = baseBehind(el);
+          const perDir = [];
+          let allOk = true;
+          for (const d of ['Top', 'Right', 'Bottom', 'Left']) {
+            const w = parseFloat(cs['border' + d + 'Width']) || 0;
+            const col = parseRGBA(cs['border' + d + 'Color']);
+            const eff = over(col, base);
+            const r = ratio(eff, base);
+            const ok = w >= 1 && r >= 3;
+            if (!ok) allOk = false;
+            perDir.push({ side: d, w: w, color: cs['border' + d + 'Color'], ratio: Math.round(r * 1000) / 1000, ok: ok });
+          }
+          rows.push({ sel: sel, present: els.length,
+            base: 'rgb(' + Math.round(base.r) + ', ' + Math.round(base.g) + ', ' + Math.round(base.b) + ')',
+            ok: allOk, sides: perDir });
+        }
+        return { rows: rows, failures: rows.filter(function (r) { return r.present && !r.ok; }) };
+      })()`
+    })).result.value;
+
+    console.log('[Test] Scenario 1c: border contrast table (base = nearest opaque-background ancestor):');
+    for (const r of contrastReport.rows) {
+      if (!r.present) { console.log('  ' + r.sel + ': (absent/hidden — skipped)'); continue; }
+      console.log('  ' + r.sel + ' x' + r.present + ' base=' + r.base + ' -> ' +
+        r.sides.map((s) => s.side[0] + s.w + 'px/' + s.ratio + (s.ok ? '' : '!!')).join(' ') + (r.ok ? '  OK' : '  FAIL'));
+    }
+    assert.ok(contrastReport.rows.filter((r) => r.present).length >= 5,
+      'AC3: 至少 5 类按钮必须在场可测, 实测 ' + contrastReport.rows.filter((r) => r.present).length);
+    assert.deepStrictEqual(contrastReport.failures, [],
+      'AC3: 每个按钮四条边界都必须 >=1px 且与最近非透明背景祖先 >=3:1, 违例: ' + JSON.stringify(contrastReport.failures));
+    console.log('[Test] Scenario 1c: all present button borders are distinguishable (>=3:1) ✓');
+
+    // ============================================================
     // Scenario 1b (v3.3): 元素级规则 —— 保护/强制反色立即生效, 删除后恢复自动决策
     // ============================================================
     console.log('[Test] Scenario 1b: element rules (protect / invert) ...');

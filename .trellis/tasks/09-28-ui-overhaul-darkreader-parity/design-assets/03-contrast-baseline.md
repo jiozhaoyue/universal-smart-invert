@@ -55,8 +55,34 @@ token 源: universal-smart-invert.user.js
 
 **design.md §2C / §3.3 的 6 个可核比值逐条一致（6/6）** —— 其对比度结论经独立复算成立。
 
-## D. 达标口径（Step A 落地后的期望）
+## D. 达标实测（Step A 落地后，2026-09-29）—— 浏览器 computed 断言
 
-- 面板：所有按钮/页签/输入控件描边 vs 面板底 **≥3:1**。
-- popup：同样 vs `--svi-bg-deep` **≥3:1**。
+已固化为 `test-browser.js` **Scenario 1c**（读计算样式 + WCAG relative luminance + alpha 合成；
+基准 = 最近非透明背景祖先）。实测（`node test-browser.js`，SHA 见 04）：
+
+| 选择器 | 实测数 | 基准底 | 四边 | 比值 | ≥3:1 |
+|---|---:|---|---|---:|---|
+| `.svi-btn` | 3 | rgb(20,30,35) | 2px | 5.763 | ✅ |
+| `.svi-btn-nav` | 1 | rgb(20,30,35) | 2px | 5.763 | ✅ |
+| `.svi-btn-reset` | 3 | rgb(20,30,35) | 2px | 3.444 | ✅ |
+| `.svi-btn-done` | 1 | rgb(20,30,36) | 2px | 5.752 | ✅ |
+| `.svi-action-btn` | 4 | rgb(20,29,35) | 2px | 3.448 | ✅ |
+| `.svi-preset-btn` | 2 | rgb(20,29,35) | 2px | 5.769 | ✅ |
+| `.svi-open-modal-btn` | 1 | rgb(20,29,35) | 2px | 3.448 | ✅ |
+| `.svi-pip-btn` | 1 | rgb(20,29,35) | 2px | 3.448 | ✅ |
+| `.svi-mini-btn` | 25 | rgb(20,30,35) | 2px | 3.444 | ✅ |
+| `.svi-modal-close` | 1 | rgb(20,30,35) | 2px | 3.444 | ✅ |
+| `.svi-layout-btn` | 3 | rgb(20,30,36) | 1px | 5.735 | ✅ |
+| `.svi4-tab:not(.active)` | 1 | rgb(20,30,36) | 2px | 3.432 | ✅ |
+| `.svi4-tab.active` | 1 | rgb(20,30,36) | 2px | 5.742 | ✅ |
+
+（`.svi-chip` 在本次场景状态下无可布局实例，断言**跳过**并在表中标注 `absent/hidden`。）
+
+**结论**：Step A 后**全部 12 类可见按钮**的四条边界均 ≥1px 且对比度 **≥3:1**（最低 3.432）。
+修前对照（同一算法）：`.svi-action-btn` 1.435:1、`.svi-btn` 1.380:1、`.svi4-tab`/`.svi-modal-close` = 0
+（`border:none`）—— 全部必红，证明断言的负向对照成立。
+
+- 面板：所有按钮/页签/输入控件描边 vs 面板底 **≥3:1** —— 已达标。
+- popup：描边换 `var(--svi-border)` 后 vs `--svi-bg-deep` = **3.696:1** —— 已达标
+  （本次未在 popup 语境跑对比断言；其 token 生效由 `test-extension.js` 场景 6a-2 守卫，**本窗口未跑**）。
 - 「按钮填充」列**保持 1.00:1 不改** —— 忠于 DR（其 `@color-control-back` 亦等于页面底，靠描边分离）。
