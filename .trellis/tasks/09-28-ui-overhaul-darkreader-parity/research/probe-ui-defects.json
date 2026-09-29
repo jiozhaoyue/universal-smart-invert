@@ -1,0 +1,258 @@
+{
+  "version": "0.6.10",
+  "width": 480,
+  "height": 940,
+  "results": {
+    "capsule": {
+      "rootExists": true,
+      "pillTag": "DIV",
+      "pillIsButton": false,
+      "cardShown": true,
+      "cardButtons": [
+        "svi-action-btn :: 视频:关",
+        "svi-action-btn active :: 智能:开",
+        "svi-action-btn active :: 图片:开",
+        "svi-action-btn :: 背景:关",
+        "svi-pip-btn :: 画中画",
+        "svi-preset-btn selected :: 柔和灰",
+        "svi-preset-btn :: 纯黑",
+        "svi-open-modal-btn :: 打开设置面板"
+      ],
+      "closeCandidates": [],
+      "offBadgeDisplay": "none"
+    },
+    "capsuleShot": {
+      "file": ".trellis\\tasks\\09-28-ui-overhaul-darkreader-parity\\research\\shots\\defect4-capsule-panel-open.png",
+      "bytes": 77161
+    },
+    "capsuleClosed": {
+      "file": ".trellis\\tasks\\09-28-ui-overhaul-darkreader-parity\\research\\shots\\defect4-capsule-pill-closed.png",
+      "bytes": 29586
+    },
+    "buttonBorders": {
+      "action": {
+        "sel": ".svi-action-btn",
+        "borderTop": "1px solid rgba(255, 255, 255, 0.12)",
+        "borderRight": "1px",
+        "borderBottom": "1px",
+        "borderLeft": "1px",
+        "borderColor": "rgba(255, 255, 255, 0.12)",
+        "bg": "rgba(255, 255, 255, 0.06)",
+        "w": 0,
+        "h": 0
+      },
+      "preset": {
+        "sel": ".svi-preset-btn",
+        "borderTop": "1px solid rgb(83, 161, 179)",
+        "borderRight": "1px",
+        "borderBottom": "1px",
+        "borderLeft": "1px",
+        "borderColor": "rgb(83, 161, 179)",
+        "bg": "rgba(83, 161, 179, 0.15)",
+        "w": 0,
+        "h": 0
+      },
+      "openModal": {
+        "sel": ".svi-open-modal-btn",
+        "borderTop": "1px solid rgba(83, 161, 179, 0.3)",
+        "borderRight": "1px",
+        "borderBottom": "1px",
+        "borderLeft": "1px",
+        "borderColor": "rgba(83, 161, 179, 0.3)",
+        "bg": "rgba(83, 161, 179, 0.12)",
+        "w": 0,
+        "h": 0
+      },
+      "pip": {
+        "sel": ".svi-pip-btn",
+        "borderTop": "1px solid rgba(255, 255, 255, 0.12)",
+        "borderRight": "1px",
+        "borderBottom": "1px",
+        "borderLeft": "1px",
+        "borderColor": "rgba(255, 255, 255, 0.12)",
+        "bg": "rgba(255, 255, 255, 0.06)",
+        "w": 0,
+        "h": 0
+      },
+      "tab": {
+        "sel": ".svi4-tab",
+        "borderTop": "0px none rgb(232, 244, 246)",
+        "borderRight": "0px",
+        "borderBottom": "0px",
+        "borderLeft": "0px",
+        "borderColor": "rgb(232, 244, 246)",
+        "bg": "rgb(83, 161, 179)",
+        "w": 215,
+        "h": 35
+      },
+      "close": {
+        "sel": ".svi-modal-close",
+        "borderTop": "0px none rgb(111, 154, 166)",
+        "borderRight": "0px",
+        "borderBottom": "0px",
+        "borderLeft": "0px",
+        "borderColor": "rgb(111, 154, 166)",
+        "bg": "rgba(0, 0, 0, 0)",
+        "w": 23,
+        "h": 25
+      },
+      "done": {
+        "sel": ".svi-btn-done",
+        "borderTop": "1px solid rgb(83, 161, 179)",
+        "borderRight": "1px",
+        "borderBottom": "1px",
+        "borderLeft": "1px",
+        "borderColor": "rgb(83, 161, 179)",
+        "bg": "rgb(83, 161, 179)",
+        "w": 90,
+        "h": 31
+      },
+      "reset": {
+        "sel": ".svi-btn-reset",
+        "borderTop": "1px solid rgba(219, 66, 69, 0.3)",
+        "borderRight": "1px",
+        "borderBottom": "1px",
+        "borderLeft": "1px",
+        "borderColor": "rgba(219, 66, 69, 0.3)",
+        "bg": "rgba(219, 66, 69, 0.12)",
+        "w": 0,
+        "h": 0
+      },
+      "chip": null,
+      "miniBtn": {
+        "sel": ".svi-mini-btn",
+        "borderTop": "1px solid rgba(83, 161, 179, 0.3)",
+        "borderRight": "1px",
+        "borderBottom": "1px",
+        "borderLeft": "1px",
+        "borderColor": "rgba(83, 161, 179, 0.3)",
+        "bg": "rgba(83, 161, 179, 0.12)",
+        "w": 66,
+        "h": 28
+      },
+      "nativeColorCount": 3,
+      "borderToken": ".125rem"
+    },
+    "modalShot": {
+      "file": ".trellis\\tasks\\09-28-ui-overhaul-darkreader-parity\\research\\shots\\defect1-2-modal-site-tab.png",
+      "bytes": 191182
+    },
+    "colorInputs": [
+      {
+        "cls": "svi-color-input-native",
+        "parentCls": "svi-color-input-wrap",
+        "parentPos": "relative",
+        "rect": {
+          "x": 0,
+          "y": 0,
+          "w": 0,
+          "h": 0
+        },
+        "coversViewport": false,
+        "opacity": "0",
+        "position": "absolute",
+        "zIndex": "auto",
+        "pointerEvents": "auto",
+        "containingBlock": "svi-color-input-wrap",
+        "appxSection": "图片反色决定哪些图片反色以及反色方式"
+      },
+      {
+        "cls": "svi-color-input-native",
+        "parentCls": "svi-color-input-wrap",
+        "parentPos": "relative",
+        "rect": {
+          "x": 0,
+          "y": 0,
+          "w": 0,
+          "h": 0
+        },
+        "coversViewport": false,
+        "opacity": "0",
+        "position": "absolute",
+        "zIndex": "auto",
+        "pointerEvents": "auto",
+        "containingBlock": "svi-color-input-wrap",
+        "appxSection": "图片反色决定哪些图片反色以及反色方式"
+      },
+      {
+        "cls": "svi-color-input-native",
+        "parentCls": "svi-color-picker-controls",
+        "parentPos": "static",
+        "rect": {
+          "x": 0,
+          "y": 0,
+          "w": 0,
+          "h": 0
+        },
+        "coversViewport": false,
+        "opacity": "0",
+        "position": "absolute",
+        "zIndex": "auto",
+        "pointerEvents": "auto",
+        "containingBlock": "svi-modal-mask show",
+        "appxSection": "原色屏蔽这些颜色永不转换"
+      }
+    ],
+    "hitTest": {
+      "centerViewport": {
+        "tag": "DIV",
+        "cls": "svi-modal-hint",
+        "isNativeColor": false,
+        "insideModal": true,
+        "isMask": false
+      },
+      "topLeftViewport": {
+        "tag": "DIV",
+        "cls": "svi-modal-header",
+        "isNativeColor": false,
+        "insideModal": true,
+        "isMask": false
+      },
+      "bottomLeftViewport": {
+        "tag": "DIV",
+        "cls": "svi-modal-footer",
+        "isNativeColor": false,
+        "insideModal": true,
+        "isMask": false
+      },
+      "onCloseButton": {
+        "tag": "BUTTON",
+        "cls": "svi-modal-close",
+        "isNativeColor": false,
+        "insideModal": true,
+        "isMask": false
+      },
+      "justOutsideWindow": {
+        "x": -20,
+        "y": 470,
+        "hit": {
+          "tag": "DIV",
+          "cls": "svi-modal-body",
+          "isNativeColor": false,
+          "insideModal": true,
+          "isMask": false
+        }
+      }
+    },
+    "modalFullShot": {
+      "file": ".trellis\\tasks\\09-28-ui-overhaul-darkreader-parity\\research\\shots\\defect5-modal-colorinput-overlay.png",
+      "bytes": 191182
+    },
+    "clickOutsideTest": {
+      "before": true,
+      "hitElement": "DIV.svi-modal-footer",
+      "after": true,
+      "closedByOutsideClick": false
+    },
+    "afterOutsideClickShot": {
+      "file": ".trellis\\tasks\\09-28-ui-overhaul-darkreader-parity\\research\\shots\\defect5-after-outside-click.png",
+      "bytes": 191182
+    },
+    "clickCloseTest": {
+      "before": true,
+      "hitElement": "BUTTON.svi-modal-close",
+      "after": false,
+      "closedByCloseBtn": true
+    }
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "version": "0.6.10",
+  "width": 480,
+  "height": 940,
+  "dsf": 2,
+  "shots": [
+    {
+      "tab": "global",
+      "file": "dev\\shots\\panel-2026-09-29T04-39-37-pid44100\\panel-global.png",
+      "bytes": 191209
+    },
+    {
+      "tab": "site",
+      "file": "dev\\shots\\panel-2026-09-29T04-39-37-pid44100\\panel-site.png",
+      "bytes": 191209
+    },
+    {
+      "tab": "readability",
+      "file": "dev\\shots\\panel-2026-09-29T04-39-37-pid44100\\panel-readability.png",
+      "bytes": 180057
+    },
+    {
+      "tab": "capsule",
+      "file": "dev\\shots\\panel-2026-09-29T04-39-37-pid44100\\capsule.png",
+      "bytes": 30656
+    }
+  ]
+}

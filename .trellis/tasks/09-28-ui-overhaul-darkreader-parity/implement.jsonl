@@ -1,0 +1,9 @@
+{"file": ".trellis/spec/frontend/ui-design-tokens.md", "reason": "UI 外观唯一权威：token 表、SviControls 20 项建造器收口规则、图标与交互纪律。改任何 UI 前必读"}
+{"file": ".trellis/spec/frontend/style-mount-contract.md", "reason": "样式挂载唯一入口 mountStyleNode 与根依赖唯一延迟点 whenRootReady 的契约；改 CSS/启动路径必须遵守"}
+{"file": ".trellis/spec/frontend/cross-browser-extension-contract.md", "reason": "Chromium/Firefox 双引擎 manifest 与身份契约（extension ID / geckoId / @name 不可动），改 popup/options 产物时不可破坏"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "项目质量守则与五绿门禁要求（含标题为 v6.5 Additions 的段）；文件较大(66KB)，按需分段阅读，勿一次通读"}
+{"file": ".trellis/spec/frontend/index.md", "reason": "前端 spec 索引与推荐阅读顺序"}
+{"file": ".trellis/spec/guides/subagent-model-policy.md", "reason": "派发与编排规则：§1 通道/模型配置、§2 编排自主权（哪些收尾动作自行执行）"}
+{"file": ".trellis/tasks/09-28-ui-overhaul-darkreader-parity/research/02-darkreader-ui-anatomy.md", "reason": "Dark Reader UI 解剖与「可直接照搬 / 需改造」两栏清单 —— 本次改造的设计输入"}
+{"file": ".trellis/tasks/09-28-ui-overhaul-darkreader-parity/research/04-settings-redundancy-matrix.md", "reason": "三处界面设置项冗余矩阵与重构映射建议 —— 信息架构收敛的设计输入"}
+{"file": ".trellis/tasks/09-28-ui-overhaul-darkreader-parity/research/01-prior-ui-overhaul-postmortem.md", "reason": "前 4 次 UI 重建归因与必须规避的坑清单 —— 实现时逐条对照"}

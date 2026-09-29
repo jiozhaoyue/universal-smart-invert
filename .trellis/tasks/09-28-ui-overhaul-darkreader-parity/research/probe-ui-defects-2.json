@@ -1,0 +1,196 @@
+{
+  "width": 1100,
+  "height": 900,
+  "results": {
+    "siteTab": {
+      "vp": [
+        1100,
+        900
+      ],
+      "modalShown": true,
+      "inputs": [
+        {
+          "rect": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "fullViewport": false,
+          "opacity": "0",
+          "containingBlock": "svi-color-input-wrap",
+          "section": "图片反色决定哪些图片反色以及反色方式"
+        },
+        {
+          "rect": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "fullViewport": false,
+          "opacity": "0",
+          "containingBlock": "svi-color-input-wrap",
+          "section": "图片反色决定哪些图片反色以及反色方式"
+        },
+        {
+          "rect": [
+            0,
+            0,
+            0,
+            0
+          ],
+          "fullViewport": false,
+          "opacity": "0",
+          "containingBlock": "svi-modal-mask show",
+          "section": "原色屏蔽这些颜色永不转换"
+        }
+      ],
+      "hit": {
+        "topLeft": "DIV.svi-modal-mask show",
+        "topRight": "DIV.svi-modal-mask show",
+        "bottomLeft": "DIV.svi-modal-mask show",
+        "outsideLeftMid": "DIV.svi-modal-mask show",
+        "center": "SELECT.svi-modal-select"
+      }
+    },
+    "siteTabShot": {
+      "file": ".trellis\\tasks\\09-28-ui-overhaul-darkreader-parity\\research\\shots\\defect5-a-site-tab.png",
+      "bytes": 92105
+    },
+    "globalTab": {
+      "vp": [
+        1100,
+        900
+      ],
+      "modalShown": true,
+      "inputs": [
+        {
+          "rect": [
+            774,
+            1144,
+            34,
+            24
+          ],
+          "fullViewport": false,
+          "opacity": "0",
+          "containingBlock": "svi-color-input-wrap",
+          "section": "图片反色决定哪些图片反色以及反色方式"
+        },
+        {
+          "rect": [
+            774,
+            1728,
+            34,
+            24
+          ],
+          "fullViewport": false,
+          "opacity": "0",
+          "containingBlock": "svi-color-input-wrap",
+          "section": "图片反色决定哪些图片反色以及反色方式"
+        },
+        {
+          "rect": [
+            0,
+            0,
+            1100,
+            900
+          ],
+          "fullViewport": true,
+          "opacity": "0",
+          "containingBlock": "svi-modal-mask show",
+          "section": "原色屏蔽这些颜色永不转换"
+        }
+      ],
+      "hit": {
+        "topLeft": "INPUT.svi-color-input-native[type=color]",
+        "topRight": "INPUT.svi-color-input-native[type=color]",
+        "bottomLeft": "INPUT.svi-color-input-native[type=color]",
+        "outsideLeftMid": "INPUT.svi-color-input-native[type=color]",
+        "center": "INPUT.svi-color-input-native[type=color]"
+      }
+    },
+    "globalTabShot": {
+      "file": ".trellis\\tasks\\09-28-ui-overhaul-darkreader-parity\\research\\shots\\defect5-b-global-tab.png",
+      "bytes": 81231
+    },
+    "shieldScrolled": {
+      "vp": [
+        1100,
+        900
+      ],
+      "modalShown": true,
+      "inputs": [
+        {
+          "rect": [
+            774,
+            -6198,
+            34,
+            24
+          ],
+          "fullViewport": false,
+          "opacity": "0",
+          "containingBlock": "svi-color-input-wrap",
+          "section": "图片反色决定哪些图片反色以及反色方式"
+        },
+        {
+          "rect": [
+            774,
+            -5614,
+            34,
+            24
+          ],
+          "fullViewport": false,
+          "opacity": "0",
+          "containingBlock": "svi-color-input-wrap",
+          "section": "图片反色决定哪些图片反色以及反色方式"
+        },
+        {
+          "rect": [
+            0,
+            0,
+            1100,
+            900
+          ],
+          "fullViewport": true,
+          "opacity": "0",
+          "containingBlock": "svi-modal-mask show",
+          "section": "原色屏蔽这些颜色永不转换"
+        }
+      ],
+      "hit": {
+        "topLeft": "INPUT.svi-color-input-native[type=color]",
+        "topRight": "INPUT.svi-color-input-native[type=color]",
+        "bottomLeft": "INPUT.svi-color-input-native[type=color]",
+        "outsideLeftMid": "INPUT.svi-color-input-native[type=color]",
+        "center": "INPUT.svi-color-input-native[type=color]"
+      }
+    },
+    "shieldShot": {
+      "file": ".trellis\\tasks\\09-28-ui-overhaul-darkreader-parity\\research\\shots\\defect5-c-shield-scrolled.png",
+      "bytes": 81485
+    },
+    "clickOnSwatch": {
+      "found": true,
+      "inputRect": [
+        0,
+        0,
+        1100,
+        900
+      ],
+      "topmostAtThatPoint": "INPUT.svi-color-input-native[type=color]",
+      "topmostIsThisInput": true
+    },
+    "clickMaskGutter": {
+      "point": [
+        125,
+        450
+      ],
+      "hit": "INPUT.svi-color-input-native",
+      "hitIsMask": false,
+      "before": true,
+      "after": true,
+      "closed": false
+    }
+  }
+}

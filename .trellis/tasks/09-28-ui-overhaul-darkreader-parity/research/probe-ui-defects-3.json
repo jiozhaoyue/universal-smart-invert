@@ -1,0 +1,65 @@
+{
+  "note": "real CDP mouse input; activeElement proves the browser routed the click to the invisible color input",
+  "results": {
+    "siteTab": {
+      "shown": true,
+      "gutterPoint": [
+        125,
+        450
+      ],
+      "afterClick": {
+        "active": "BODY.svi-img-invert-on",
+        "modalStillOpen": false
+      }
+    },
+    "globalTab": {
+      "windowRect": [
+        249,
+        62,
+        602,
+        776
+      ],
+      "gutterPoint": [
+        125,
+        450
+      ],
+      "beforeClick": {
+        "active": "BODY.svi-img-invert-on",
+        "modalOpen": true
+      },
+      "afterGutterClick": {
+        "active": "INPUT.svi-color-input-native[type=color]",
+        "modalStillOpen": true
+      },
+      "shot": ".trellis\\tasks\\09-28-ui-overhaul-darkreader-parity\\research\\shots\\defect5-d-global-realclick-gutter.png",
+      "afterCloseBtnClick": {
+        "point": [
+          821,
+          91
+        ],
+        "active": "INPUT.svi-color-input-native[type=color]",
+        "modalStillOpen": true
+      }
+    },
+    "escapeSequence": [
+      {
+        "press": 1,
+        "modalStillOpen": true,
+        "active": "INPUT.svi-color-input-native[type=color]"
+      },
+      {
+        "press": 2,
+        "modalStillOpen": true,
+        "active": "INPUT.svi-color-input-native[type=color]"
+      },
+      {
+        "press": 3,
+        "modalStillOpen": true,
+        "active": "INPUT.svi-color-input-native[type=color]"
+      }
+    ],
+    "afterEscape": {
+      "modalStillOpen": true
+    }
+  }
+}

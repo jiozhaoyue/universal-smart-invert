@@ -1,0 +1,9 @@
+{"file": ".trellis/spec/frontend/ui-design-tokens.md", "reason": "核验三条守卫：token 单一真源、SviControls 单一实现（ui.* 调用点为 0）、图标零 emoji 且无手写 svg 字面量"}
+{"file": ".trellis/spec/frontend/quality-guidelines.md", "reason": "核验五绿门禁与守则条款（含标题为 v6.5 Additions 的段）；文件较大(66KB)，按需分段阅读"}
+{"file": ".trellis/spec/frontend/style-mount-contract.md", "reason": "核验样式挂载是否绕过 mountStyleNode、根延迟是否绕过 whenRootReady"}
+{"file": ".trellis/spec/frontend/cross-browser-extension-contract.md", "reason": "核验双引擎 manifest 与身份字段（extension ID / geckoId / @name）未被破坏"}
+{"file": ".trellis/spec/guides/subagent-model-policy.md", "reason": "核验本轮派发合规性：通道/模型已确认、prompt 首行 Active task、只读子代理仅写 research/"}
+{"file": ".trellis/tasks/09-28-ui-overhaul-darkreader-parity/research/03-ui-defects-repro.md", "reason": "6 条缺陷的根因与复现步骤清单 —— 逐条核验修复是否真的覆盖（含「未实测」标注项）"}
+{"file": ".trellis/tasks/09-28-ui-overhaul-darkreader-parity/research/04-settings-redundancy-matrix.md", "reason": "冗余项与「同名语义/默认值不一致」项清单 —— 核验是否归零，尤其危险项"}
+{"file": ".trellis/tasks/09-28-ui-overhaul-darkreader-parity/research/02-darkreader-ui-anatomy.md", "reason": "Dark Reader 照搬基准 —— 核验 AC5 对齐范围是否落地"}
+{"file": ".trellis/tasks/09-28-ui-overhaul-darkreader-parity/research/01-prior-ui-overhaul-postmortem.md", "reason": "必须规避的坑清单 —— 核验是否逐条处置（AC10）"}
