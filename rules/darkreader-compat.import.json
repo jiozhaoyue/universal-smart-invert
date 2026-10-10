@@ -1,8 +1,8 @@
 {
   "kind": "svi-rules",
   "schema": 1,
-  "version": "4.2.0",
-  "exportedAt": "2026-09-13T10:33:51.277Z",
+  "version": "0.6.10",
+  "exportedAt": "2026-10-10T08:35:56.635Z",
   "generator": "scripts/sync-darkreader.js",
   "note": "Machine-generated Dark Reader compatibility seeds (dark-sites → siteBlacklist). Import via 设置 → 数据与备份 → 导入并合并; array merge dedups, idempotent.",
   "rules": {
@@ -685,6 +685,7 @@
       "masseffect.fandom.com",
       "mastercomfig.com",
       "mastofeed.com",
+      "matrova.com",
       "max.com",
       "maximepinot.com",
       "mazes.jothin.tech",
@@ -969,6 +970,7 @@
       "shellshock.io",
       "shockbs.is-a.dev",
       "shockbs.pro",
+      "shop.x-raypad.com",
       "shpposter.club",
       "shubhamprasad.dev",
       "shubhamprasad.vercel.app",
