@@ -104,3 +104,27 @@ geckodriver 放 `dev/tools/`(gitignored),脚本自动探测,也可用 `SVI_GECKO
    复用上一版 manifest 打出的 zip,导致 Firefox 分配随机 `@temporary-addon` id,报错却看起来像"身份字段不被采纳"。
 2. **判定行尾不要用 `grep -c $'\r'`**:在 Git Bash 下 `$'\r'` 展开为空模式,"匹配所有行",
    会把纯 LF 文件全部误报为 CRLF。用 `node` 数字节:`s.match(/\r/g)`。
+
+## 8. 后台脚本与跨域取字节(2026-09 新增)
+
+**为什么需要**:MV3 下内容脚本的 `fetch` 受页面 CORS 限制(MV2 那种凭 host 权限跨域的做法已失效),
+"跨域且源站不发 CORS"的图片拿不到字节 → 像素回退链整条失效。后台脚本 / SW 有 `host_permissions`
+授予的跨域能力,是 MV3 下唯一合法的越权取图通道。
+
+**契约**:
+
+1. manifest 里 `background` **两键并存** —— `{ service_worker, scripts }`:Chromium 用前者,
+   Firefox MV3 用后者,各引擎忽略不认识的那个键。**绝不为两引擎分叉产物目录**。
+   `web-ext lint` 会报一条 `BACKGROUND_SERVICE_WORKER_IGNORED`(警告,不是错误)—— 那是**预期行为**,
+   `extesy/hoverzoom` 的真实 manifest 用的也是这份双键写法。
+2. `host_permissions: ["<all_urls>"]`。Chrome 的"读取与更改所有网站数据"警告本就由
+   `content_scripts.matches` 的 `<all_urls>` 派生,故此键**通常不新增警告类别** ——
+   本条为**推导,未实测**;要实证请开 `chrome://extensions` 详情页看权限清单。
+3. **跨上下文传二进制一律走 base64 字符串**。`Uint8Array` 过 `chrome.runtime` 消息会被
+   JSON 序列化成普通对象(`ctor=Object`、`len=undefined`),内容脚本侧 `new Blob([obj])`
+   只得到 **15 字节**(`"[object Object]"`)→ 解码必失败;而且失败会被调用方的 catch 吞掉,
+   **伪装成"跨域取不到"**。实测 `blob.size=15`。字段名固定 `b64`,
+   以 `typeof res.b64 !== 'string'` 作失败判据(不要再检查 `bytes`)。
+   与引擎无关,Chromium / Firefox 都会 JSON 化,故**不得**改用"传字节数组"的变体。
+4. 后台脚本**只做一件事**:取媒体字节。限 http/https、带体积门(4MB)、只服务本扩展上下文
+   (manifest 无 `externally_connectable`,页面触达不到)。**不得**演变成通用代理。
