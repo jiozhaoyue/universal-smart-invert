@@ -194,6 +194,9 @@ async function loadSnapshot() {
   // v0.6.15 (D5): 回退值引构建期注入的 SVI_DEFAULTS —— 此前这里内联第三份默认值字面量。
   $('policy').value = snap.imagePolicy || SVI_DEFAULTS.imagePolicy;
   $('imgfx').value = snap.imgFxMode || SVI_DEFAULTS.imgFxMode;
+  // v0.6.16 (D8 作用域徽标): 本站 imageInvert 覆盖在场时亮「本站」徽标 ——
+  //   让 setImagesEffective 的作用域感知开合看得见（不亮 = 常规态, 开关就是全局总开关）。
+  $('imginv-scope').hidden = !snap.imageInvertScoped;
   $('imginv').checked = snap.imageOn !== false;
   $('hover').checked = snap.hoverRestore !== false;
   $('chip-soft-gray').classList.toggle('on', snap.presetId !== 'amoled');

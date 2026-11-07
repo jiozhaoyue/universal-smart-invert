@@ -895,8 +895,22 @@ function startServer() {
     const resetRes = await relay({ type: 'svi-site-reset' });
     assert.ok(resetRes && resetRes.ok === true && resetRes.cleared === true,
       'svi-site-reset 应返回 {ok:true, cleared:true}，实测 ' + JSON.stringify(resetRes));
-    const leftOver = await P.ev('Object.keys(window.__svi.prefs.siteOverrides || {}).length', ctxW.id);
-    assert.strictEqual(leftOver, 0, '清除后本站覆盖必须为空，实测 ' + leftOver);
+    // 清除是契约, 但「落盘 + onChanged 重放」存在实测过的写竞速窗口 (R1b 家族):
+    // 有界轮询等它收敛; 红时必须带现场 —— 否则「谁复活了覆盖」无从归因。
+    let lastOvJson = null;
+    let clearedWait = null;
+    try {
+      clearedWait = await waitFor(async () => {
+        try {
+          lastOvJson = await P.ev('JSON.stringify(window.__svi.prefs.siteOverrides || {})', ctxW.id);
+        } catch (e) { return null; } // 世界瞬断: 下一轮再试, 超时后由外层带现场重抛
+        // 注意: waitFor 以 `if (v) return v` 判定成功 —— 哨兵必须用真值 (0 会被当没等到)
+        return lastOvJson === '{}' ? true : null;
+      }, 8000, 'svi-site-reset 后覆盖收敛为空');
+    } catch (e) {
+      throw new Error('svi-site-reset 后覆盖未收敛为空, 8s 现场保留: ' + lastOvJson + ' | ' + e.message);
+    }
+    assert.strictEqual(clearedWait, true, '清除后本站覆盖必须为空（有界轮询收敛）, 8s 现场保留: ' + lastOvJson);
     const snapAfter = await relay({ type: 'svi-get-snapshot' });
     assert.strictEqual(snapAfter.overriddenSites, 0, '清除后快照的覆盖站点数应归零');
     console.log('    svi-site-reset → 本站覆盖已清空 ✓');
@@ -919,17 +933,37 @@ function startServer() {
       await cycleTo(2);
       let snap6g = await relay({ type: 'svi-get-snapshot' });
       assert.strictEqual(snap6g.imageOn, false, '① 前提: 本站强制关 → 快照 imageOn 应为 false');
+      // 徽标可见性 (v0.6.16 / D8): 覆盖在场 → 「本站」徽标亮; 清回继承 → 灭。
+      //   走真实 popup 页 loadSnapshot 渲染路径, 不只看快照字段。
+      const badgeOn = await U.ev(`(async () => {
+        await loadSnapshot();
+        const b = document.getElementById('imginv-scope');
+        return { hidden: b.hidden, text: b.textContent };
+      })()`, undefined, true);
+      assert.deepStrictEqual(badgeOn, { hidden: false, text: '本站' }, '① 本站覆盖在场时徽标必须亮');
+      snap6g = await relay({ type: 'svi-get-snapshot' });
+      assert.strictEqual(snap6g.imageInvertScoped, true, '① 快照应报告 imageInvertScoped=true');
       await relay({ type: 'svi-set-pref', key: 'imageInvert', value: true });
-      assert.strictEqual(await ovKeys(), '[]', '① 覆盖必须被清回继承（全局主门已给到位）');
+      const o1keys = JSON.parse(await ovKeys());
+      assert.strictEqual(o1keys.indexOf('imageInvert'), -1,
+        '① 覆盖必须被清回继承（全局主门已给到位）, 实测 ' + JSON.stringify(o1keys));
       snap6g = await relay({ type: 'svi-get-snapshot' });
       assert.strictEqual(snap6g.imageOn, true, '① 点「开」必须真变开（修复前这里恒 false）');
+      assert.strictEqual(snap6g.imageInvertScoped, false, '① 清回继承后 imageInvertScoped 必须归 false');
+      const badgeOff = await U.ev(`(async () => {
+        await loadSnapshot();
+        return document.getElementById('imginv-scope').hidden;
+      })()`, undefined, true);
+      assert.strictEqual(badgeOff, true, '① 清回继承后徽标必须灭');
       // ② 全局关（常规态写全局键）→ 三态再点两下回到强制关 → 发「开」→ 主门跟开 + 否决清除
       await relay({ type: 'svi-set-pref', key: 'imageInvert', value: false });
       await cycleTo(2);
       snap6g = await relay({ type: 'svi-get-snapshot' });
       assert.strictEqual(snap6g.imageOn, false, '② 前提: 本站强制关 + 全局关 → imageOn 应为 false');
       await relay({ type: 'svi-set-pref', key: 'imageInvert', value: true });
-      assert.strictEqual(await ovKeys(), '[]', '② 站点否决必须被清回继承');
+      const o2keys = JSON.parse(await ovKeys());
+      assert.strictEqual(o2keys.indexOf('imageInvert'), -1,
+        '② 站点否决必须被清回继承, 实测 ' + JSON.stringify(o2keys));
       const g2 = await P.ev('window.__svi.prefs.imageInvert !== false', ctx6g.id);
       assert.strictEqual(g2, true, '② 全局主门必须跟开（AND 语义下不开主门, 本页永远到不了「开」）');
       snap6g = await relay({ type: 'svi-get-snapshot' });
@@ -939,7 +973,11 @@ function startServer() {
       snap6g = await relay({ type: 'svi-get-snapshot' });
       assert.strictEqual(snap6g.imageOn, true, '③ 前提: 本站强制开 + 全局开 → imageOn 应为 true');
       await relay({ type: 'svi-set-pref', key: 'imageInvert', value: false });
-      assert.strictEqual(await ovKeys(), '["imageInvert"]', '③ 必须落「本站强制关」覆盖');
+      const o3keys = JSON.parse(await ovKeys());
+      assert.ok(o3keys.indexOf('imageInvert') !== -1,
+        '③ 必须落「本站强制关」覆盖, 实测 ' + JSON.stringify(o3keys));
+      const o3val = await P.ev('window.__svi.prefs.siteOverrides[location.hostname].imageInvert === false', ctx6g.id);
+      assert.strictEqual(o3val, true, '③ 落下的必须是「强制关」(false)');
       const g3 = await P.ev('window.__svi.prefs.imageInvert !== false', ctx6g.id);
       assert.strictEqual(g3, true, '③ 全局键必须保持开（外科式关, 修复前会波及全站）');
       snap6g = await relay({ type: 'svi-get-snapshot' });
