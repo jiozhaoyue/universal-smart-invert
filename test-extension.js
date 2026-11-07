@@ -43,6 +43,39 @@ const HTTP_PORT = Number(process.env.SVI_EXT_HTTP_PORT || 8791);
 const BOOT_TIMEOUT_MS = 25000;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// 落盘等待的**有界轮询**评估源（0.6.7 纪律: 固定等待是拿概率赌"300ms 防抖 + 分片落盘"
+// 在 900ms 内完成 —— 输掉竞速时紧随其后的导航/重载就会读到旧值, 这类偶发实测过）。
+// 读取口径与下方 readPrefsRaw 同规则（分片感知）; sync/local 双区都试, 兼容两种后端。
+// wantSource 是以 `obj`（解析后的 svi:prefs 对象）为上下文的谓词表达式。
+const persistWaitSrc = (wantSource) => `(async () => {
+  const g = (area, k) => new Promise((res) => chrome.storage[area].get(k, (r) => res(r[k] === undefined ? null : r[k])));
+  const readRaw = async () => {
+    for (const area of ['sync', 'local']) {
+      try {
+        const metaRaw = await g(area, 'svi:prefs.meta');
+        if (metaRaw) {
+          const meta = JSON.parse(metaRaw);
+          let s = '';
+          for (let i = 0; i < (meta.chunks || 0); i++) { const p = await g(area, 'svi:prefs#' + i); if (p == null) return null; s += p; }
+          return s;
+        }
+        const single = await g(area, 'svi:prefs');
+        if (single != null) return single;
+      } catch (e) { /* 该区不可用: 试下一个 */ }
+    }
+    return null;
+  };
+  const deadline = Date.now() + 8000;
+  for (;;) {
+    try {
+      const raw = await readRaw();
+      if (raw) { const obj = JSON.parse(raw); if (${wantSource}) return true; }
+    } catch (e) { /* 半途分片 / JSON 半成品: 下一轮再试 */ }
+    if (Date.now() > deadline) return false;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+})()`;
+
 // --shots [dir]：额外产出 popup / options 两个扩展页的 PNG 基线（视觉验收物）。
 // 默认关闭 —— 只多写文件，不改变任何断言语义。用户脚本的面板截图由 scripts/panel-shot.js 产出，
 // 三处界面合起来才构成任务 design-assets/ 里的「三处界面截图基线」。
@@ -448,9 +481,11 @@ function startServer() {
       const prev = S.prefs.flashGuardLevel;
       S.prefs.flashGuardLevel = 'media';
       S.savePrefs();
-      await new Promise((r) => setTimeout(r, 900));   // 300ms 防抖 + 分片落盘余量
       return prev;
     })()`, ctxSeed.id, true);
+    // 0.6.7 纪律: 有界轮询存储后端确认落盘, 不再固定睡 900ms 赌防抖+分片写赢竞速
+    const persistedSeed = await P.ev(persistWaitSrc(`obj.flashGuardLevel === 'media'`), ctxSeed.id, true);
+    assert.ok(persistedSeed, '配档 flashGuardLevel=media 必须真的落盘（有界轮询 svi:prefs, 8s 上限）');
     console.log('    配档: flashGuardLevel → media (复访前; 原值 ' + prevTier + ')');
 
     const revisit = await runOnce('复访');
@@ -556,9 +591,10 @@ function startServer() {
       const S = window.__svi;
       S.prefs.flashGuardLevel = ${JSON.stringify(prevTier)};
       S.savePrefs();
-      await new Promise((r) => setTimeout(r, 900));
       return true;
     })()`, ctxT.id, true);
+    const persistedRestore = await P.ev(persistWaitSrc(`obj.flashGuardLevel === ${JSON.stringify(prevTier)}`), ctxT.id, true);
+    assert.ok(persistedRestore, '还原档位必须真的落盘（有界轮询 svi:prefs）');
     console.log('    还原档位: flashGuardLevel → ' + prevTier);
 
     // ---------- 场景 3：隔离世界 + 扩展自验 ----------
@@ -632,9 +668,10 @@ function startServer() {
     await P.ev(`(async () => {
       window.__svi.prefs.hoverRestore = ${!before.orig};
       window.__svi.savePrefs();
-      await new Promise((r) => setTimeout(r, 900));   // 防抖 300ms + 落盘余量
       return true;
     })()`, extCtx.id, true);
+    const persistedHover = await P.ev(persistWaitSrc(`obj.hoverRestore === ${!before.orig}`), extCtx.id, true);
+    assert.ok(persistedHover, 'hoverRestore 写入必须真的落盘（有界轮询 svi:prefs）');
 
     await P.ev('(localStorage.clear(), localStorage.length)');
     P.resetCtxs();
@@ -1045,9 +1082,16 @@ function startServer() {
     //   跨界面同步的真实口径因此是：**写入必须发生在旧页回写之后**（新开/刷新页面即见，
     //   但已打开且持有旧镜像的页面会把它按回去）。这里先把旧页导航走、等回写落盘，再写。
     await P.send('Page.navigate', { url: 'about:blank' });
-    await sleep(1200);   // 卸载回写 = flushPrefsNow（防抖 300ms）+ Store.flush（400ms）+ 余量
-    const parked = await readPrefsRaw();
-    assert.ok(parked, 'fixture 页腾位置后, svi:prefs 必须仍然读得到（不许把偏好写丢）');
+    // 卸载回写 = flushPrefsNow（防抖 300ms）+ Store.flush（400ms 异步）—— 有界轮询等它落盘
+    // （0.6.7 纪律, 不再固定睡 1200ms 赌余量）; 谓词 = 旧页内存镜像的 maskBlur 仍在存储里（不许写丢）
+    const parked = await waitFor(async () => {
+      try {
+        const raw = await readPrefsRaw();
+        if (!raw) return null;
+        const obj = JSON.parse(raw);
+        return Number(obj.maskBlur) === Number(stored0.maskBlur) ? raw : null;
+      } catch (e) { return null; }   // 半途分片: 下一轮再试
+    }, 8000, '旧页卸载回写落盘（maskBlur 保持原值）');
     console.log('    旧页已腾位置（卸载回写落盘: maskBlur=' + JSON.parse(parked).maskBlur + '）');
 
     // 7d. 在设置页上改一项 → 落到 svi:prefs（走真实的控件事件 + 300ms 防抖）
@@ -1162,9 +1206,10 @@ function startServer() {
     await P.ev(`(async () => {
       window.__svi.prefs.maskHoverOpacity = ${NEW_OPACITY};
       window.__svi.savePrefs();
-      await new Promise((r) => setTimeout(r, 900));   // 防抖 300ms + 落盘余量
       return true;
     })()`, ctxPage.id, true);
+    const persistedOpacity = await P.ev(persistWaitSrc(`obj.maskHoverOpacity === ${NEW_OPACITY}`), ctxPage.id, true);
+    assert.ok(persistedOpacity, 'maskHoverOpacity 反向写入必须真的落盘（有界轮询 svi:prefs）');
     await O.send('Page.reload');
     const backRead = await waitFor(async () => {
       try {
@@ -1186,9 +1231,14 @@ function startServer() {
       window.__svi.prefs.shieldColors = ${JSON.stringify(preShield)};
       window.__svi.prefs.elementRules = ${JSON.stringify(preRules)};
       window.__svi.savePrefs();
-      await new Promise((r) => setTimeout(r, 900));
       return true;
     })()`, ctxPage.id, true);
+    const persistedRestoreAll = await P.ev(persistWaitSrc(
+      `obj.maskBlur === ${Number(DEF.maskBlur)} && obj.maskHoverOpacity === ${Number(DEF.maskHoverOpacity)}`
+      + ` && Array.isArray(obj.shieldColors) && obj.shieldColors.length === ${preShield.length}`
+      + ` && Array.isArray(obj.elementRules) && obj.elementRules.length === ${preRules.length}`
+    ), ctxPage.id, true);
+    assert.ok(persistedRestoreAll, '收尾还原（4 键）必须真的落盘（有界轮询 svi:prefs）');
     const restoredRaw = await readPrefsRaw();
     const restoredObj = restoredRaw ? JSON.parse(restoredRaw) : {};
     assert.strictEqual(Number(restoredObj.maskBlur), Number(DEF.maskBlur), '收尾必须把 maskBlur 还原成默认值');
@@ -1263,11 +1313,18 @@ function startServer() {
       '开着的页面必须靠 storage.onChanged 订阅即时跟上另一个界面的写入（R2e 的核心能力）');
     console.log('    设置页写 maskBlur=' + SYNC_BLUR + ' → 开着的页面即时跟随 ✓（无需刷新）');
 
-    // (4) 关键一条：内容脚本页**导航卸载**（pagehide 整份回写）→ 新值必须仍在
+    // (4) 关键一条：内容脚本页**导航卸载**（pagehide 整份回写）→ 新值必须仍在。
+    //     有界轮询到「回写已落盘且值仍为新值」—— 若旧缺陷复发（整份回写把新值按回旧值）,
+    //     轮询永远见不到新值 → 8s 超时红, 比固定睡 1500ms 后读一次更诚实也更抗慢。
     await P.send('Page.navigate', { url: 'about:blank' });
-    await sleep(1500);   // 卸载回写 = flushPrefsNow(300ms 防抖) + Store.flush(异步) + 余量
-    const survived = await readPrefsRaw();
-    assert.ok(survived, '卸载后 svi:prefs 必须仍然读得到');
+    const survived = await waitFor(async () => {
+      try {
+        const raw = await readPrefsRaw();
+        if (!raw) return null;
+        const obj = JSON.parse(raw);
+        return Number(obj.maskBlur) === SYNC_BLUR ? raw : null;
+      } catch (e) { return null; }   // 半途分片: 下一轮再试
+    }, 8000, '卸载回写落盘且设置页写入的新值仍在');
     assert.strictEqual(Number(JSON.parse(survived).maskBlur), SYNC_BLUR,
       '内容脚本页卸载时的整份回写**不得**把设置页写入的新值按回旧值（R1b 实测缺陷的复现点）');
     console.log('    旧页卸载回写后，设置页写入的新值仍在 ✓（上轮缺陷路径已根治）');
