@@ -4331,6 +4331,129 @@ async function main() {
     assert.strictEqual(pageErrorCount, errBefore36, '36: 取色器路径不得产生页面异常');
     console.log('[Test] Scenario 36: R3 主修通过 (取色器 confined in wrap / 添加钮可点)');
 
+    // ============================================================
+    // Scenario 37 (11-07 R15 同族修复): Alt+M 元素遮罩 + Alt+Shift+Z 全部恢复
+    //   修前红证据: dev/audit-dead-calls.js 全类审计揪出 this.toggleMask /
+    //   this.restoreAllHidden 两死调用 —— Alt+M 双层死 (UI 实例 hoverTarget 从未更新,
+    //   永远提示"先移鼠标"; 即便有值也 TypeError), Alt+Shift+Z 必 TypeError
+    //   —— **两个快捷键自 v5.0 起从未真正生效**。
+    // ============================================================
+    console.log('[Test] Scenario 37: 快捷键 Alt+M / Alt+Shift+Z (R15 同族) ...');
+    await sendCdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/action-page` });
+    await new Promise((r) => setTimeout(r, 1500));
+    const errBefore37 = pageErrorCount;
+
+    // 37a. 真实 mouseMoved → 引擎 hoverTarget 跟踪 (mouseover 在引擎侧; 有界轮询)
+    const t37 = await evalInPage(`(() => {
+      const el = document.getElementById('act-target');
+      const r = el.getBoundingClientRect();
+      return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
+    })()`);
+    await sendCdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: t37.x, y: t37.y });
+    const hover37 = await evalInPageAsync(`(async () => {
+      const deadline = Date.now() + 2000;
+      while (Date.now() < deadline) {
+        const eng = window.__svi_image_engine;
+        if (eng && eng.hoverTarget) return true;
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      return false;
+    })()`);
+    assert.strictEqual(hover37, true, '37a: 真实 mouseMoved 后引擎必须跟踪到 hoverTarget (跟踪在引擎侧)');
+    await evalInPage(`(() => { window.__svi.prefs.actions.mask.enabled = true; return true; })()`);
+    // Alt+M (modifiers bitmask: Alt=1)
+    await sendCdp('Input.dispatchKeyEvent', { type: 'keyDown', modifiers: 1, key: 'm', code: 'KeyM', windowsVirtualKeyCode: 77, nativeVirtualKeyCode: 77 });
+    await sendCdp('Input.dispatchKeyEvent', { type: 'keyUp', modifiers: 1, key: 'm', code: 'KeyM', windowsVirtualKeyCode: 77, nativeVirtualKeyCode: 77 });
+    const masked37 = await evalInPageAsync(`(async () => {
+      const deadline = Date.now() + 2000;
+      while (Date.now() < deadline) {
+        const el = document.getElementById('act-target');
+        if (el && el.hasAttribute('data-svi-masked')) return true;
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      return false;
+    })()`);
+    assert.strictEqual(masked37, true, '37a: Alt+M 必须真的给悬停元素加上遮罩 (修前从未生效)');
+    // 再按一次 = 取消遮罩
+    await sendCdp('Input.dispatchKeyEvent', { type: 'keyDown', modifiers: 1, key: 'm', code: 'KeyM', windowsVirtualKeyCode: 77, nativeVirtualKeyCode: 77 });
+    await sendCdp('Input.dispatchKeyEvent', { type: 'keyUp', modifiers: 1, key: 'm', code: 'KeyM', windowsVirtualKeyCode: 77, nativeVirtualKeyCode: 77 });
+    const unmasked37 = await evalInPageAsync(`(async () => {
+      const deadline = Date.now() + 2000;
+      while (Date.now() < deadline) {
+        const el = document.getElementById('act-target');
+        if (el && !el.hasAttribute('data-svi-masked')) return true;
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      return false;
+    })()`);
+    assert.strictEqual(unmasked37, true, '37a: Alt+M 第二次必须取消遮罩 (开关语义)');
+    // 第三按 = 再遮上 (验证 'clear' 表态不会粘住阻塞再遮; on 路径 reason 'manual' 走 BYPASS 直写)
+    await sendCdp('Input.dispatchKeyEvent', { type: 'keyDown', modifiers: 1, key: 'm', code: 'KeyM', windowsVirtualKeyCode: 77, nativeVirtualKeyCode: 77 });
+    await sendCdp('Input.dispatchKeyEvent', { type: 'keyUp', modifiers: 1, key: 'm', code: 'KeyM', windowsVirtualKeyCode: 77, nativeVirtualKeyCode: 77 });
+    const remasked37 = await evalInPageAsync(`(async () => {
+      const deadline = Date.now() + 2000;
+      while (Date.now() < deadline) {
+        const el = document.getElementById('act-target');
+        if (el && el.hasAttribute('data-svi-masked')) return true;
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      return false;
+    })()`);
+    assert.strictEqual(remasked37, true, '37a: Alt+M 第三次必须能再遮上 (clear 表态不得粘住)');
+    await evalInPage(`(() => { window.__svi.prefs.actions.mask.enabled = false; return true; })()`);   // 还原
+
+    // 37b. Alt+Shift+Z: 走真实路径构造隐藏态 (引擎 toggleHide, session 入引擎真表) → 按键恢复
+    const hid37 = await evalInPage(`(() => { try {
+      const svi = window.__svi;
+      svi.prefs.actions.hide.enabled = true;
+      const eng = window.__svi_image_engine;
+      const el = document.getElementById('act-box-b');
+      const ok = eng.toggleHide(el);   // session scope → 引擎 sessionHidden.add
+      return { ok, hidden: el.getAttribute('data-svi-hidden'), inSet: eng.sessionHidden.has(el) };
+    } catch (e) { return { err: String((e && e.stack) || e) }; } })()`);
+    assert.strictEqual(hid37 && hid37.err, undefined, '37b: 页面表达式不得抛错 —— ' + (hid37 && hid37.err));
+    assert.strictEqual(hid37.ok, true, '37b: toggleHide 必须成功 (真实隐藏路径)');
+    assert.strictEqual(hid37.hidden, 'session', '37b: 隐藏必须是 session 档');
+    assert.strictEqual(hid37.inSet, true, '37b: 引擎真表必须收录该元素');
+    // Alt+Shift+Z (modifiers: Alt|Shift = 1|8 = 9)
+    await sendCdp('Input.dispatchKeyEvent', { type: 'keyDown', modifiers: 9, key: 'z', code: 'KeyZ', windowsVirtualKeyCode: 90, nativeVirtualKeyCode: 90 });
+    await sendCdp('Input.dispatchKeyEvent', { type: 'keyUp', modifiers: 9, key: 'z', code: 'KeyZ', windowsVirtualKeyCode: 90, nativeVirtualKeyCode: 90 });
+    const restored37 = await evalInPageAsync(`(async () => {
+      const deadline = Date.now() + 2000;
+      while (Date.now() < deadline) {
+        const el = document.getElementById('act-box-b');
+        if (el && el.getAttribute('data-svi-hidden') === null) return true;
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      return false;
+    })()`);
+    assert.strictEqual(restored37, true, '37b: Alt+Shift+Z 必须恢复全部临时隐藏 (修前必 TypeError)');
+    await evalInPage(`(() => { window.__svi.prefs.actions.hide.enabled = false; return true; })()`);   // 还原
+
+    // 37c. toggleHide 三态循环的第二态 (Alt+Shift+点击) —— 与 toggleMask 同族的修序缺陷:
+    //   旧顺序先 revert 会被仲裁里的旧 'hide' 表态翻回 invert, 元素永远恢复不了
+    const cycle37 = await evalInPage(`(() => { try {
+      const svi = window.__svi;
+      svi.prefs.actions.hide.enabled = true;
+      const eng = window.__svi_image_engine;
+      const el = document.getElementById('act-box-a');
+      const on1 = eng.toggleHide(el);                       // 隐藏 (session)
+      const hidden1 = el.getAttribute('data-svi-hidden');
+      const on2 = eng.toggleHide(el);                       // 恢复 (同族修序路径)
+      const hidden2 = el.getAttribute('data-svi-hidden');
+      svi.prefs.actions.hide.enabled = false;
+      return { on1, hidden1, on2, hidden2 };
+    } catch (e) { return { err: String((e && e.stack) || e) }; } })()`);
+    assert.strictEqual(cycle37 && cycle37.err, undefined, '37c: 页面表达式不得抛错 —— ' + (cycle37 && cycle37.err));
+    assert.strictEqual(cycle37.on1, true, '37c: 第一次 toggleHide 必须隐藏');
+    assert.strictEqual(cycle37.hidden1, 'session', '37c: 第一态 = session 隐藏');
+    assert.strictEqual(cycle37.on2, true, '37c: 第二次 toggleHide 必须走恢复分支');
+    assert.strictEqual(cycle37.hidden2, null, '37c: 修序后元素必须真的恢复 (修前被仲裁翻回, 永远恢复不了)');
+
+    assert.strictEqual(pageErrorCount, errBefore37,
+      '37 全程: 两个快捷键不得产生任何页面异常 (修前正是 TypeError 源)');
+    console.log('[Test] Scenario 37: 快捷键通过 (Alt+M 开/关/再遮 · Alt+Shift+Z 恢复 · toggleHide 循环 · 零异常)');
+
     console.log('\n🎉 ALL BROWSER AUTOMATION TESTS PASSED 100% SUCCESFULLY!\n');
 
     await new Promise((r) => setTimeout(r, 400)); // Windows 重定向: 等待 stdout 刷盘再退出

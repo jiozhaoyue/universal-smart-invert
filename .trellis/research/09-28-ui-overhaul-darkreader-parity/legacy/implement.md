@@ -174,6 +174,25 @@ node scripts/build-extension.js && node test-extension.js
       （沿用 :13852 一带既有别名惯例）；`this.armRegionMask()` 同理
       〔11-07 落地：两处均改显式委托 + `typeof` 门；顺带清掉 UIController 上只写不读的
       `this.regionArmed` 死状态（真状态只在引擎 :8703 一带）〕
+- [x] **11-07 追加 · R15 同族全类审计**：新工具 `dev/audit-dead-calls.js`（各类体
+      `this.method()` 调用 vs 本类定义差集）扫出**三处同族死调用 + 一族连带缺陷**，全部修复：
+      ① `Alt+M` = `this.toggleMask(this.hoverTarget)` 双层死（UI 实例 hoverTarget 只在构造时
+      置 null 从未更新 → 永远提示"先移鼠标"；即便有值也 TypeError）—— **该快捷键自 v5.0
+      起从未真正生效**；改为取引擎 hoverTarget + 显式委托。② `Alt+Shift+Z` 与 ③ 菜单
+      「恢复本页临时屏蔽」= `this.restoreAllHidden()` 必 TypeError —— 委托引擎。
+      **连带（修完死调用才解锁、首次可达的路径，三处同族"修序"缺陷）**：
+      toggleMask / toggleHide / restoreAllHidden 三者的 off 分支都是「先 revert 再落手动表态」
+      —— revert 内部走 arbitrate 而仲裁对手动结论幂等占优，会读到旧 'mask'/'hide' 表态把
+      刚摘掉的 attr 原样打回 → 开关/恢复**从未生效**；修法 = 先落 'clear'/'show' 再 revert
+      （on 路径 reason 'manual' 在 ARBITRATE_BYPASS 内直写，不受影响）。
+      **状态初始化归位**：`sessionHidden`/`hoverTarget`/`regionArmed` 此前只初始化在
+      UIController 构造器（引擎侧 undefined —— toggleHide 的 session 入表一直被自身
+      try/catch 静默吞掉、restoreAllHidden 一旦可达必在 Array.from(undefined) 抛），
+      本批移到引擎构造器（唯一真主）。
+      test.js R15 守卫扩到四方法 + 两死状态；dev/audit-dead-calls.js 复扫归零
+      （12 个类无跨类死调用）。bench Scenario 37 用 CDP 真实按键实证：Alt+M 开/关/**再遮**
+      三态、Alt+Shift+Z 恢复、toggleHide 循环第二态恢复，全程零页面异常（37 场景全绿）。
+      README 对这些快捷键的描述本就存在 —— 行为至此才与文档一致〕
 - [x] Esc 处理加 `try/catch` 兜底 —— **一处异常不得废掉整条关闭路径**
       〔11-07 落地：四级链（pendingMask 逃生 → 区域遮罩委托 → 关模态 → 关胶囊面板）
       每级独立 try/catch；修前死调用在第二级抛 TypeError 使后两级永不可达〕

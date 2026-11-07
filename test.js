@@ -5469,6 +5469,13 @@ setTimeout(() => {
       'R15: UIController 类体内不得有 this.cancelRegionMask 死调用（该方法只在引擎上, 必须显式委托）');
     assert.ok(!code15.includes('this.armRegionMask'),
       'R15: UIController 类体内不得有 this.armRegionMask 死调用（同上）');
+    // 11-07 全类审计（dev/audit-dead-calls.js）追加的同族四方法:
+    assert.ok(!code15.includes('this.toggleMask'),
+      'R15: UIController 类体内不得有 this.toggleMask 死调用（Alt+M 旧缺陷, 修前从未生效）');
+    assert.ok(!code15.includes('this.restoreAllHidden'),
+      'R15: UIController 类体内不得有 this.restoreAllHidden 死调用（Alt+Shift+Z 与菜单项旧缺陷）');
+    assert.ok(!code15.includes('this.sessionHidden') && !code15.includes('this.hoverTarget'),
+      'R15: UIController 不得再持有 sessionHidden/hoverTarget 死状态（真表只在引擎）');
     const code15All = code15; // 委托存在性断言用同一份剥注释后的类体 + 全文代码
     assert.ok(code15All.includes('window.__svi_image_engine.cancelRegionMask'),
       'R15: Esc 关闭路径必须显式委托 __svi_image_engine.cancelRegionMask');

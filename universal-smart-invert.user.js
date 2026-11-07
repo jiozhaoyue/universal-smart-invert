@@ -4,10 +4,10 @@
 // @name:en      Universal Smart Video & Image Invert
 // @name:ext     全网通用智能视频与图片反色 (Universal Smart Invert)
 // @namespace    https://github.com/jiozhaoyue/universal-smart-invert
-// @version      0.6.13
-// @description  全网通用智能视频与图片反色脚本 (0.6.13, AGPL-3.0 开源)。视频/图片/背景图/Canvas 智能反色, 判定以连通区域为单位; 0.6 线新增区域反色 (按连通区域自动判定, 默认关闭)、界面全量同源重构与扩展形态。 保留v5.0页面媒体治理层(统一元素动作表 invert/keep/hide/mask/dim/peek、元素屏蔽 Alt+Shift+点击、遮罩 Alt+M 三档风格可调、全页压暗、悬停复原通用门, 全部默认关闭且可开关)与v4.6全部能力(本地优先判定/Alt+点击一次生效/暗色遮罩感知)。
-// @description:zh-CN 全网通用智能视频与图片反色脚本 (0.6.13, AGPL-3.0 开源)。新增: 区域反色 (按连通区域自动判定, 默认关闭)、界面全量同源重构、扩展形态与发版流水线; 保留 v5.0 页面媒体治理层与 v4.6 全部能力。
-// @description:en Universal smart video and image invert userscript (0.6.13, AGPL-3.0 licensed). Smart inversion for video, images, background images and canvas, decided at connected-region granularity. The 0.6 line adds region inversion (per connected region, off by default), a fully unified UI rebuild, and the browser-extension form with its release pipeline. Retains the v5.0 page-media governance layer (unified element-action table invert/keep/hide/mask/dim/peek, element blocking Alt+Shift+click, masks Alt+M with three adjustable styles, whole-page dimming, generic hover-restore gate — all off by default and individually switchable) and every v4.6 capability (local-first decisions, once-per-click Alt+click, dark-veil awareness).
+// @version      0.6.14
+// @description  全网通用智能视频与图片反色脚本 (0.6.14, AGPL-3.0 开源)。视频/图片/背景图/Canvas 智能反色, 判定以连通区域为单位; 0.6 线新增区域反色 (按连通区域自动判定, 默认关闭)、界面全量同源重构与扩展形态。 保留v5.0页面媒体治理层(统一元素动作表 invert/keep/hide/mask/dim/peek、元素屏蔽 Alt+Shift+点击、遮罩 Alt+M 三档风格可调、全页压暗、悬停复原通用门, 全部默认关闭且可开关)与v4.6全部能力(本地优先判定/Alt+点击一次生效/暗色遮罩感知)。
+// @description:zh-CN 全网通用智能视频与图片反色脚本 (0.6.14, AGPL-3.0 开源)。新增: 区域反色 (按连通区域自动判定, 默认关闭)、界面全量同源重构、扩展形态与发版流水线; 保留 v5.0 页面媒体治理层与 v4.6 全部能力。
+// @description:en Universal smart video and image invert userscript (0.6.14, AGPL-3.0 licensed). Smart inversion for video, images, background images and canvas, decided at connected-region granularity. The 0.6 line adds region inversion (per connected region, off by default), a fully unified UI rebuild, and the browser-extension form with its release pipeline. Retains the v5.0 page-media governance layer (unified element-action table invert/keep/hide/mask/dim/peek, element blocking Alt+Shift+click, masks Alt+M with three adjustable styles, whole-page dimming, generic hover-restore gate — all off by default and individually switchable) and every v4.6 capability (local-first decisions, once-per-click Alt+click, dark-veil awareness).
 // @author       jiozhaoyue
 // @license      AGPL-3.0-or-later
 // @icon         data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><circle cx=%2250%22 cy=%2250%22 r=%2246%22 fill=%22%23141e24%22 stroke=%22%2353a1b3%22 stroke-width=%228%22/><path d=%22M50 4 A46 46 0 0 1 50 96 Z%22 fill=%22%2353a1b3%22/></svg>
@@ -41,7 +41,7 @@
   // ==========================================
   // 1. 配置与常量定义
   // ==========================================
-  const SCRIPT_VERSION = '0.6.13';
+  const SCRIPT_VERSION = '0.6.14';
   const PREFS_KEY = 'universal_smart_invert_v4';   // v2.0 遗留偏好键 (迁移源, 迁移后原样保留以便回滚)
   const LEGACY_KEY = 'universal_smart_invert_v3';  // v1.x 旧键 (仅读取迁移, 保留不删以便回滚)
   const STATS_KEY = 'universal_smart_invert_stats_v1'; // v2.0 遗留统计键 (保留写入以兼容回滚)
@@ -8190,6 +8190,12 @@
       // v3.0: 覆盖 img + svg + 内联 SVG image + input[type=image]
       this.MEDIA_SELECTOR = 'img, svg, image, input[type="image" i]';
       this._eagerTimers = [];
+      // v5.0 元素动作的手动状态 —— 唯一真主在引擎 (11-07 R15 同族修复时从 UI 构造器归位;
+      //   此前它们只初始化在 UIController 上, 引擎侧 undefined: toggleHide 的 session 入表
+      //   一直被自身 try/catch 静默吞掉, restoreAllHidden 一旦被调到必在 Array.from(undefined) 抛)
+      this.sessionHidden = new Set();  // 本会话临时隐藏的元素 (『全部恢复』用)
+      this.hoverTarget = null;         // 最近悬停元素 (Alt+M 的取法, 引擎 mouseover 跟踪)
+      this.regionArmed = false;        // 区域遮罩一次性武装拖拽模式
       this.init();
       this.bindManualToggle();
       window.__svi_image_engine = this;
@@ -8670,8 +8676,11 @@
       try {
         if (!target || typeof target.setAttribute !== 'function') return false;
         if (target.getAttribute('data-svi-hidden') !== null) {
-          ACTIONS.hide.revert(target);
+          // 修序 (11-07, 与 toggleMask 同一族): 先落手动表态 'show' 再 revert ——
+          //   旧顺序先 revert 会被仲裁里的旧 'hide' 表态翻回 invert, 元素永远恢复不了
+          //   （该分支此前同样从未被真实触达 —— 依赖它的 Alt+Shift+点击三态循环的第二态）。
           target.setAttribute('data-svi-manual-hide', 'show');
+          ACTIONS.hide.revert(target);
           this.sessionHidden.delete(target);
           showToast('已恢复显示 (Alt+Shift+点击)');
           return true;
@@ -8697,8 +8706,10 @@
       for (const el of Array.from(this.sessionHidden)) {
         try {
           if (el && typeof el.getAttribute === 'function' && el.getAttribute('data-svi-hidden') === 'session') {
-            ACTIONS.hide.revert(el);
+            // 修序 (11-07, 同族第三处): 先落 'show' 表态再 revert —— revert 的仲裁对手动
+            //   结论幂等占优, 旧顺序先 revert 会读到旧 'hide' 表态把刚摘的 attr 打回去。
             el.setAttribute('data-svi-manual-hide', 'show');
+            ACTIONS.hide.revert(el);
             n++;
           }
         } catch (e) { /* ignore */ }
@@ -8713,8 +8724,12 @@
       try {
         if (!target || typeof target.setAttribute !== 'function') return false;
         if (target.getAttribute('data-svi-masked') !== null) {
-          ACTIONS.mask.revert(target);
+          // 修序 (11-07, R15 家族解锁后首次可达的路径): 必须先落手动表态 'clear' 再 revert ——
+          //   revert 内部走 arbitrate, 而仲裁对手动结论幂等占优; 旧顺序先 revert 会读到
+          //   旧的 'mask' 表态, 把刚摘掉的 data-svi-masked 又原样打回去（开关语义从未生效）。
+          //   on 路径不受影响 —— apply 的 reason 'manual' 在 ARBITRATE_BYPASS 内, 直写。
           target.setAttribute('data-svi-manual-mask', 'clear');
+          ACTIONS.mask.revert(target);
           showToast('已取消遮罩 (Alt+M)');
           return true;
         }
@@ -13383,10 +13398,10 @@
     constructor() {
       this.stateMachine = null;
       // ===== v5.0: 元素动作触发器状态 (仅内存, 标签页隔离) =====
-      this.sessionHidden = new Set(); // 本会话临时隐藏的元素 (『全部恢复』用)
-      this.hoverTarget = null;        // 最近悬停元素 (Alt+M 的元素遮罩取法)
-      // Step B (R15): 本类不再持有 regionArmed —— 它只存在于 ImageInvertEngine（武装/取消/
-      //   拖拽消费全在引擎侧 :8703 一带）; 旧字段是只写不读的死状态, 误导后来的维护者。
+      // R15 同族清理 (11-07 全类审计): 本类不再持有 sessionHidden / hoverTarget / regionArmed
+      //   —— 三者的真状态与唯一消费者都在 ImageInvertEngine（hide/遮罩的 apply、恢复、悬停跟踪、
+      //   拖拽消费全在引擎侧 :8639-:8712 一带）; UI 侧旧字段只写不读, 恰恰是 Alt+M /
+      //   Alt+Shift+Z / 菜单「恢复本页临时屏蔽」三处 this. 死调用的成因。一律显式委托引擎。
       this.root = null;
       this.pill = null;
       this.dot = null;
@@ -14707,7 +14722,15 @@
             showToast('安全模式：已关闭全部会改动页面观感的动作');
             refresh();
           } },
-        { label: '恢复本页临时屏蔽', onClick: () => { this.restoreAllHidden(); refresh(); } },
+        // R15 同族修复 (11-07): restoreAllHidden 只在引擎上 —— 旧 this. 死调用让菜单项
+        //   「恢复本页临时屏蔽」一点击就抛 TypeError, refresh 都走不到。显式委托。
+        { label: '恢复本页临时屏蔽', onClick: () => {
+            try {
+              const eng = window.__svi_image_engine;
+              if (eng && typeof eng.restoreAllHidden === 'function') eng.restoreAllHidden();
+            } catch (e) { /* ignore */ }
+            refresh();
+          } },
       ]));
 
       // —— v5.2 复查与撤销 ——
@@ -16652,15 +16675,28 @@
           e.preventDefault();
           this.stateMachine.onUserToggleAuto();
         } else if (e.altKey && !e.shiftKey && (e.key === 'm' || e.key === 'M')) {
-          // v5.0: Alt+M = 给「最近悬停元素」加/取消遮罩 (元素遮罩的元素取法见 hoverTarget 跟踪)
+          // v5.0: Alt+M = 给「最近悬停元素」加/取消遮罩
           e.preventDefault();
           if (!actionEnabled('mask')) { showToast('遮罩未启用（设置 → 元素动作）'); return; }
-          if (!this.hoverTarget) { showToast('请先把鼠标移到目标元素上，再按 Alt+M'); return; }
-          this.toggleMask(this.hoverTarget);
+          // R15 同族修复 (11-07 全类审计揪出): toggleMask 与 hoverTarget 跟踪都在引擎上
+          //   （引擎 mouseover :8639 / toggleMask :8712）, UI 实例的 hoverTarget 只在构造时
+          //   置 null 且从未更新 → 旧代码双层死: 永远提示"先移鼠标"; 即便有值也会在
+          //   this.toggleMask 处 TypeError。改为取引擎的 hoverTarget 并显式委托。
+          try {
+            const eng = window.__svi_image_engine;
+            const target = eng ? eng.hoverTarget : null;
+            if (!target) { showToast('请先把鼠标移到目标元素上，再按 Alt+M'); return; }
+            if (eng && typeof eng.toggleMask === 'function') eng.toggleMask(target);
+          } catch (err) { /* ignore —— 快捷键异常不得打扰页面 */ }
         } else if (e.altKey && e.shiftKey && (e.key === 'z' || e.key === 'Z')) {
           // v5.0: Alt+Shift+Z = 恢复本页全部临时屏蔽元素
           e.preventDefault();
-          this.restoreAllHidden();
+          // R15 同族修复: restoreAllHidden 与 sessionHidden 真表都在引擎上 —— 旧 this. 调用必 TypeError,
+          //   **该快捷键自 v5.0 起从未真正生效过**。显式委托既有别名。
+          try {
+            const eng = window.__svi_image_engine;
+            if (eng && typeof eng.restoreAllHidden === 'function') eng.restoreAllHidden();
+          } catch (err) { /* ignore */ }
         } else if (e.altKey && !e.shiftKey && (e.key === 'z' || e.key === 'Z')) {
           // v5.2: Alt+Z = 撤销最近一次自动结论 (逐个回退, 可连按)
           e.preventDefault();
