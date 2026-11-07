@@ -47,7 +47,7 @@
 
 | 项 | 状态 |
 |---|---|
-| Firefox 侧 SW 实载验证 | **只有 lint 证据**（`BACKGROUND_SERVICE_WORKER_IGNORED` 为双键并存的预期告警）；无 geckodriver 实载。AC10 的 Firefox 半边未闭环 |
+| Firefox 侧 SW 实载验证 | ~~只有 lint 证据~~ → **11-07 已闭环**：`test-firefox.js` 新增 F5（第二源站无 CORS），跨域原图经 Firefox 后台脚本（`background.scripts` 键）反色成功，5/5 断言（Firefox 158.0.1）。两引擎各有"加载 + 跨域取字节"直接证据 |
 | 权限提示实测（AC10） | 未做真机安装观察；现行 `content_scripts.matches` 本就含 `<all_urls>`，**不推测**，留待实装观察 |
 | `maskSettleTimeoutMs` 是否暴露到面板 | 未暴露（维持现状）；是否暴露交用户裁决 |
 | 夹具三形态（闭合根 / canvas / 跨域 iframe 浮层） | 未在本次夹具构造；M3 由 bench Scenario 16 覆盖，M2 机制覆盖 |

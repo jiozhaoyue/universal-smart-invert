@@ -42,6 +42,8 @@ const DIST_DIR = path.join(ROOT, 'dist');
 
 const GD_PORT = Number(process.env.SVI_GD_PORT || 4457);
 const HTTP_PORT = Number(process.env.SVI_FF_HTTP_PORT || 8793);
+// F5 跨域源站端口（不同端口 = 不同 origin；同机回环即可制造真实跨域）
+const CROSS_PORT = HTTP_PORT + 1;
 const LOAD_TIMEOUT_MS = 20000; // 装载后等待反色生效的上限
 const POLL_MS = 400;
 
@@ -76,6 +78,8 @@ function findFirefox() {
 
 const WHITE_SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="150"><rect width="100%" height="100%" fill="#ffffff"/><path d="M20,20 L180,20 L180,130 L20,130 Z" stroke="#333" fill="none" stroke-width="2"/><text x="40" y="80" fill="#000" font-family="sans-serif" font-size="16">Architecture</text></svg>';
 const DARK_SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="150"><rect width="100%" height="100%" fill="#0f172a"/><circle cx="100" cy="75" r="40" fill="#334155"/><text x="60" y="80" fill="#94a3b8">Dark Photo</text></svg>';
+// F5 跨域用例的图：与 WHITE_SVG 同判据（白底黑图 → 应反色），仅文字不同以便肉眼区分。
+const CROSS_SVG = '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="150"><rect width="100%" height="100%" fill="#ffffff"/><path d="M20,20 L180,20 L180,130 L20,130 Z" stroke="#333" fill="none" stroke-width="2"/><text x="40" y="80" fill="#000" font-family="sans-serif" font-size="16">Cross Origin</text></svg>';
 
 const FIXTURE_HTML = `<!DOCTYPE html>
 <html lang="zh-CN">
@@ -91,6 +95,7 @@ const FIXTURE_HTML = `<!DOCTYPE html>
   <h1>Firefox WebDriver E2E</h1>
   <img id="img-white" src="/img/white.svg" alt="white diagram">
   <img id="img-dark" src="/img/dark.svg" alt="dark photo">
+  <img id="img-cross" src="http://127.0.0.1:${CROSS_PORT}/img/cross-white.svg" alt="cross-origin no-cors">
 </body>
 </html>`;
 
@@ -117,6 +122,27 @@ function startFixtureServer() {
     });
     srv.once('error', reject);
     srv.listen(HTTP_PORT, '127.0.0.1', () => resolve(srv));
+  });
+}
+
+// F5 跨域源站（不同端口 = 不同 origin）：**刻意不发任何 CORS 头** ——
+// 这正是 09-29-viewer-plugin-adapt G1 的实测形态。像素回退链在这里只能靠
+// 扩展的特权取字节通道（内容脚本 fetch 受 CORS 限制 → 后台脚本凭 host_permissions 越权取），
+// 所以 F5 反色成功 = Firefox 侧后台脚本（manifest `background.scripts` 键）通道**真实生效**的
+// 直接证据；失败（data-svi-failed）= 通道断，断言即红。
+function startCrossServer() {
+  return new Promise((resolve, reject) => {
+    const srv = http.createServer((req, res) => {
+      const url = req.url.split('?')[0];
+      if (url === '/img/cross-white.svg') {
+        res.writeHead(200, { 'Content-Type': 'image/svg+xml' });   // 无 Access-Control-Allow-Origin
+        res.end(CROSS_SVG);
+        return;
+      }
+      res.writeHead(404); res.end('Not Found');
+    });
+    srv.once('error', reject);
+    srv.listen(CROSS_PORT, '127.0.0.1', () => resolve(srv));
   });
 }
 
@@ -161,7 +187,8 @@ const PROBE_SCRIPT = [
   '  var cs = getComputedStyle(im);',
   '  out[im.id || ("img-" + i)] = {',
   '    filter: cs.filter,',
-  '    inverted: /invert\\(/.test(cs.filter) || im.hasAttribute("data-svi-invert")',
+  '    inverted: /invert\\(/.test(cs.filter) || im.hasAttribute("data-svi-invert"),',
+  '    failed: im.hasAttribute("data-svi-failed")',
   '  };',
   '}',
   'return { htmlClass: document.documentElement.className, imgs: out };',
@@ -207,6 +234,7 @@ function packFreshZip(manifestVersion) {
   log('装载载荷 = ' + path.basename(zipPath) + '（' + zipB64.length + ' base64 字符）');
 
   const srv = await startFixtureServer();
+  const crossSrv = await startCrossServer();
   // geckodriver 自行创建并销毁临时 profile（不触碰用户 profile），此处无需管理
   const gd = spawn(geckodriver, ['--port', String(GD_PORT)], { stdio: ['ignore', 'pipe', 'pipe'] });
   let gdStderr = '';
@@ -278,11 +306,34 @@ function packFreshZip(manifestVersion) {
     log('  ✓ F4 通过：html.class = "' + report.htmlClass + '"');
     passed++;
 
-    console.log('\n🎉 Firefox E2E 通过（' + passed + '/4 断言）: ' + geckoId);
+    // —— F5: 跨域且源站不发 CORS 的原图（G1 通道在 Firefox 侧的实载证据）——
+    // 字节链：像素被污染 → gmFetchBlob → 内容脚本垫片 → chrome.runtime 消息 →
+    // 后台脚本（Firefox 走 manifest `background.scripts` 键的事件页）凭 host_permissions 取字节
+    // → base64 回传 → 解码判定。任何一环断都会落 data-svi-failed → 不反色 → 本断言红。
+    // 跨域字节往返比同源慢，先等 img-cross 到达终态（反色或 failed）再断言。
+    let cross = report.imgs['img-cross'];
+    const crossDeadline = Date.now() + LOAD_TIMEOUT_MS;
+    while (cross && !cross.inverted && !cross.failed && Date.now() < crossDeadline) {
+      await new Promise((r) => setTimeout(r, POLL_MS));
+      try {
+        const r2 = await wd('POST', `/session/${sessionId}/execute/sync`, { script: PROBE_SCRIPT, args: [] });
+        if (r2 && r2.imgs) cross = r2.imgs['img-cross'];
+      } catch (e) { /* 单轮探针失败不放弃 */ }
+    }
+    if (!cross) throw new Error('F5 失败：跨域图 img-cross 不在探针结果里（夹具是否加载完整？）');
+    if (!cross.inverted) {
+      throw new Error('F5 失败：跨域（无 CORS）原图未反色（failed=' + cross.failed + ', filter=' + cross.filter
+        + '）—— Firefox 侧后台取字节通道未生效，正是 09-29 任务 G1 要堵的缺口');
+    }
+    log('  ✓ F5 通过：跨域（无 CORS）原图已反色 —— Firefox 后台脚本取字节通道真实生效');
+    passed++;
+
+    console.log('\n🎉 Firefox E2E 通过（' + passed + '/5 断言）: ' + geckoId);
   } finally {
     if (sessionId) { try { await wd('DELETE', `/session/${sessionId}`); } catch (e) { /* ignore */ } }
     try { gd.kill(); } catch (e) { /* ignore */ }
     try { srv.close(); } catch (e) { /* ignore */ }
+    try { crossSrv.close(); } catch (e) { /* ignore */ }
   }
 })().catch((err) => {
   fail(err && err.message ? err.message : String(err));

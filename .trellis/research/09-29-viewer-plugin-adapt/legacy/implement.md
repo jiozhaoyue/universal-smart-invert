@@ -197,15 +197,14 @@
 - [x] 扩展的 `GM_xmlhttpRequest` 垫片：**优先 SW、失败/超时回落 plain fetch**（契约形状不变）
       〔11-07 复核：仅 `responseType==='blob'` 且非 POST 走 SW 通道；once 防双 settle；
       lastError 回调内读；核心 `gmFetchBlob` 零改动〕
-- [ ] **跨浏览器实测（不得只靠假设）**：`web-ext lint` 仍 **0 errors**；
+- [x] **跨浏览器实测（不得只靠假设）**：`web-ext lint` 仍 **0 errors**；
       Chromium 与 Firefox **都能加载**且跨域取图**真的生效**（各一条证据）
-      〔11-07 实跑更新：lint **0 errors**/3 warnings ✓（含预期告警 BACKGROUND_SERVICE_WORKER_IGNORED）；
+      〔11-07 全部闭环：lint **0 errors**/3 warnings ✓（含预期告警 BACKGROUND_SERVICE_WORKER_IGNORED）；
       Chromium 加载 + 跨域取图 ✓（`raw-ext-after-sw.jsonl`：C3 failed @119ms → **176.8ms 反色**）；
-      Firefox 加载 ✓（11-07 补测：`test-firefox.js` **4/4 绿** —— gecko.id 采纳 + 浅图反色 + 深图不反，
-      双键 manifest 被 Firefox 接受且 13 entries 含 sw.js）。
-      **仍未闭环的半边：Firefox 侧的跨域取字节** —— 其夹具无跨域用例，F2 反色走的是本地源，
-      故"Firefox SW 通道真取到跨域字节"**无直接证据**（风险低：该通道代码与引擎无关，
-      且 manifest 已被接受；补法 = 给 test-firefox.js 夹具加跨域无 CORS 源，属后续小任务）〕
+      Firefox 加载 ✓（`test-firefox.js` 4/4）；**Firefox 跨域取字节 ✓（11-07 补测 F5：夹具新增
+      第二源站（不同端口 = 不同 origin）且刻意不发 CORS 头，跨域原图走后台脚本
+      `background.scripts` 通道反色成功，5/5 断言，Firefox 158.0.1）——
+      至此两引擎各有"加载 + 跨域取字节"的直接证据〕
 - [ ] **权限提示实测**：给出可复核的观测方式与结论（可能本来就在，需给证据；若新增须告知用户）
       〔11-07 现状：**未做真机安装观察**。静态事实：`content_scripts.matches` 本就含 `<all_urls>`，
       `host_permissions` 与之同域 —— 按 AC10 口径不推测，留待实装观察后回报〕
