@@ -5462,6 +5462,16 @@ setTimeout(() => {
     const notOnOptions = [...panelKeys].filter((k) => !onOptions(k) && !inTable(k));
     assert.deepStrictEqual(notOnOptions, [],
       'R1b: 面板引用的键必须在 schema 或例外表里（防面板新增项而 options 漏项）, 实测 ' + JSON.stringify(notOnOptions));
+
+    // v0.6.15: README 的「全部 <N> 项设置」必须跟 schema 真源同步 —— 手写计数与版本行同族,
+    // 0.6.11 起真源 93→94 后 README 停在 93（本批修真 + 门禁化, 漂移即响红）。
+    {
+      const readme1b = fs.readFileSync(path.join(ROOT, 'README.md'), 'utf8');
+      const readmeCount = (readme1b.match(/全部 (\d+) 项设置/) || [])[1];
+      assert.ok(readmeCount, 'README 必须保留「全部 <N> 项设置」计数行');
+      assert.strictEqual(Number(readmeCount), schemaKeys.length,
+        'README 的设置项计数 ' + readmeCount + ' 必须与 schema 真源 ' + schemaKeys.length + ' 同步');
+    }
   }
 
   // ---- 3b. R15 静态守卫（09-28-ui-overhaul Step B）: 区域遮罩两方法只存在于 ImageInvertEngine,
