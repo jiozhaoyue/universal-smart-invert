@@ -1716,7 +1716,11 @@ async function main() {
     // ============================================================
     console.log('[Test] Scenario 8: navigating to /learn-page (rule learning) ...');
     await sendCdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/learn-page` });
-    await new Promise((r) => setTimeout(r, 3500));
+    // 0.6.7 纪律（Session 21 点名的本场景竞速收口）: 三处固定等待改有界轮询 ——
+    //   ① 点击前等 boot + 判定就绪（慢机上点击落在引擎就绪前 → 规则聚合不出 = 假红）;
+    assert.ok(await waitForExpr(
+      `!!(window.__svi && window.__svi.enginesBooted && document.getElementById('learn-1'))`, 15000, 250),
+      'Scenario 8: learn 页必须在 15s 内完成引导（引擎就绪 + 夹具在场）');
     const clickRes = (await sendCdp('Runtime.evaluate', {
       expression: `(() => {
         let invertedBefore = 0;
@@ -1732,9 +1736,24 @@ async function main() {
     console.log('RuleLearner after 3 corrections:', JSON.stringify(clickRes));
     assert.strictEqual(clickRes.invertedBefore, 0, 'dark images must not be auto-inverted before corrections');
     assert.ok(clickRes.rules.some((r) => r.stem === 'img.thumb-x' && r.hits >= 3), '3 corrections must aggregate into one learned rule with hits ≥ 3');
-    await new Promise((r) => setTimeout(r, 900)); // 落盘
+    // ② 落盘改有界轮询: svi:learned（{[host]:{rules:[{stem,hits,…}]}}）里出现 hits≥3 的
+    //    img.thumb-x 规则才导航 —— 不再赌 900ms（分片/防抖输掉竞速 = 第二载规则缺席 = 假红）
+    assert.ok(await waitForExpr(
+      `(function () { try {
+          const raw = localStorage.getItem('svi:learned'); if (!raw) return false;
+          const store = JSON.parse(raw);
+          const host = Object.keys(store || {})[0];
+          const rules = host && store[host] && store[host].rules;
+          return !!(Array.isArray(rules) && rules.some((r) => r && r.stem === 'img.thumb-x' && (r.hits | 0) >= 3));
+        } catch (e) { return false; } })()`, 8000, 250),
+      'Scenario 8: 学习规则必须在 8s 内落盘（svi:learned 出现 hits≥3 的 img.thumb-x）');
     await sendCdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/learn-page` });
-    await new Promise((r) => setTimeout(r, 4000));
+    // ③ 第二载改有界轮询: 等 learn-4 真的被学习规则反色 —— 不再赌 4000ms
+    //    （规则若真缺席, 15s 超时红, 断言信息比读一次 attr 更可归属）
+    assert.ok(await waitForExpr(
+      `!!(document.getElementById('learn-4') && document.getElementById('learn-4').getAttribute('data-svi-inverted') === 'true')`,
+      15000, 250),
+      'Scenario 8: 重载后 learn-4 必须在 15s 内被学习规则自动反色');
     const learnedRes = (await sendCdp('Runtime.evaluate', {
       expression: `(() => {
         const out = {};
