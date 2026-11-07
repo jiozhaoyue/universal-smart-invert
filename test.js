@@ -5483,6 +5483,45 @@ setTimeout(() => {
       'R15: 菜单「区域遮罩（拖拽）」必须显式委托 __svi_image_engine.armRegionMask');
   }
 
+  // ---- 3c. 全类死调用审计（R15 家族的系统性防线; 逻辑与 dev/audit-dead-calls.js 一致）----
+  //      逐类取类体, 差集 = 「this.method() 调用 − 本类定义的方法」。非空即跨类死调用 ——
+  //      该家族的实测代价: Esc 永远关不掉模态、Alt+M / Alt+Shift+Z 自 v5.0 起从未生效
+  //      （详见 spec quality-guidelines §跨类死调用家族）。修法一律 = 显式委托 + try/catch。
+  {
+    const lines15c = src.split('\n');
+    const classRe15c = /^  class ([A-Za-z_$][\w$]*) \{/;
+    const classes15c = [];
+    for (let i = 0; i < lines15c.length; i++) {
+      const m = classRe15c.exec(lines15c[i]);
+      if (m) classes15c.push({ name: m[1], start: i });
+    }
+    assert.ok(classes15c.length >= 12,
+      'R15c: 类扫描应找到全部顶层类（现役 12 个）, 实得 ' + classes15c.length + ' —— 抽取规则可能已失效');
+    for (let c = 0; c < classes15c.length; c++) {
+      const end = c + 1 < classes15c.length ? classes15c[c + 1].start : lines15c.length;
+      let bodyEnd = end;
+      for (let i = classes15c[c].start + 1; i < end; i++) {
+        if (lines15c[i] === '  }') { bodyEnd = i; break; }
+      }
+      const body = lines15c.slice(classes15c[c].start, bodyEnd).join('\n');
+      // 与 dev 工具同口径: 先剥块注释, 再逐行剥行注释
+      const codeLines = body.replace(/\/\*[\s\S]*?\*\//g, '').split('\n').map((l) => l.replace(/\/\/.*$/, ''));
+      const defined = new Set();
+      for (const m of codeLines.join('\n').matchAll(/^    (?:static\s+|get\s+|set\s+|async\s+)*([A-Za-z_$][\w$]*)\s*\(/gm)) defined.add(m[1]);
+      for (const m of codeLines.join('\n').matchAll(/^    (?:static\s+)?([A-Za-z_$][\w$]*)\s*=/gm)) defined.add(m[1]);
+      const found = [];
+      for (const l of codeLines) {
+        for (const m of l.matchAll(/\bthis\.([A-Za-z_$][\w$]*)\s*\(/g)) {
+          const name = m[1];
+          if (!defined.has(name) && !found.includes(name)) found.push(name);
+        }
+      }
+      assert.deepStrictEqual(found, [],
+        'R15c[' + classes15c[c].name + ']: 类体内存在未在本类定义的 this. 调用（跨类死调用族 —— '
+        + '该方法不在本类上, 每次调用必 TypeError; 一律改显式委托 + try/catch）, 实测: ' + JSON.stringify(found));
+    }
+  }
+
   // ---- 4. kind → 控件工厂 的映射必须完整（schema 新增一种 kind, options 必须跟得上）----
   {
     const kindM = /const KINDS = \{([\s\S]*?)\n  \};/.exec(optSrc);
