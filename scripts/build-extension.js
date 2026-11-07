@@ -108,12 +108,44 @@ function prelude(version) {
   // userscript sharing this world in tests) never observe it.
   var EXT_MODE = true;
 
+  // 09-29 (R3.3): 取字节请求优先走**后台脚本的跨域通道**（内容脚本自己 fetch 受 CORS 限制）,
+  // 通道不可用/失败/超时才回落 plain fetch。契约形状保持不变（blob / onload / onerror /
+  // ontimeout）—— 核心的 gmFetchBlob 只认这个形状, 故核心零改动。
+  function __sviGmXhrViaSw(opts, onFail) {
+    var settled = false;
+    var timer = null;
+    var once = function (fn) {
+      return function () { if (settled) return; settled = true; if (timer) clearTimeout(timer); fn.apply(null, arguments); };
+    };
+    var fail = once(onFail);
+    try {
+      if (typeof chrome === 'undefined' || !chrome.runtime || typeof chrome.runtime.sendMessage !== 'function') { fail(); return; }
+      if (opts.timeout > 0) timer = setTimeout(fail, opts.timeout);
+      chrome.runtime.sendMessage({ type: 'svi-fetch-bytes', url: opts.url }, function (res) {
+        // lastError 必须在回调内读取, 否则控制台会报 unchecked runtime.lastError
+        var lastErr = (typeof chrome.runtime.lastError !== 'undefined') ? chrome.runtime.lastError : null;
+        if (lastErr || !res || !res.ok || typeof res.b64 !== 'string') { fail(); return; }
+        var done = once(function () {
+          try {
+            // 解 base64 → Uint8Array → Blob (见 sw.js 顶部注释: 为什么不能直接传字节)
+            var bin = atob(res.b64);
+            var u8 = new Uint8Array(bin.length);
+            for (var i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+            var blob = new Blob([u8], { type: res.type || 'application/octet-stream' });
+            if (typeof opts.onload === 'function') opts.onload({ status: 200, response: blob, responseHeaders: '' });
+          } catch (e) { if (typeof opts.onerror === 'function') opts.onerror(e); }
+        });
+        done();
+      });
+    } catch (e) { fail(); }
+  }
+
   // GM_xmlhttpRequest shim over fetch. Matches the core's gmFetchBlob usage:
   // responseType 'blob' → res.response is a Blob; 2xx + truthy response →
   // onload; abort on opts.timeout (ms) → ontimeout; network failure → onerror.
   // Note: an MV3 content script cannot bypass page CORS with fetch; the
   // core's decode chain already degrades gracefully when a fetch fails.
-  function __sviGmXhr(opts) {
+  function __sviGmXhrViaFetch(opts) {
     opts = opts || {};
     var ctrl = typeof AbortController === 'function' ? new AbortController() : null;
     var timedOut = false;
@@ -143,6 +175,18 @@ function prelude(version) {
         }
         if (typeof opts.onerror === 'function') opts.onerror(err);
       });
+  }
+
+  function __sviGmXhr(opts) {
+    opts = opts || {};
+    // 只有"取字节"(responseType blob) 才值得多一层转发; 文本拉取走页面 fetch 更直接
+    if (opts.responseType !== 'blob' || opts.method === 'POST') { __sviGmXhrViaFetch(opts); return; }
+    var fellBack = false;
+    __sviGmXhrViaSw(opts, function () {
+      if (fellBack) return;
+      fellBack = true;
+      __sviGmXhrViaFetch(opts);
+    });
   }
 
   var GM_xmlhttpRequest = __sviGmXhr;
@@ -281,6 +325,14 @@ function main() {
     // 不声明则回退到 gecko 的 140 并持续告警。
     gecko_android: { strict_min_version: '142.0' },
   };
+  // 09-29 (task 09-29-viewer-plugin-adapt R3.3): 跨域取字节通道 —— 后台脚本 + 全站 host 权限。
+  //   MV3 下**内容脚本的 fetch 受 CORS 限制**, 只有后台脚本能凭 host_permissions 跨域取图;
+  //   否则「跨域且源站不发 CORS」的原图永远拿不到字节 → 永不反色 (实测见该任务 research/)。
+  //   `background` **两键并存**: Chromium 用 service_worker, Firefox MV3 用 scripts
+  //   (Firefox 不支持 MV3 的 service_worker), 各引擎忽略不认识的那个键 ——
+  //   这是本仓「绝不分叉产物目录」约束下的唯一写法。可用性由 web-ext lint + 双引擎实载把关。
+  manifest.host_permissions = ['<all_urls>'];
+  manifest.background = { service_worker: 'sw.js', scripts: ['sw.js'] };
   fs.writeFileSync(MANIFEST_OUT, JSON.stringify(manifest, null, 2) + '\n', 'utf8');
 
   // v4.5: popup / options sources live in scripts/extension-src/ and are copied —
@@ -334,6 +386,12 @@ function main() {
     }
     fs.writeFileSync(path.join(OUT_DIR, f), out, 'utf8');
   }
+
+  // 09-29 (R3.3): 后台脚本产物 —— 与 popup/options 同源 (真源在 scripts/extension-src/,
+  //   extension/ 目录整体由构建产出, 不手改)。缺源即构建失败。
+  const swFrom = path.join(popupSrcDir, 'sw.js');
+  if (!fs.existsSync(swFrom)) fail('sw.js source missing: ' + path.relative(ROOT, swFrom));
+  fs.writeFileSync(path.join(OUT_DIR, 'sw.js'), fs.readFileSync(swFrom, 'utf8'), 'utf8');
 
   // v6.4 R1: 控件库与设置项 schema 同样是「真源在用户脚本、构建时抽出」——
   //   `v6.4-CONTROLS-START/END`（SviControls 控件库，块内零外部依赖，抽到扩展页即可直接用）

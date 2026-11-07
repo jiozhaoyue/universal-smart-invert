@@ -106,7 +106,7 @@
     ] },
     { id: "theme", title: "动态主题调节", items: [
       { key: "flashGuardLevel", kind: "select", label: "加载前保护（防白闪）", hint: "深色站点加载前先铺黑底消除白闪；「元素遮罩」档另加元素级 pending 遮罩（见下）。注意：元素级遮罩只有扩展形态能做到真正的\"首帧前\"—— 用户脚本在 document-end 启动，首屏元素已渲染，因此只覆盖后续动态插入的元素，首屏由黑底兜底", options: [["off", "关闭", "不做任何加载前介入。"], ["document", "文档黑底", "仅文档级黑底（与 v4.6 行为一致，默认）。"], ["media", "文档黑底 + 元素遮罩", "另对\"本站已知会反色\"时的元素做 pending 遮罩。"]] },
-      { key: "maskPending", kind: "toggle", label: "元素遮罩（pending 遮罩）", hint: "media 档下对\"本站已知会反色\"的新插入媒体先遮住（visibility:hidden），判定完成即放行。三层预算兜底：总时长 / 元素数 / 单元素超时；判定失败立即放行原图。按 Esc（有东西被遮住时）或点下方按钮可一次性显示全部并暂停本会话" },
+      { key: "maskPending", kind: "toggle", label: "元素遮罩（pending 遮罩）", hint: "media 档下对\"本站已知会反色\"的新插入媒体先用深色占住它的位置（不是把它藏起来——藏起来只会露出背后的白底），等判定出结果再放行。临时结论不算数，只有权威结论（或预算兜底）才摘罩；判定失败立即放行原图。三层预算兜底：总时长 / 元素数 / 单元素超时。按 Esc（有东西被遮住时）或点下方按钮可一次性显示全部并暂停本会话" },
       { key: "maskBudgetMs", kind: "slider", label: "遮罩总时长预算", hint: "超过即全部摘罩放行（防\"页面一直白/一直黑\"）", min: 200, max: 5000, step: 100, unit: "ms" },
       { key: "maskMaxElements", kind: "slider", label: "遮罩元素数上限", hint: "同时最多遮住多少个元素（超出部分不打标）", min: 1, max: 500, step: 1, unit: "个" },
       { key: "siteInvertRate", kind: "slider", label: "本站启用门 · 历史反色率", hint: "上次在本站的反色率超过此值才启用元素遮罩（首访站点一律不遮）", min: 0.05, max: 0.95, step: 0.05, unit: "" },

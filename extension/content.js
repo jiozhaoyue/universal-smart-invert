@@ -3,7 +3,7 @@
  * universal-smart-invert — browser extension content script
  * GENERATED FILE — DO NOT EDIT.
  * Built by scripts/build-extension.js from universal-smart-invert.user.js
- * Source version: 0.6.10
+ * Source version: 0.6.11
  *
  * Prelude contract (see scripts/build-extension.js header):
  *   - EXT_MODE (wrapper scope)   → core claims coexistence kind 'ext'
@@ -20,12 +20,44 @@
   // userscript sharing this world in tests) never observe it.
   var EXT_MODE = true;
 
+  // 09-29 (R3.3): 取字节请求优先走**后台脚本的跨域通道**（内容脚本自己 fetch 受 CORS 限制）,
+  // 通道不可用/失败/超时才回落 plain fetch。契约形状保持不变（blob / onload / onerror /
+  // ontimeout）—— 核心的 gmFetchBlob 只认这个形状, 故核心零改动。
+  function __sviGmXhrViaSw(opts, onFail) {
+    var settled = false;
+    var timer = null;
+    var once = function (fn) {
+      return function () { if (settled) return; settled = true; if (timer) clearTimeout(timer); fn.apply(null, arguments); };
+    };
+    var fail = once(onFail);
+    try {
+      if (typeof chrome === 'undefined' || !chrome.runtime || typeof chrome.runtime.sendMessage !== 'function') { fail(); return; }
+      if (opts.timeout > 0) timer = setTimeout(fail, opts.timeout);
+      chrome.runtime.sendMessage({ type: 'svi-fetch-bytes', url: opts.url }, function (res) {
+        // lastError 必须在回调内读取, 否则控制台会报 unchecked runtime.lastError
+        var lastErr = (typeof chrome.runtime.lastError !== 'undefined') ? chrome.runtime.lastError : null;
+        if (lastErr || !res || !res.ok || typeof res.b64 !== 'string') { fail(); return; }
+        var done = once(function () {
+          try {
+            // 解 base64 → Uint8Array → Blob (见 sw.js 顶部注释: 为什么不能直接传字节)
+            var bin = atob(res.b64);
+            var u8 = new Uint8Array(bin.length);
+            for (var i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+            var blob = new Blob([u8], { type: res.type || 'application/octet-stream' });
+            if (typeof opts.onload === 'function') opts.onload({ status: 200, response: blob, responseHeaders: '' });
+          } catch (e) { if (typeof opts.onerror === 'function') opts.onerror(e); }
+        });
+        done();
+      });
+    } catch (e) { fail(); }
+  }
+
   // GM_xmlhttpRequest shim over fetch. Matches the core's gmFetchBlob usage:
   // responseType 'blob' → res.response is a Blob; 2xx + truthy response →
   // onload; abort on opts.timeout (ms) → ontimeout; network failure → onerror.
   // Note: an MV3 content script cannot bypass page CORS with fetch; the
   // core's decode chain already degrades gracefully when a fetch fails.
-  function __sviGmXhr(opts) {
+  function __sviGmXhrViaFetch(opts) {
     opts = opts || {};
     var ctrl = typeof AbortController === 'function' ? new AbortController() : null;
     var timedOut = false;
@@ -57,6 +89,18 @@
       });
   }
 
+  function __sviGmXhr(opts) {
+    opts = opts || {};
+    // 只有"取字节"(responseType blob) 才值得多一层转发; 文本拉取走页面 fetch 更直接
+    if (opts.responseType !== 'blob' || opts.method === 'POST') { __sviGmXhrViaFetch(opts); return; }
+    var fellBack = false;
+    __sviGmXhrViaSw(opts, function () {
+      if (fellBack) return;
+      fellBack = true;
+      __sviGmXhrViaFetch(opts);
+    });
+  }
+
   var GM_xmlhttpRequest = __sviGmXhr;
   var GM = { xmlHttpRequest: __sviGmXhr };
 
@@ -75,7 +119,7 @@
   // ==========================================
   // 1. 配置与常量定义
   // ==========================================
-  const SCRIPT_VERSION = '0.6.10';
+  const SCRIPT_VERSION = '0.6.11';
   const PREFS_KEY = 'universal_smart_invert_v4';   // v2.0 遗留偏好键 (迁移源, 迁移后原样保留以便回滚)
   const LEGACY_KEY = 'universal_smart_invert_v3';  // v1.x 旧键 (仅读取迁移, 保留不删以便回滚)
   const STATS_KEY = 'universal_smart_invert_stats_v1'; // v2.0 遗留统计键 (保留写入以兼容回滚)
@@ -5214,9 +5258,14 @@
 
       /* --- v5.5 加载前 pending 遮罩 (media 档): **纯 CSS 属性门**, 不用 inline style。
              判定完成 (data-svi-settled 写入) 即自动失效 —— 摘罩不需要删样式。
-             用 visibility 而非 opacity: 不留可点击的透明元素, 也不产生过渡中间态。 --- */
+             09-29 由 visibility:hidden 改为「深色占住盒子」: 隐藏元素只是露出**背后**的东西,
+             浅色站点背后仍是白 —— 用户报的"白区"根本没被解决 (实测见 research §10)。
+             pointer-events:none 保留原设计意图: 不留下可点击的占位块 (点击落到背后元素上)。
+             注意: img 的 CSS 滤镜作用于元素含背景, 但摘罩与上滤镜同处一个同步块
+             (applyDecision 内先 finalizeInvert 后 settle), 不产生两者并存的绘制帧。 --- */
       html[data-svi-masking] [data-svi-pending]:not([data-svi-settled]) {
-        visibility: hidden !important;
+        background: var(--svi-bg) !important;
+        pointer-events: none;
       }
 
       /* --- 区域选取框 (与 rect 反色框共用视觉, 独立类避免影响既有选择器) --- */      .svi-mask-select {
@@ -8886,7 +8935,13 @@
       } catch (e) { /* ignore */ }
       this.finalizeInvert(el, src, d.verdict === 'invert');
       // v5.5: 判定完成即摘罩 —— 挂在**唯一决策落点**上, 不靠定时器 (定时器只是兜底)
-      try { pendingMask.settle(el, d.reason || 'decision'); } catch (e) { /* ignore */ }
+      // 09-29: 只有**权威结论**才摘罩。档 B 的临时结论 (provisional) 当场摘罩会让加载前遮罩
+      //   形同虚设 —— 实测: 媒体 2.5s 才到, 遮罩在档 B 判定那一刻就被摘掉, 白区全程暴露
+      //   (research §10)。provisional 由真实像素到达后的重判升级; 期间由既有
+      //   总时长预算 / 单元素超时兜底放行 (防"页面一直黑")。
+      if (!isProvisionalDecision(d)) {
+        try { pendingMask.settle(el, d.reason || 'decision'); } catch (e) { /* ignore */ }
+      }
       // v5.5: 记本站反色率 (供下次加载的"已知会反色"门使用)。写入走 1s 去抖。
       try { siteMediaStore.record(profileKey(), d.verdict === 'invert'); } catch (e) { /* ignore */ }
       // v5.2: 会话处理日志 + 撤销栈 —— 仅记"动作确实被施加"的结论 (keep / skip 无可见状态可回退)
@@ -9272,12 +9327,25 @@
       const src = getMediaSrc(img);
       if (!src) return;
 
+      // 「已决」早退 —— 但**临时结论 (provisional) 不算已决**: 它允许被更权威的来源升级
+      //   (既有语义: 档 B 临时结论由 IO/eager 升级; 09-29 起也允许被「原图链接」继承升级)
+      let cur = null;
+      try { cur = this.decisionBySrc.get(src) || null; } catch (e) { cur = null; }
       try {
-        if (img.getAttribute && img.getAttribute('data-svi-checked-src') === src) return;
+        if (img.getAttribute && img.getAttribute('data-svi-checked-src') === src && !isProvisionalDecision(cur)) return;
       } catch (e) { /* ignore */ }
 
       const profile = getSiteProfile();
       if (state.imageInvert === false || profile.enabled === false || profile.imageInvert === false) return;
+
+      // 09-29 (viewer-plugin-adapt R3.2): 「原图链接」视觉同一性继承。
+      //   看图类插件 (浮图秀 / Imagus / HoverZoom 等) 的通用约定是
+      //   `<a href="原图.ext"><img 缩略图></a>`, 而浮层展示的就是那个 href。
+      //   缩略图与浮层是**同一张图** → 缩略图已有权威结论时直接继承, 于是:
+      //     ① 不必等原图自己的字节 (网络慢时省掉一次下载 —— 实测 382~535ms 就花在这);
+      //     ② 不必跨域取图 (扩展形态拿不到跨域字节时, 也仍能反色)。
+      //   继承结论标 provisional: 真像素到达后仍由 attachPendingWake 升级覆盖, 不锁死。
+      if ((!cur || isProvisionalDecision(cur)) && this.inheritFromOriginalLink(img, src)) return;
 
       // v4.6 回退开关: localFirstDecide=false → v4.5 旧行为 (未解码挂 load 等网络, 无本地保守判定)
       if (state.localFirstDecide === false) {
@@ -9332,6 +9400,47 @@
       // 由 load / IO 交叉 / Mutation 事件自然唤醒重判
       this.registerPending(img, src);
       this.attachPendingWake(img, src);
+    }
+
+    // 09-29 (R3.2) 「原图链接」继承: 只读 DOM + 有界扫描, 无新增全局状态、无持久化。
+    //   信号 = 文档内存在 `a[href]` 且其绝对 href **逐字符等于**本元素的 src;
+    //   取该链接内部媒体的**权威**结论作为继承源。命中即返回 true (已落决策)。
+    //   刻意不继承的情形 (宁可慢不可错):
+    //     · 链接内媒体无结论 / 结论是 provisional / 结论是 skip (多半是"小图标/骨架"判断)
+    //     · 本元素或链接内媒体是 <video> (视频缩略图 ≠ 视频帧, 视觉同一性不成立)
+    inheritFromOriginalLink(img, src) {
+      try {
+        const tag = String(img.tagName || '').toLowerCase();
+        if (tag === 'video') return false;
+        const cur = this.decisionBySrc.get(src);
+        // 已经是继承来的 → 不重复继承 (幂等, 省掉一次有界扫描)
+        if (cur && cur.reason === 'overlay-inherit') return false;
+        const root = document.body || document.documentElement;
+        if (!root || !root.querySelectorAll) return false;
+        const links = root.querySelectorAll('a[href]');
+        const cap = Math.min(links.length, 400);   // 有界: 长页面不无界扫描
+        for (let i = 0; i < cap; i++) {
+          const a = links[i];
+          let href = '';
+          try { href = a.href || ''; } catch (e) { continue; }
+          if (href !== src) continue;
+          let thumb = null;
+          try { thumb = a.querySelector('img, image, input[type="image" i]'); } catch (e) { thumb = null; }
+          if (!thumb) return false;
+          if (String(thumb.tagName || '').toLowerCase() === 'video') return false;
+          const ts = getMediaSrc(thumb);
+          if (!ts || ts === src) return false;
+          const d = this.decisionBySrc.get(ts);
+          if (!d || isProvisionalDecision(d) || d.verdict === 'skip') return false;
+          const rec = this.recordDecision(src, d.verdict, 'overlay-inherit', true, true);
+          this.applyDecision(img, src, rec);
+          this.registerPending(img, src);
+          this.attachPendingWake(img, src);
+          StatsManager.count('overlayInherits');
+          return true;
+        }
+      } catch (e) { /* ignore */ }
+      return false;
     }
 
     // —— v4.6 档 B/C pending 登记表 (有界 LRU ≤500; 可被 load / IO / Mutation 唤醒重判) ——
@@ -12440,6 +12549,7 @@
         pageDarkAdopted: 0,
         pageDarkDelegateFailures: 0,
         taintFallbacks: 0,
+        overlayInherits: 0,   // 09-29: 「原图链接」视觉同一性继承命中次数 (viewer-plugin-adapt R3.2)
         videoAutoActivations: 0,
         bgReplacePages: 0,
         imgFxTransforms: 0,
@@ -12681,7 +12791,7 @@
     ] },
     { id: "theme", title: "动态主题调节", items: [
       { key: "flashGuardLevel", kind: "select", label: "加载前保护（防白闪）", hint: "深色站点加载前先铺黑底消除白闪；「元素遮罩」档另加元素级 pending 遮罩（见下）。注意：元素级遮罩只有扩展形态能做到真正的\"首帧前\"—— 用户脚本在 document-end 启动，首屏元素已渲染，因此只覆盖后续动态插入的元素，首屏由黑底兜底", options: [["off", "关闭", "不做任何加载前介入。"], ["document", "文档黑底", "仅文档级黑底（与 v4.6 行为一致，默认）。"], ["media", "文档黑底 + 元素遮罩", "另对\"本站已知会反色\"时的元素做 pending 遮罩。"]] },
-      { key: "maskPending", kind: "toggle", label: "元素遮罩（pending 遮罩）", hint: "media 档下对\"本站已知会反色\"的新插入媒体先遮住（visibility:hidden），判定完成即放行。三层预算兜底：总时长 / 元素数 / 单元素超时；判定失败立即放行原图。按 Esc（有东西被遮住时）或点下方按钮可一次性显示全部并暂停本会话" },
+      { key: "maskPending", kind: "toggle", label: "元素遮罩（pending 遮罩）", hint: "media 档下对\"本站已知会反色\"的新插入媒体先用深色占住它的位置（不是把它藏起来——藏起来只会露出背后的白底），等判定出结果再放行。临时结论不算数，只有权威结论（或预算兜底）才摘罩；判定失败立即放行原图。三层预算兜底：总时长 / 元素数 / 单元素超时。按 Esc（有东西被遮住时）或点下方按钮可一次性显示全部并暂停本会话" },
       { key: "maskBudgetMs", kind: "slider", label: "遮罩总时长预算", hint: "超过即全部摘罩放行（防\"页面一直白/一直黑\"）", min: 200, max: 5000, step: 100, unit: "ms" },
       { key: "maskMaxElements", kind: "slider", label: "遮罩元素数上限", hint: "同时最多遮住多少个元素（超出部分不打标）", min: 1, max: 500, step: 1, unit: "个" },
       { key: "siteInvertRate", kind: "slider", label: "本站启用门 · 历史反色率", hint: "上次在本站的反色率超过此值才启用元素遮罩（首访站点一律不遮）", min: 0.05, max: 0.95, step: 0.05, unit: "" },

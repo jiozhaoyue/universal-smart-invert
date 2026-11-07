@@ -3427,6 +3427,132 @@ async function main() {
     assert.strictEqual(mg3.afterTag, false, '暂停后不再打标');
     assert.strictEqual(mg3.remain, 0, '逃生后无残留 pending');
 
+    // 09-29 (task 09-29-viewer-plugin-adapt): media 档由「藏元素」改为「深色占盒」,
+    //   且**临时结论 (provisional) 不得摘罩**。
+    //   实测依据: research/01-overlay-probe.md §10 —— 武装成功的前提下, 档 B 的临时结论当场
+    //   就把遮罩摘掉 (data-svi-pending=false, settled=local-context, 背景白), 遮罩形同虚设;
+    //   而旧实现用 visibility:hidden 只是露出**背后**的白底, 用户报的"白区"根本没解决。
+    const mg4 = await evalInPageAsync(`(() => {
+      const svi = window.__svi;
+      const saved = { level: svi.prefs.flashGuardLevel, paused: svi.runtime.maskPaused,
+                      budget: svi.prefs.maskBudgetMs, settleMs: svi.prefs.maskSettleTimeoutMs };
+      svi.prefs.flashGuardLevel = 'media';
+      svi.runtime.maskPaused = false;
+      svi.prefs.maskBudgetMs = 5000;          // 拉长预算, 免得兜底摘罩干扰本组断言
+      svi.prefs.maskSettleTimeoutMs = 5000;
+      const ov = (svi.prefs.siteOverrides = svi.prefs.siteOverrides || {});
+      const key = location.hostname || 'file:';
+      ov[key] = Object.assign(ov[key] || {}, { pendingMask: 'on' });
+      svi.setupPendingMask();
+      const armed = !!svi.pendingMask.armed;
+      const masking = document.documentElement.hasAttribute('data-svi-masking');
+
+      // 有布局盒、但永远不会有像素的媒体 → 走档 B (provisional)
+      const im = document.createElement('img');
+      im.width = 120; im.height = 90;
+      im.src = '/__svi_never_exists__.png';
+      document.body.appendChild(im);
+      svi.tagInlineMedia(im);
+      const taggedNow = im.hasAttribute('data-svi-pending');
+      const cs = getComputedStyle(im);
+      const styled = { bg: cs.backgroundColor, vis: cs.visibility, pe: cs.pointerEvents };
+
+      let afterProvisional = null;
+      try {
+        const d = svi.engines.image.recordDecision(im.src, 'keep', 'local-context', true, true);
+        svi.engines.image.applyDecision(im, im.src, d);
+        afterProvisional = { pending: im.hasAttribute('data-svi-pending'), settled: im.getAttribute('data-svi-settled') };
+      } catch (e) { afterProvisional = { err: String(e && e.message) }; }
+
+      let afterFinal = null;
+      try {
+        const d2 = svi.engines.image.recordDecision(im.src, 'keep', 'pixel', true, false);
+        svi.engines.image.applyDecision(im, im.src, d2);
+        afterFinal = { pending: im.hasAttribute('data-svi-pending'), settled: im.getAttribute('data-svi-settled') };
+      } catch (e) { afterFinal = { err: String(e && e.message) }; }
+
+      im.remove();
+      svi.pendingMask.settleAll('test-restore');
+      svi.prefs.flashGuardLevel = saved.level;
+      svi.prefs.maskBudgetMs = saved.budget;
+      svi.prefs.maskSettleTimeoutMs = saved.settleMs;
+      svi.runtime.maskPaused = saved.paused;
+      return { armed, masking, taggedNow, styled, afterProvisional, afterFinal };
+    })()`);
+    assert.strictEqual(mg4.armed, true, 'media 档 + 本站 override=on 必须武装遮罩');
+    assert.strictEqual(mg4.masking, true, 'armed 时 data-svi-masking 必须在场 (CSS 属性门的开关)');
+    assert.strictEqual(mg4.taggedNow, true, '新插入媒体必须被打标');
+    assert.strictEqual(mg4.styled.vis, 'visible',
+      '09-29 改造: 遮罩期间元素必须仍 visible —— 改成「深色占盒」, 不再 visibility:hidden');
+    assert.notStrictEqual(mg4.styled.bg, 'rgba(0, 0, 0, 0)',
+      '遮罩期间必须有实底色 (透明 = 背后白底照旧露出, 正是用户报的白区), got ' + mg4.styled.bg);
+    assert.strictEqual(mg4.styled.pe, 'none',
+      '遮罩期间不得留下可点击的占位块 (保留原设计意图)');
+    assert.deepStrictEqual(mg4.afterProvisional, { pending: true, settled: null },
+      '**临时结论 (provisional) 不得摘罩** —— 实测过: 当场摘罩会让加载前遮罩形同虚设');
+    assert.deepStrictEqual(mg4.afterFinal, { pending: false, settled: 'pixel' },
+      '权威结论必须摘罩 (挂在唯一决策落点 applyDecision)');
+
+    // 09-29 (R3.2): 「原图链接」视觉同一性继承 —— 看图类插件的通用约定
+    //   `<a href="原图.ext"><img 缩略图></a>`, 浮层展示的就是那个 href。
+    //   实测收益 (research/01-overlay-probe.md): 原图 2500ms 才到, 靠继承 **104ms 就反色**。
+    //   本组用**预置结论**构造, 不依赖时序与真实图片字节, 故确定性。
+    const mg5 = await evalInPageAsync(`(() => {
+      const svi = window.__svi;
+      const eng = svi.engines.image;
+      const mk = (cls) => { const d = document.createElement('div'); d.className = cls; return d; };
+      // 必须用**绝对 URL** 做键: 真实流程经 getMediaSrc 取到的就是绝对串,
+      //   用相对字面量建键会与查找口径不一致 (本组第一版就栽在这里, 断言报 false)
+      const abs = (u) => { const a = document.createElement('a'); a.href = u; return a.href; };
+      // 按 spec 处方: 要断言计数就**显式打开** statsEnabled (它默认被别的场景关掉并留在 localStorage 里)
+      const savedStats = svi.prefs.statsEnabled;
+      svi.prefs.statsEnabled = true;
+      const thA_ = abs('/__bench_thumb_a__.png');
+      const orgA_ = abs('/__bench_orig_a__.png');
+      const thB_ = abs('/__bench_thumb_b__.png');
+      const orgB_ = abs('/__bench_orig_b__.png');
+
+      // 源 A: 已决缩略图 (权威 invert) → 应当可继承
+      eng.recordDecision(thA_, 'invert', 'pixel', true, false);
+      const wrapA = mk('content');
+      const aA = document.createElement('a'); aA.href = orgA_;
+      const imA = document.createElement('img'); imA.width = 260; imA.height = 200; imA.src = thA_;
+      aA.appendChild(imA); wrapA.appendChild(aA); document.body.appendChild(wrapA);
+
+      // 源 B: 已决缩略图 (skip, 典型的封面/卡片判断) → **不得**继承
+      eng.recordDecision(thB_, 'skip', 'policy', true, false);
+      const wrapB = mk('content');
+      const aB = document.createElement('a'); aB.href = orgB_;
+      const imB = document.createElement('img'); imB.width = 260; imB.height = 200; imB.src = thB_;
+      aB.appendChild(imB); wrapB.appendChild(aB); document.body.appendChild(wrapB);
+
+      // 浮层: src = 链接的 href, 且**永不加载** → 只能靠继承出结论
+      const ovA = document.createElement('img'); ovA.width = 300; ovA.height = 220;
+      ovA.src = orgA_; document.body.appendChild(ovA);
+      const ovB = document.createElement('img'); ovB.width = 300; ovB.height = 220;
+      ovB.src = orgB_; document.body.appendChild(ovB);
+
+      const hitA = eng.inheritFromOriginalLink(ovA, ovA.src);
+      const recA = eng.decisionBySrc.get(ovA.src) || null;
+      const attrA = ovA.getAttribute('data-svi-inverted');
+      const hitB = eng.inheritFromOriginalLink(ovB, ovB.src);
+      const recB = eng.decisionBySrc.get(ovB.src) || null;
+      const hits = (svi.stats.counters || {}).overlayInherits || 0;
+      svi.prefs.statsEnabled = savedStats;
+
+      [wrapA, wrapB, ovA, ovB].forEach((n) => n.remove());
+      return { hitA, recA, attrA, hitB, recB, hits };
+    })()`);
+    assert.strictEqual(mg5.hitA, true, '已决缩略图 (invert) 的原图链接必须被继承');
+    assert.strictEqual(mg5.recA && mg5.recA.reason, 'overlay-inherit',
+      '继承结论必须以 overlay-inherit 为 reason 落进 decisionBySrc, got ' + JSON.stringify(mg5.recA));
+    assert.strictEqual(mg5.recA && mg5.recA.provisional, true,
+      '继承结论必须是 provisional —— 真像素到达后仍要能被升级覆盖');
+    assert.strictEqual(mg5.attrA, 'true', '继承必须真的落地到元素 (永不加载的原图也能反色)');
+    assert.strictEqual(mg5.hitB, false, 'skip 结论不得被继承 (封面/卡片判断与原图语境不同)');
+    assert.strictEqual(mg5.recB, null, 'skip 源不得留下任何决策');
+    assert.ok(mg5.hits >= 1, '继承命中必须可观测 (overlayInherits 计数; 已按 spec 显式打开 statsEnabled)');
+
     // ============================================================
     // Scenario 30 (v6.2): 区域反色渲染层 (部分反色)
     //   - 默认关闭 → 零覆盖层 (基线零回归)

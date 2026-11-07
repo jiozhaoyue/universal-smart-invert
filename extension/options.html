@@ -1291,9 +1291,14 @@
 
       /* --- v5.5 加载前 pending 遮罩 (media 档): **纯 CSS 属性门**, 不用 inline style。
              判定完成 (data-svi-settled 写入) 即自动失效 —— 摘罩不需要删样式。
-             用 visibility 而非 opacity: 不留可点击的透明元素, 也不产生过渡中间态。 --- */
+             09-29 由 visibility:hidden 改为「深色占住盒子」: 隐藏元素只是露出**背后**的东西,
+             浅色站点背后仍是白 —— 用户报的"白区"根本没被解决 (实测见 research §10)。
+             pointer-events:none 保留原设计意图: 不留下可点击的占位块 (点击落到背后元素上)。
+             注意: img 的 CSS 滤镜作用于元素含背景, 但摘罩与上滤镜同处一个同步块
+             (applyDecision 内先 finalizeInvert 后 settle), 不产生两者并存的绘制帧。 --- */
       html[data-svi-masking] [data-svi-pending]:not([data-svi-settled]) {
-        visibility: hidden !important;
+        background: var(--svi-bg) !important;
+        pointer-events: none;
       }
 
       /* --- 区域选取框 (与 rect 反色框共用视觉, 独立类避免影响既有选择器) --- */      .svi-mask-select {

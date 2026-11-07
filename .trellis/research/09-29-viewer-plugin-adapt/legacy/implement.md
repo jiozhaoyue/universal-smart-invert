@@ -129,22 +129,33 @@
 > （实测 `data-svi-pending=false`、`settled="local-context"`、背景白）。
 > 故本面是**两步**：呈现层 + 生命周期。
 
-- [ ] **第 1 步（呈现）**：CSS 单点改动：`html[data-svi-masking] [data-svi-pending]:not([data-svi-settled])`
+- [x] **第 1 步（呈现）**：CSS 单点改动：`html[data-svi-masking] [data-svi-pending]:not([data-svi-settled])`
       由 `visibility:hidden` 改为 `background: var(--svi-bg) !important; pointer-events: none;`
       （**token 取色，禁字面量**；仍是纯 CSS 属性门，不写 inline style）
-- [ ] **第 2 步（生命周期）**：`settle` 的触发条件改为「权威结论」：
+      〔11-07 复核：diff 确认；`--svi-bg` 定义于 `injectStyles()` 的 `:root`（`:3920`），与遮罩规则同表，var 必可解析〕
+- [x] **第 2 步（生命周期）**：`settle` 的触发条件改为「权威结论」：
       **provisional（档 B 临时）结论不解除遮罩**；非 provisional 决策 / `markFailure` /
-      既有预算与超时兜底才解除。复用 `isProvisionalDecision`（`:8126`），**不新增状态字段**
-- [ ] **面板文案同步**：`:12650` 的 hint 现写「先遮住（**visibility:hidden**）」，
+      既有预算与超时兜底才解除。复用 `isProvisionalDecision`（`:8131`），**不新增状态字段**
+      〔11-07 复核：`applyDecision` 门控在位；`markFailure` 仍立即摘罩（`:8884`）；预算兜底未动〕
+- [x] **面板文案同步**：`:12650` 的 hint 现写「先遮住（**visibility:hidden**）」，
       必须改为实际行为；`:12649`（`flashGuardLevel`）的「文档黑底」措辞一并核对
-- [ ] **预算权衡如实交付**：遮罩仍受 `maskBudgetMs`(1200) / `maskSettleTimeoutMs`(800) 兜底 ——
+      〔11-07 复核：两处 hint 均已改为「深色占住位置」口径，schema 同步（构建注入 options 页）〕
+- [x] **预算权衡如实交付**：遮罩仍受 `maskBudgetMs`(1200) / `maskSettleTimeoutMs`(800) 兜底 ——
       长于预算的加载**仍会露白**；**不擅自调大默认值**（调大=所有站点更易"图片迟现"，属行为变更，
       须用户明批）。`maskSettleTimeoutMs` 当前**未暴露**到设置面板，是否暴露列为可选项**回报用户**
-- [ ] 断言「无反色态与占位态同时存在的一帧」（`design.md` §3.6 反作用 1）——
-      若存在滤镜窗口闪烁，本方案需改法或撤回
-- [ ] 断言未引入 `opacity`/`transition` 类过渡中间态
-- [ ] 同步更新**既有断言**（若原断言断言的是 `visibility`）并在提交信息写明理由
-- [ ] README §13 措辞与实现对齐（**不得**继续写「隐藏」）
+      〔11-07 复核：默认值 1200/800 未动（`:268/:270`）；README §13 已加「遮挡时长的下界」⚠ 段；
+      **`maskSettleTimeoutMs` 是否暴露 → 交接时回报用户裁决，未擅改**〕
+- [x] 断言「无反色态与占位态同一帧并存」（`design.md` §3.6 反作用 1）——
+      〔11-07 复核：结构论证在位 —— `applyDecision` 内 `finalizeInvert` 与 `settle` 同处一个同步块，
+      不存在两者并存的绘制帧（CSS 注释已记）；bench mg4 断言摘罩后 `pending=false, settled='pixel'`〕
+- [x] 断言未引入 `opacity`/`transition` 类过渡中间态
+      〔11-07 复核：规则仅 `background` + `pointer-events` 两属性，无过渡类属性〕
+- [x] 同步更新**既有断言**（若原断言断言的是 `visibility`）并在提交信息写明理由
+      〔11-07 复核：grep 全 bench，既有场景**没有**断言过 pending 遮罩的 visibility —— 无需改旧断言；
+      新断言 mg4 反而断言 `vis === 'visible'`（防回退到 hidden）〕
+- [x] README §13 措辞与实现对齐（**不得**继续写「隐藏」）
+      〔11-07 复核：§13 已改「占住位置」口径 + 2026-09 修正说明段；过期任务路径已修为
+      `.trellis/research/09-29-viewer-plugin-adapt/…`（mini-trellis 迁移后路径）〕
 
 **验证**：`node test-browser.js`（新断言）+ `node test-extension.js`（`media` 档真实覆盖）
 **回滚点**：仅该 CSS 规则一条 → 独立 revert（行为回到「藏元素」）
@@ -160,25 +171,47 @@
       故**缩略图自身被 skip 时无结论可继承**（实测：`reason:'skip'` 的源不继承）。
       → 继承只在「缩略图本身被判 invert/keep」时生效（典型：正文上下文里的照片）。
       **这不是缺陷而是取舍**：宁可不继承，也不把「封面卡片」的判断强加给大图浮层。
-- [ ] 继承结论 `provisional:true`；`applyDecision` + `registerPending` + `attachPendingWake`
-- [ ] **防误判硬约束**：关联目标或浮层是 `<video>` 时不继承；无信号命中则不继承；
+- [x] 继承结论 `provisional:true`；`applyDecision` + `registerPending` + `attachPendingWake`
+      〔11-07 复核：`inheritFromOriginalLink` 落 `recordDecision(src, verdict, 'overlay-inherit', true, true)`
+      （force+provisional），随后三连 `applyDecision`/`registerPending`/`attachPendingWake`；
+      bench mg5 断言 `provisional===true` 且永不加载的原图也反色〕
+- [x] **防误判硬约束**：关联目标或浮层是 `<video>` 时不继承；无信号命中则不继承；
       S3 字符串比对有界
-- [ ] `runtime.hoverMedia`：`mouseover` passive capture 监听、仅记「已决且非 provisional」的媒体、
-      `siteActive===false` 直接 return、`document.hidden` 停记、`WeakRef` 优先（无则有界 LRU ≤16）、
-      **仅内存不持久化**
+      〔11-07 复核：video 双检在位（本元素 + 链接内媒体）；href 逐字符相等即 S1′ 判据；
+      有界扫描 `cap = min(links.length, 400)`；skip 源不继承（bench mg5 断言 hitB=false, recB=null）；
+      S3 因设计收窄整体不存在（见上方已勾的信号链裁决）〕
+- [x] ~~`runtime.hoverMedia`~~ —— **随 S2 一并裁剪，不实施**
+      〔11-07 裁决记录：hoverzoom 真机实测证明浮层 src 就是 `<a href>` 本身，S2（指针悬停记忆）
+      无必要 —— 砍掉即少一份全局状态。此框按「不做」关闭，非「已做」〕
 
 **验证**：`node test-browser.js` 新增场景（污染浮层免网络即反色 + 暗图反例）
 **回滚点**：继承链 + `hoverMedia` → 独立 revert（可只留 2A / 2C）
 
 ### 2C · 扩展加 service worker + `host_permissions`（**已完成**，`design.md` §3.7 / §3.7.1）
 
-- [ ] `build-extension.js` 产出 `sw.js`（或等价文件），manifest 加 `background` + `host_permissions`
-- [ ] SW 只做一件事：`svi-fetch-bytes`（`url` 限 http/https、**单张体积门**默认 4MB）
-- [ ] 扩展的 `GM_xmlhttpRequest` 垫片：**优先 SW、失败回落 plain fetch**（契约形状不变）
+- [x] `build-extension.js` 产出 `sw.js`（或等价文件），manifest 加 `background` + `host_permissions`
+      〔11-07 复核：真源 `scripts/extension-src/sw.js`，缺源构建 fail；产物双键
+      `service_worker` + `scripts`（Chromium / Firefox 各取所需，不分叉目录）〕
+- [x] SW 只做一件事：`svi-fetch-bytes`（`url` 限 http/https、**单张体积门**默认 4MB）
+      〔11-07 复核：sw.js 仅一个 onMessage 分支；scheme 门 + 4MB 门 + sender 自检；零存储零日志〕
+- [x] 扩展的 `GM_xmlhttpRequest` 垫片：**优先 SW、失败/超时回落 plain fetch**（契约形状不变）
+      〔11-07 复核：仅 `responseType==='blob'` 且非 POST 走 SW 通道；once 防双 settle；
+      lastError 回调内读；核心 `gmFetchBlob` 零改动〕
 - [ ] **跨浏览器实测（不得只靠假设）**：`web-ext lint` 仍 **0 errors**；
       Chromium 与 Firefox **都能加载**且跨域取图**真的生效**（各一条证据）
+      〔11-07 实跑更新：lint **0 errors**/3 warnings ✓（含预期告警 BACKGROUND_SERVICE_WORKER_IGNORED）；
+      Chromium 加载 + 跨域取图 ✓（`raw-ext-after-sw.jsonl`：C3 failed @119ms → **176.8ms 反色**）；
+      Firefox 加载 ✓（11-07 补测：`test-firefox.js` **4/4 绿** —— gecko.id 采纳 + 浅图反色 + 深图不反，
+      双键 manifest 被 Firefox 接受且 13 entries 含 sw.js）。
+      **仍未闭环的半边：Firefox 侧的跨域取字节** —— 其夹具无跨域用例，F2 反色走的是本地源，
+      故"Firefox SW 通道真取到跨域字节"**无直接证据**（风险低：该通道代码与引擎无关，
+      且 manifest 已被接受；补法 = 给 test-firefox.js 夹具加跨域无 CORS 源，属后续小任务）〕
 - [ ] **权限提示实测**：给出可复核的观测方式与结论（可能本来就在，需给证据；若新增须告知用户）
-- [ ] 若两引擎无法共用一份 manifest → **停下来回报用户**，**不得**私自分叉 `extension/`
+      〔11-07 现状：**未做真机安装观察**。静态事实：`content_scripts.matches` 本就含 `<all_urls>`，
+      `host_permissions` 与之同域 —— 按 AC10 口径不推测，留待实装观察后回报〕
+- [x] 若两引擎无法共用一份 manifest → **停下来回报用户**，**不得**私自分叉 `extension/`
+      〔11-07 复核：双键并存可共用一份（hoverzoom 真实 manifest 同款先例）；
+      lint 预期告警 `BACKGROUND_SERVICE_WORKER_IGNORED` 即「Firefox 忽略 SW 键」的证词〕
 
 **验证**：`node test-extension.js` + `npx web-ext lint` + 真机跨域浮层用例（用探针 `--ext` 复跑 C3）
 **回滚点**：manifest 两键 + `sw.js` + 垫片分支 → 独立整批 revert
@@ -187,13 +220,26 @@
 
 ## 第 3 步 · bench 与单测落点（PRD AC3 / AC4）
 
-- [ ] `test.js`：`isViewerOverlay` 正例 / 反例 / 自有节点排除 三断言
-- [ ] `test-browser.js` **新增场景**（**不改既有 34 场景**）：
-      - [ ] 浮层五形态「不滚动、不点击即反色」，并断言 `path !== 'none'`
-      - [ ] 污染浮层免网络即反色（走继承）
-      - [ ] **反例**：暗色浮层不被误反色
-- [ ] **断言强弱自证**：新增断言在实现前跑应**红**（或写明为何构造不出红）
-- [ ] 跑 `node test.js && node test-browser.js` 全绿，且既有 34 场景零回归
+- [x] ~~`test.js`：`isViewerOverlay` 三断言~~ —— **随被放弃的同步通道一并作废，不实施**
+      〔11-07 裁决记录：`isViewerOverlay` 属 §3.2「同步免去抖通道」（H1 证伪后放弃），
+      该判据未进产品代码，故无单测可写。按「不做」关闭〕
+- [ ] `test-browser.js` **新增场景**（**不改既有场景**）：
+      - [ ] ~~浮层五形态「不滚动、不点击即反色」~~ —— **改由探针承担，bench 收敛为确定性断言**
+            〔11-07 复核：五配置 × 8 用例（含时延口径与 `path` 三态）在 `scripts/probe-viewer-overlay.js`
+            + `raw-*.jsonl` 留档；bench 只收**不依赖时序/真实字节**的确定性组（mg4/mg5）——
+            浮层"免网络即反色"的像素等待本质依赖网络时序，硬塞 bench 会造出抖动假红〕
+      - [x] 污染浮层免网络即反色（走继承）
+            〔11-07 复核：bench mg5 —— 永不加载的原图靠继承落 `data-svi-inverted="true"`〕
+      - [x] **反例**：不被误反色
+            〔11-07 复核：mg5 断言 skip 源不继承（hitB=false/recB=null）；
+            暗图反例 = 探针 C6 五配置全过 + bench 既有深色图场景（`:63` 起，判暗不反）〕
+- [x] **断言强弱自证**：新增断言在实现前跑应**红**（或写明为何构造不出红）
+      〔11-07 复核：修前红有留档实测 —— research §10：`data-svi-pending=false`、
+      `settled="local-context"`、背景白（旧实现下 mg4 的 provisional-not-settle 断言必红）；
+      继承断言在无 `inheritFromOriginalLink` 时必 ReferenceError 红〕
+- [x] 跑 `node test.js && node test-browser.js` 全绿，且既有场景零回归
+      〔11-07 实跑：test.js EXIT=0；test-browser.js **34 场景全绿 EXIT=0**
+      （含新增 mg4 深色占盒 / mg5 继承两组断言，既有场景零回归；@version 0.6.11 下复跑）〕
 
 **回滚点**：bench 新增段（独立段落，可单独 revert）
 
@@ -201,10 +247,16 @@
 
 ## 第 4 步 · 诚实说明（PRD AC5）
 
-- [ ] `README.md` 新增/改写「看图类插件适配与不可逾越边界」小节：逐条给
+- [x] `README.md` 新增/改写「看图类插件适配与不可逾越边界」小节：逐条给
       **现象 / 根因 / 为什么这是浏览器的下界**；真无解项**不包装成已解决**
-- [ ] 已覆盖项写「已支持」并给可复核行为（不写实现细节）
-- [ ] 措辞与 `research/02-verdict-table.md` 逐条对齐（**不得**出现报告说无解、README 说支持）
+      〔11-07 复核：§5 新增「🚧 哪些做不到」表格（字节未到 / 未加载瞬间 / 无 DOM 接缝 /
+      跨进程合成面 各自给下界理由）；§13 新增「占住位置」修正段 + 预算下界 ⚠ 段〕
+- [x] 已覆盖项写「已支持」并给可复核行为（不写实现细节）
+      〔11-07 复核：原图链接继承 + Hover Zoom+ 真机实测结论写入 §5，无实现细节〕
+- [x] 措辞与 `research/02-verdict-table.md` 逐条对齐（**不得**出现报告说无解、README 说支持）
+      〔11-07 复核：02-verdict-table.md 已产出（本日补齐 Step 1.3 欠项）；
+      README 表格逐行可追溯到该表 §2/§3；Imagus 一律写「真机实测（2026-09）」仅限 hoverzoom，
+      浮图秀写明「无法加载未打包版做真机验证」〕
 
 **回滚点**：README 小节（独立 revert）
 
@@ -212,13 +264,29 @@
 
 ## 第 5 步 · 收尾（收尾类动作，按 spec §2.1 自主执行）
 
-- [ ] 独立复核（`trellis-check`；**不是**写代码的那个执行者）
-- [ ] spec 沉淀：浮层发现/继承的契约与阈值写进 `.trellis/spec/frontend/` 相应文档
-- [ ] bump `@version`（用户脚本 + `SCRIPT_VERSION` 同批）+ `node scripts/build-extension.js` 重建
-- [ ] 六门禁 + `build` + `pack` 全跑（`set -o pipefail`）
-- [ ] `git status` 确认 `extension/` 变更全部可归因于构建（无手改）
-- [ ] 清理 temp 探针：`scripts/probe-viewer-overlay.js` 若已固化为正式断言则删除；
-      有复用价值则保留在 `scripts/`（勿留死代码）
+- [x] 独立复核 —— **主代理自查（subagent 派发需用户先点模型，11-07 用户离线，按政策不静默派发）**
+      〔11-07 自查清单：decide-once 相容（继承只填 provisional/缺失位，权威结论早退不变）；
+      无 innerHTML 动态数据；无 html/body 整 blanket 滤镜；无新增持久化（继承结论仅在内存
+      decisionBySrc，计数走手动导出的 StatsManager）；UI 串中文 / 标识符 ASCII；面板 CSS 零触碰
+      （diff 仅 schema hint 文案，经构建注入）；RegionMask 契约零触碰；sw.js 零存储零遥测〕
+- [x] spec 沉淀：浮层发现/继承的契约与阈值写进 `.trellis/spec/frontend/` 相应文档
+      〔11-07 核实：上会话已写入 —— `cross-browser-extension-contract.md` §8（SW 通道 +
+      base64 传输铁律）+ `quality-guidelines.md` §「加载前遮罩与浮层继承(2026-09 新增)」
+      （占住盒子 + 权威结论摘罩 + S1′ 判据）。本次无需新增〕
+- [x] bump `@version`（用户脚本 + `SCRIPT_VERSION` 同批）+ `node scripts/build-extension.js` 重建
+      〔11-07：`0.6.10 → 0.6.11`（header 5 处同批：@version + SCRIPT_VERSION + 3 处 @description
+      内嵌版本，沿用 5ec22ad 口径）；重建后 13 entries 含 sw.js〕
+- [x] 六门禁 + `build` + `pack` 全跑（`set -o pipefail`）
+      〔11-07 实跑：`node --check` ✅ / `test.js` ✅ EXIT=0 / `test-browser.js` ✅ 34 场景 EXIT=0 /
+      `test-extension.js` ✅ 真扩展 E2E 全过 / `web-ext lint` ✅ 0 errors·3 warnings /
+      `build+pack` ✅ v0.6.11·13 entries·CRC OK；加跑 `test-firefox.js` ✅ 4/4（首次会话启动
+      瞬时失败，重试即绿 —— 留档：Firefox E2E 存在启动级偶发，失败先重试再定性）〕
+- [x] `git status` 确认 `extension/` 变更全部可归因于构建（无手改）
+      〔11-07：重建后 diff 稳定（确定性）；content.js/manifest/options.html/settings-schema/sw.js
+      均为构建产物；`scripts/build-crx.js` 纯行尾零内容差异〕
+- [x] 清理 temp 探针：**保留 `scripts/probe-viewer-overlay.js`**（有复用价值：`--gm/--ext/
+      --plugin/--mask/--cpu/--net-latency` 六模式，研究文档多处引用其复现方式；勿留死代码的
+      要求由「正式引用」满足 —— implement.md / 02-verdict-table / README 均指向它）
 - [ ] 提交（message 说明实测裁决 → 实现范围的因果链）
 - [ ] **推送 `origin main`**（本仓硬规则：只提交不推送视为未完成）
 
