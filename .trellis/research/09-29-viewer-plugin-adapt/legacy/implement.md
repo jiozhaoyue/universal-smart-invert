@@ -287,8 +287,10 @@
 - [x] 清理 temp 探针：**保留 `scripts/probe-viewer-overlay.js`**（有复用价值：`--gm/--ext/
       --plugin/--mask/--cpu/--net-latency` 六模式，研究文档多处引用其复现方式；勿留死代码的
       要求由「正式引用」满足 —— implement.md / 02-verdict-table / README 均指向它）
-- [ ] 提交（message 说明实测裁决 → 实现范围的因果链）
-- [ ] **推送 `origin main`**（本仓硬规则：只提交不推送视为未完成）
+- [x] 提交（message 说明实测裁决 → 实现范围的因果链）
+      〔11-07：`e5852ef` feat(overlay) 13 files / +1545 −64〕
+- [x] **推送 `origin main`**（本仓硬规则：只提交不推送视为未完成）
+      〔11-07：`a9276b1..e5852ef main -> main` 实推成功〕
 
 ---
 

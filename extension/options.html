@@ -125,6 +125,10 @@
         transition: width 0.15s ease, background 0.15s ease, opacity 0.15s ease;
         box-shadow: 0 4px 14px rgba(var(--svi-black-rgb), 0.25);
         opacity: 0.55;
+        /* Step B (R1): 药丸由 div 改 button —— 抹平原生 button 的默认 padding/字体,
+           视觉与原 div 完全一致; 换来键盘聚焦与原生语义 */
+        padding: 0;
+        font: inherit;
       }
       .svi-trigger-pill.left-edge {
         border-radius: 0 8px 8px 0;
@@ -191,6 +195,33 @@
         font-size: 13px;
         padding-bottom: 6px;
         border-bottom: 1px solid rgba(var(--svi-white-rgb), 0.08);
+      }
+      /* Step B (R1): header 右侧组（状态徽标 + 关闭钮）+ 关闭钮本体 ——
+         形态对齐 .svi-modal-close（直角 + 描边 + hover 提亮）, 色/token 一律走既有变量 */
+      .svi-card-header-right {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-weight: 500;
+      }
+      .svi-card-close {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 20px;
+        height: 20px;
+        padding: 0;
+        border: var(--svi-border-w) solid var(--svi-border);
+        border-radius: 0;
+        background: transparent;
+        color: var(--svi-text-dim);
+        cursor: pointer;
+        transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+      }
+      .svi-card-close:hover {
+        color: var(--svi-text-strong);
+        border-color: var(--svi-fg);
+        background: rgba(var(--svi-white-rgb), 0.1);
       }
       .svi-card-status-badge {
         font-size: 11px;

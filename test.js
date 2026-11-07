@@ -5455,6 +5455,27 @@ setTimeout(() => {
       'R1b: 面板引用的键必须在 schema 或例外表里（防面板新增项而 options 漏项）, 实测 ' + JSON.stringify(notOnOptions));
   }
 
+  // ---- 3b. R15 静态守卫（09-28-ui-overhaul Step B）: 区域遮罩两方法只存在于 ImageInvertEngine,
+  //      UIController 类体内**不得**再出现 `this.cancelRegionMask` / `this.armRegionMask` ——
+  //      旧代码正是这两个死调用让每次 Esc 都抛 TypeError, 后面的关模态永远走不到
+  //      （实测见 09-28-ui-overhaul research/03）。修法 = 显式委托 `window.__svi_image_engine`,
+  //      守卫同时锚定委托形态在场, 防止有人改回 `this.` 形式。
+  {
+    const clsM15 = /class UIController \{([\s\S]*?)\n  \}\n/.exec(src);
+    assert.ok(clsM15, 'R15: 必须能定位 UIController 类体');
+    // 剥掉块/行注释再判 —— 否则修复说明注释里的字样会误报（本守卫第一版就栽在这）
+    const code15 = clsM15[1].replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+    assert.ok(!code15.includes('this.cancelRegionMask'),
+      'R15: UIController 类体内不得有 this.cancelRegionMask 死调用（该方法只在引擎上, 必须显式委托）');
+    assert.ok(!code15.includes('this.armRegionMask'),
+      'R15: UIController 类体内不得有 this.armRegionMask 死调用（同上）');
+    const code15All = code15; // 委托存在性断言用同一份剥注释后的类体 + 全文代码
+    assert.ok(code15All.includes('window.__svi_image_engine.cancelRegionMask'),
+      'R15: Esc 关闭路径必须显式委托 __svi_image_engine.cancelRegionMask');
+    assert.ok(code15All.includes('window.__svi_image_engine.armRegionMask'),
+      'R15: 菜单「区域遮罩（拖拽）」必须显式委托 __svi_image_engine.armRegionMask');
+  }
+
   // ---- 4. kind → 控件工厂 的映射必须完整（schema 新增一种 kind, options 必须跟得上）----
   {
     const kindM = /const KINDS = \{([\s\S]*?)\n  \};/.exec(optSrc);

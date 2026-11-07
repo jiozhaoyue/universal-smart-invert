@@ -4196,6 +4196,94 @@ async function main() {
     await sendCdp('Page.removeScriptToEvaluateOnNewDocument', { identifier: drInjected.identifier });
     console.log('[Test] Scenario 34: 仲裁三态通过 (缺席=自有 / 在场=委托并让位 / 他人已开=只读不动)');
 
+    // ============================================================
+    // Scenario 35 (09-28-ui-overhaul Step B): 关闭模型
+    //   药丸 button 化 / 面板卡 [data-svi-close] / Esc 四级链
+    //   修前红证据 (research/03 §4/§5.5): 药丸是 div (pillIsButton:false, 不可键盘聚焦);
+    //   closeCandidates 为空 (面板卡无任何关闭控件); Esc 处理里的 this.cancelRegionMask()
+    //   是死调用 → 每次 Esc 都抛 TypeError, **模态永远关不掉**。
+    // ============================================================
+    console.log('[Test] Scenario 35: UI 关闭模型 (药丸button / data-svi-close / Esc链) ...');
+    await sendCdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/action-page` });
+    await new Promise((r) => setTimeout(r, 1500));
+    const errBefore35 = pageErrorCount;
+
+    // 35a. 药丸必须已是 button (R1: 可键盘聚焦 + 原生语义 + aria)
+    const pill35 = await evalInPage(`(() => {
+      const p = document.querySelector('.svi-trigger-pill');
+      if (!p) return { found: false };
+      return { found: true, isButton: p instanceof HTMLButtonElement, type: p.type,
+               aria: p.getAttribute('aria-label') || '' };
+    })()`);
+    assert.strictEqual(pill35.found, true, '35a: 药丸必须在场');
+    assert.strictEqual(pill35.isButton, true, '35a: 药丸必须是 <button> (修前是 div, 不可键盘聚焦)');
+    assert.strictEqual(pill35.type, 'button', '35a: 药丸必须 type=button (避免表单隐式提交语义)');
+    assert.ok(pill35.aria.length > 0, '35a: 药丸必须有 aria-label (读屏可用)');
+
+    // 35b. 面板卡关闭入口 (AC1: 点 [data-svi-close] 关闭, 全程不点击面板外部)
+    const close35 = await evalInPage(`(() => {
+      const pill = document.querySelector('.svi-trigger-pill');
+      pill.click();
+      const card = document.querySelector('.svi-panel-card');
+      const openedByToggle = card.classList.contains('show');
+      const closeBtn = card.querySelector('[data-svi-close]');
+      const modalCloseHasContract = !!document.querySelector('.svi-modal-close[data-svi-close]');
+      const isButton = closeBtn instanceof HTMLButtonElement;
+      if (closeBtn) closeBtn.click();
+      const closedByButton = !card.classList.contains('show');
+      return { openedByToggle, hasClose: !!closeBtn, isButton, modalCloseHasContract, closedByButton };
+    })()`);
+    assert.strictEqual(close35.openedByToggle, true, '35b: 点药丸必须能开面板卡');
+    assert.strictEqual(close35.hasClose, true, '35b: 面板卡必须有关闭入口 [data-svi-close] (修前 closeCandidates 为空)');
+    assert.strictEqual(close35.isButton, true, '35b: 关闭入口必须是 <button>');
+    assert.strictEqual(close35.modalCloseHasContract, true, '35b: 模态关闭钮也必须带 data-svi-close (同一契约)');
+    assert.strictEqual(close35.closedByButton, true, '35b: AC1 — 点关闭钮后面板卡必须失去 show (全程未点击面板外部)');
+
+    // 真实按键通道: CDP Input.dispatchKeyEvent (trusted event, 与研究探针 dispatchMouseEvent 同族)
+    const pressEsc35 = async () => {
+      await sendCdp('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27, nativeVirtualKeyCode: 27 });
+      await sendCdp('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27, nativeVirtualKeyCode: 27 });
+    };
+
+    // 35c-1. Esc 链第一级: 区域遮罩武装态被取消 (走显式委托 —— 修前这里是 TypeError)
+    const arm35 = await evalInPage(`(() => {
+      const svi = window.__svi;
+      const eng = window.__svi_image_engine;
+      const hasMethod = !!(eng && typeof eng.cancelRegionMask === 'function');
+      svi.prefs.actions.mask.enabled = true;   // armRegionMask 受 actionEnabled('mask') 门控 (默认关)
+      let armed = false;
+      try { eng.armRegionMask(); armed = !!eng.regionArmed; } catch (e) {}
+      return { hasMethod, armed };
+    })()`);
+    assert.strictEqual(arm35.hasMethod, true, '35c: 委托目标 __svi_image_engine.cancelRegionMask 必须存在');
+    assert.strictEqual(arm35.armed, true, '35c: armRegionMask 经引擎必须能武装 (菜单项委托的落点)');
+    await pressEsc35();
+    const cancel35 = await evalInPage(`(() => {
+      window.__svi.prefs.actions.mask.enabled = false;   // 还原 35c-1 的临时启用
+      return { armedNow: !!window.__svi_image_engine.regionArmed };
+    })()`);
+    assert.strictEqual(cancel35.armedNow, false, '35c: Esc 必须经显式委托取消区域遮罩武装态 (修前此路是 TypeError)');
+
+    // 35c-2. Esc 关模态 (AC11; 修前必红 —— 死调用抛错使 Esc 永远走不到关模态) + 零页面异常
+    await evalInPage(`(() => { window.__svi.ui.openSettingsModal(); return true; })()`);
+    const modalBefore35 = await evalInPage(`(() => document.querySelector('.svi-modal-mask').classList.contains('show'))()`);
+    assert.strictEqual(modalBefore35, true, '35c: 模态必须先打开');
+    await pressEsc35();
+    const modalAfter35 = await evalInPage(`(() => document.querySelector('.svi-modal-mask').classList.contains('show'))()`);
+    assert.strictEqual(modalAfter35, false, '35c: AC11 — Esc 必须能关模态 (修前死调用 TypeError 使 Esc 永远关不掉)');
+
+    // 35c-3. 胶囊面板纳入 Esc (R1: 此前面板完全不在 Esc 链里)
+    await evalInPage(`(() => { document.querySelector('.svi-trigger-pill').click(); return true; })()`);
+    const panelBefore35 = await evalInPage(`(() => document.querySelector('.svi-panel-card').classList.contains('show'))()`);
+    assert.strictEqual(panelBefore35, true, '35c: 面板卡必须先打开');
+    await pressEsc35();
+    const panelAfter35 = await evalInPage(`(() => document.querySelector('.svi-panel-card').classList.contains('show'))()`);
+    assert.strictEqual(panelAfter35, false, '35c: R1 — Esc 必须能关胶囊面板 (此前面板完全不在 Esc 链里)');
+
+    assert.strictEqual(pageErrorCount, errBefore35,
+      '35 全程: Esc 链与关闭路径不得产生任何页面异常 (R15 修前的 TypeError 正是这里红)');
+    console.log('[Test] Scenario 35: 关闭模型通过 (药丸=button / [data-svi-close] 生效 / Esc 链四级零异常)');
+
     console.log('\n🎉 ALL BROWSER AUTOMATION TESTS PASSED 100% SUCCESFULLY!\n');
 
     await new Promise((r) => setTimeout(r, 400)); // Windows 重定向: 等待 stdout 刷盘再退出

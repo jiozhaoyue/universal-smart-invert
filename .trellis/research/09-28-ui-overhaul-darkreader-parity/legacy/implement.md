@@ -159,16 +159,33 @@ node scripts/build-extension.js && node test-extension.js
 
 > 依据：`design.md` §3.4、`research/03` §4/§5.5。
 
-- [ ] **先落契约**：关闭控件带 `data-svi-close`（`design.md` §4）
-- [ ] `.svi-card-header`（`:13340-13347`）加关闭按钮（`SviControls.icon('close')`，带 `data-svi-close`）
+- [x] **先落契约**：关闭控件带 `data-svi-close`（`design.md` §4）
+      〔11-07 落地：面板卡关闭钮带 `data-svi-close`；**模态的 `.svi-modal-close` 同批补上该属性**
+      （契约说"任何声明式关闭入口"，不能只管新钮不管旧钮）〕
+- [x] `.svi-card-header` 加关闭按钮（`SviControls.icon('close')`，带 `data-svi-close`）
       → 调 `togglePanel(false)`
-- [ ] `this.pill`（`:13329`）由 `div` 改 `button`（`type=button` + `aria-label`）→ 可键盘聚焦
-- [ ] **修死调用**：`:13628` `this.cancelRegionMask()` → 显式委托
-      （如 `window.__svi_image_engine?.cancelRegionMask?.()`）；`:14474` 的 `this.armRegionMask()` 同理
-- [ ] Esc 处理加 `try/catch` 兜底 —— **一处异常不得废掉整条关闭路径**
-- [ ] 胶囊面板纳入 Esc 关闭
-- [ ] `test-browser.js` 新增**真实按键**断言：Esc 关模态；**加静态守卫**断言
-      `this.cancelRegionMask` / `this.armRegionMask` 的调用点所属类上确实存在同名方法（或已显式委托）
+      〔11-07 落地：新 `.svi-card-close` 按钮 + `.svi-card-header-right` 分组（徽标+关闭钮）；
+      `togglePanel` 加可选 `force` 参（无参调用点语义不变）；CSS 形态对齐 `.svi-modal-close`
+      （直角+描边+token 变量，零新颜色字面量）〕
+- [x] `this.pill` 由 `div` 改 `button`（`type=button` + `aria-label`）→ 可键盘聚焦
+      〔11-07 落地：`HTMLButtonElement` + `type='button'` + `aria-label='反色控制面板开关'`；
+      CSS 补 `padding:0; font:inherit` 抹平 button 默认样式，视觉不变〕
+- [x] **修死调用**：`this.cancelRegionMask()` → 显式委托 `window.__svi_image_engine`
+      （沿用 :13852 一带既有别名惯例）；`this.armRegionMask()` 同理
+      〔11-07 落地：两处均改显式委托 + `typeof` 门；顺带清掉 UIController 上只写不读的
+      `this.regionArmed` 死状态（真状态只在引擎 :8703 一带）〕
+- [x] Esc 处理加 `try/catch` 兜底 —— **一处异常不得废掉整条关闭路径**
+      〔11-07 落地：四级链（pendingMask 逃生 → 区域遮罩委托 → 关模态 → 关胶囊面板）
+      每级独立 try/catch；修前死调用在第二级抛 TypeError 使后两级永不可达〕
+- [x] 胶囊面板纳入 Esc 关闭
+      〔11-07 落地：作为 Esc 链最末级（模态在场时优先关模态）〕
+- [x] `test-browser.js` 新增**真实按键**断言：Esc 关模态；**加静态守卫**断言
+      〔11-07 落地：Scenario 35 —— 35a 药丸 button/aria、35b 关闭钮 AC1（全程不点面板外部）、
+      35c-1 Esc 取消区域遮罩（经委托）、35c-2 Esc 关模态+零页面异常（AC11）、35c-3 Esc 关胶囊面板；
+      按键用 CDP `Input.dispatchKeyEvent`（trusted 通道）。**静态守卫落在 test.js**（非本文件 ——
+      test.js 本就是源码扫描的家，有现成 UIController 类体定位器；剥注释后判，第一版没剥
+      被修复说明注释的字样误报，已修正）：类体内不得再有 `this.cancel/armRegionMask`、
+      委托形态必须在场〕
 
 **验证命令**：
 
@@ -177,9 +194,16 @@ node test.js && node test-browser.js            # 新增 Esc 与关闭按钮断�
 node scripts/panel-shot.js                      # 截图留证
 ```
 
-- [ ] AC1 达成：探针点 `[data-svi-close]` 后 `.svi-panel-card` 无 `show`，**全程未点击面板外部**
-- [ ] AC11 达成：Esc 关闭模态 + console 无 `TypeError`
-- [ ] 五绿全绿
+- [x] AC1 达成：探针点 `[data-svi-close]` 后 `.svi-panel-card` 无 `show`，**全程未点击面板外部**
+      〔11-07 实证：bench 35b —— `closeBtn.click()` 后 `closedByButton=true`，只点了按钮本体〕
+- [x] AC11 达成：Esc 关闭模态 + console 无 `TypeError`
+      〔11-07 实证：bench 35c-2 —— CDP trusted Escape 后 `show` 移除，且 35 全程
+      `pageErrorCount` 零增量（修前死调用正是 TypeError 源）〕
+- [x] 五绿全绿
+      〔11-07 实跑（@0.6.12 最终态复跑）：`node --check` ✅ / `test.js` ✅ EXIT=0（含 R15 静态守卫，
+      该守卫第一版被注释字样误报 —— 剥注释后判，留档）/ `test-browser.js` ✅ **35 场景** EXIT=0
+      （Scenario 35 首跑即绿 + 0.6.12 复跑）/ `test-extension.js` ✅ / `web-ext lint` ✅ 0 errors /
+      `build+pack` ✅ v0.6.12。截图留证 `node scripts/panel-shot.js` → dev/shots/〕
 
 **回滚点**：`buildUI` / 键处理 / `:14474` 三处 → 独立 revert。
 

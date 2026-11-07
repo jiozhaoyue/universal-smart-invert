@@ -3,7 +3,7 @@
  * universal-smart-invert — browser extension content script
  * GENERATED FILE — DO NOT EDIT.
  * Built by scripts/build-extension.js from universal-smart-invert.user.js
- * Source version: 0.6.11
+ * Source version: 0.6.12
  *
  * Prelude contract (see scripts/build-extension.js header):
  *   - EXT_MODE (wrapper scope)   → core claims coexistence kind 'ext'
@@ -119,7 +119,7 @@
   // ==========================================
   // 1. 配置与常量定义
   // ==========================================
-  const SCRIPT_VERSION = '0.6.11';
+  const SCRIPT_VERSION = '0.6.12';
   const PREFS_KEY = 'universal_smart_invert_v4';   // v2.0 遗留偏好键 (迁移源, 迁移后原样保留以便回滚)
   const LEGACY_KEY = 'universal_smart_invert_v3';  // v1.x 旧键 (仅读取迁移, 保留不删以便回滚)
   const STATS_KEY = 'universal_smart_invert_stats_v1'; // v2.0 遗留统计键 (保留写入以兼容回滚)
@@ -4092,6 +4092,10 @@
         transition: width 0.15s ease, background 0.15s ease, opacity 0.15s ease;
         box-shadow: 0 4px 14px rgba(var(--svi-black-rgb), 0.25);
         opacity: 0.55;
+        /* Step B (R1): 药丸由 div 改 button —— 抹平原生 button 的默认 padding/字体,
+           视觉与原 div 完全一致; 换来键盘聚焦与原生语义 */
+        padding: 0;
+        font: inherit;
       }
       .svi-trigger-pill.left-edge {
         border-radius: 0 8px 8px 0;
@@ -4158,6 +4162,33 @@
         font-size: 13px;
         padding-bottom: 6px;
         border-bottom: 1px solid rgba(var(--svi-white-rgb), 0.08);
+      }
+      /* Step B (R1): header 右侧组（状态徽标 + 关闭钮）+ 关闭钮本体 ——
+         形态对齐 .svi-modal-close（直角 + 描边 + hover 提亮）, 色/token 一律走既有变量 */
+      .svi-card-header-right {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-weight: 500;
+      }
+      .svi-card-close {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 20px;
+        height: 20px;
+        padding: 0;
+        border: var(--svi-border-w) solid var(--svi-border);
+        border-radius: 0;
+        background: transparent;
+        color: var(--svi-text-dim);
+        cursor: pointer;
+        transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+      }
+      .svi-card-close:hover {
+        color: var(--svi-text-strong);
+        border-color: var(--svi-fg);
+        background: rgba(var(--svi-white-rgb), 0.1);
       }
       .svi-card-status-badge {
         font-size: 11px;
@@ -13419,7 +13450,8 @@
       // ===== v5.0: 元素动作触发器状态 (仅内存, 标签页隔离) =====
       this.sessionHidden = new Set(); // 本会话临时隐藏的元素 (『全部恢复』用)
       this.hoverTarget = null;        // 最近悬停元素 (Alt+M 的元素遮罩取法)
-      this.regionArmed = false;       // 区域遮罩一次性武装拖拽模式
+      // Step B (R15): 本类不再持有 regionArmed —— 它只存在于 ImageInvertEngine（武装/取消/
+      //   拖拽消费全在引擎侧 :8703 一带）; 旧字段是只写不读的死状态, 误导后来的维护者。
       this.root = null;
       this.pill = null;
       this.dot = null;
@@ -13491,8 +13523,12 @@
       });
 
       // 贴边微型触发小药丸
-      this.pill = document.createElement('div');
+      // Step B (09-28-ui-overhaul R1): div → button —— 修复实测缺陷「药丸不可键盘聚焦、
+      //   无原生 button 语义、无 aria」（research/03 §4：pillIsButton:false）。
+      this.pill = document.createElement('button');
+      this.pill.type = 'button';
       this.pill.className = 'svi-trigger-pill';
+      this.pill.setAttribute('aria-label', '反色控制面板开关');
       this.dot = document.createElement('div');
       this.dot.className = 'svi-status-dot';
       this.pill.appendChild(this.dot);
@@ -13509,7 +13545,23 @@
       this.statusBadge = document.createElement('span');
       this.statusBadge.className = 'svi-card-status-badge';
       this.statusBadge.textContent = '初始化中';
-      header.append(title, this.statusBadge);
+      // Step B (09-28-ui-overhaul R1): 面板卡此前**没有任何关闭控件**（research/03 §4：
+      //   closeCandidates 为空，唯一路径是 click-outside）。按 design §4 契约落
+      //   声明式关闭入口 data-svi-close —— 语义 = click 使最近容器移除 show 类。
+      this.cardCloseBtn = document.createElement('button');
+      this.cardCloseBtn.type = 'button';
+      this.cardCloseBtn.className = 'svi-card-close';
+      this.cardCloseBtn.setAttribute('data-svi-close', '');
+      this.cardCloseBtn.title = '关闭面板';
+      this.cardCloseBtn.appendChild(SviControls.icon('close', '', 'svi-close-icon'));
+      this.cardCloseBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.togglePanel(false);
+      });
+      const headerRight = document.createElement('span');
+      headerRight.className = 'svi-card-header-right';
+      headerRight.append(this.statusBadge, this.cardCloseBtn);
+      header.append(title, headerRight);
 
       // 行1: 核心按钮 (视频 / 智能 / 图片 / 背景 / 画中画 —— 5 紧凑按钮)
       const btnRow = document.createElement('div');
@@ -13646,7 +13698,7 @@
       //   图标必须只有一处实现 (SviControls.icon), 不能在模板串里手写 <svg>。
       header.innerHTML = `
         <div class="svi-modal-title"><span>智能反色</span></div>
-        <button class="svi-modal-close" title="关闭"></button>
+        <button class="svi-modal-close" title="关闭" data-svi-close></button>
       `;
       try {
         const tSpan = header.querySelector('.svi-modal-title span');
@@ -13786,14 +13838,31 @@
       }, true);
 
       // Esc 关闭 (v5.0: 先取消区域遮罩武装态, 再关弹窗)
+      // Step B (09-28-ui-overhaul R15): 旧代码 `this.cancelRegionMask()` 是**死调用** ——
+      //   该方法只存在于 ImageInvertEngine（:8703 一带）, 本类从来没有; 每次 Esc 都在这里
+      //   抛 TypeError, 后面的关模态永远走不到（实测: Esc 关不掉模态的根因, research/03）。
+      //   修法 = 显式委托既有别名 `window.__svi_image_engine`（与 :13852 一带的惯例一致）,
+      //   且**每一级独立 try/catch** —— 一处异常不得废掉整条关闭路径。
       document.addEventListener('keydown', (e) => {
         if (e.key !== 'Escape') return;
         // v5.5 逃生: 只在"确实有东西被遮住"时接管 Esc —— 否则会抢掉关闭弹窗/取消区域遮罩
-        if (pendingMask.count > 0) { pendingMask.escape(); return; }
-        if (this.cancelRegionMask()) return;
-        if (this.modalMask.classList.contains('show')) {
-          this.closeSettingsModal();
-        }
+        try {
+          if (pendingMask.count > 0) { pendingMask.escape(); return; }
+        } catch (err) { /* 逃生失败也要继续走后面的关闭路径 */ }
+        try {
+          if (window.__svi_image_engine && typeof window.__svi_image_engine.cancelRegionMask === 'function'
+              && window.__svi_image_engine.cancelRegionMask()) return;
+        } catch (err) { /* ignore —— 继续后面的关闭路径 */ }
+        try {
+          if (this.modalMask.classList.contains('show')) {
+            this.closeSettingsModal();
+            return;
+          }
+        } catch (err) { /* ignore */ }
+        // Step B (R1): 胶囊面板纳入 Esc 关闭（最末级 —— 模态在场时优先关模态）
+        try {
+          if (this.panel.classList.contains('show')) this.togglePanel(false);
+        } catch (err) { /* ignore */ }
       });
 
       // 存储同步方法 (区块行 sync 聚合 → 一次全量刷新)
@@ -14636,7 +14705,16 @@
       this.rowSyncs.push(() => blurRow.sync());
 
       sec.add(SviControls.btnRow([
-        { label: '区域遮罩（拖拽）', onClick: () => { this.armRegionMask(); refresh(); } },
+        // Step B (R15): armRegionMask 同样只在引擎上 —— 旧 this.armRegionMask() 是死调用
+        //   （点菜单项必抛 TypeError, refresh 都走不到）。显式委托 + try/catch。
+        { label: '区域遮罩（拖拽）', onClick: () => {
+            try {
+              if (window.__svi_image_engine && typeof window.__svi_image_engine.armRegionMask === 'function') {
+                window.__svi_image_engine.armRegionMask();
+              }
+            } catch (e) { /* ignore */ }
+            refresh();
+          } },
         { label: '清除全部遮罩', onClick: () => {
             teardown('mask');
             try { document.querySelectorAll('[data-svi-mask-region]').forEach((n) => n.remove()); } catch (e) { /* ignore */ }
@@ -16051,8 +16129,10 @@
       this.modalMask.classList.remove('show');
     }
 
-    togglePanel() {
-      const show = !this.panel.classList.contains('show');
+    // Step B (R1): 可选 force 参 —— 不传保持"点药丸切换"语义; 传 false = 显式关闭
+    //   (关闭按钮 / Esc 路径用), 传 true = 显式打开。既有无参调用点行为不变。
+    togglePanel(force) {
+      const show = force === undefined ? !this.panel.classList.contains('show') : !!force;
       this.panel.classList.toggle('show', show);
       if (show) {
         this.updateStatusBadge();
