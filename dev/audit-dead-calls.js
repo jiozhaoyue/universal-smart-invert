@@ -1,5 +1,7 @@
 // 审计: 各类体内 this.method() 调用 vs 本类实际定义的方法 —— 找 R15 同类死调用。
-// 用法: node dev/audit-dead-calls.js   (零依赖; 属一次性审计工具, 若有产出可考虑固化进 test.js)
+// 用法: node dev/audit-dead-calls.js   (零依赖)
+// 注: 同一套逻辑已固化为 test.js 的**永久门禁**（R15c 块, 12 个类差集必须为空）——
+//     本文件保留为诊断工具（给出逐类明细）; 两处口径需一致, 改一处须同步另一处。
 const fs = require('fs');
 const path = require('path');
 const ROOT = path.join(__dirname, '..');
