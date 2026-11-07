@@ -832,3 +832,34 @@ Topics: [.trellis/research/09-28-ui-overhaul-darkreader-parity/legacy/implement.
 ### Next Steps
 
 - Step C 取色器形态重做(需用户过同意门:动 hasPicker 现任断言);Step D 单一真源(串行大改面);权限提示真机观察(AC10);maskSettleTimeoutMs 是否暴露面板(用户裁决);AMO 签名(缺凭据);bench UI Collapsible Accordion 清点行 Missing 属 09-28-ui-overhaul 后续步骤观察项
+
+
+## Session 23: D 系列跨面不一致修复 0.6.15: options 死滑杆复活 + popup 选项集同源注入 + 图片开关作用域感知写
+<!-- trellis-session: v=2 fp=1ff6ddc0478cb8f7 -->
+
+**Date**: 2026-11-07
+**Task**: D 系列跨面不一致修复 0.6.15: options 死滑杆复活 + popup 选项集同源注入 + 图片开关作用域感知写
+**Branch**: `main`
+
+### Summary
+
+接 09-28-ui-overhaul design.md 诊断的 D 系列（D7 严重档在内）六项跨面不一致, 本批全修: D7 options 页四条画面滑杆是死控件(getActiveFilter 只在 presetId==='custom' 时消费, options 从不写 presetId)→拖杆联动置 custom + 选回预设反向重置四键(构建期抽 SVI_PRESET_PARAMS); schema presetId 补「自定义」项供回显。D2 popup imgFxMode 手写第二份选项集漂移 4/8→构建期 SVI_SCHEMA_OPTIONS 占位从 schema 注入(缺占位/重复注入即构建失败)。D1/D8 胶囊与 popup 勾选读合成态写只写全局键→本站覆盖否决时永远「点了没用」→UIController.setImagesEffective 作用域感知写单点承载两入口: 开=全局主门必开+清站点否决(AND 语义), 关=有覆盖走站点外科关、无覆盖走全局。D3 纯黑→夜间纯黑; D5 默认值三份真源收敛(snapshot 引 DEFAULT_PREFS + popup 构建期注入 SVI_DEFAULTS); D4 双行互指; D9 hour 分叉登记。顺带: file: 页 toggleSiteBgReplace 覆盖键与 profileKey 同源(裸 hostname 得空串写入读不到的键); popup 色卡 span→button。行为回归 test-extension 6g 四路径+7d-3 双向联动, 六门禁全绿(37 场景+真扩展 E2E+lint 0 errors+pack v0.6.15)。另: 直改 state 种覆盖会被 storage.onChanged 重载窗口洗掉(7c 同族), 测试侧已改走真实入口(cycleTriState+popup 通道)零竞速。implement.md 复选框逐项核实回填(Step A 外层框+D 系列六项)。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `2fd29cf` | fix(ui): D 系列跨面不一致修复 —— options 死滑杆复活 + popup 选项集同源注入 + 图片开关作用域感知写 (0.6.15) |
+| `a739347` | docs(task): implement.md 复选框逐项核实回填 —— Step A 外层框 + D 系列六项落地注记 (0.6.15) |
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Step C 取色器形态重做（需用户过同意门：动 hasPicker 现任断言）—— 仍待用户裁决，0.6.15 未触碰；
+- Step D 单一真源主体（SVI_KEY_REGISTRY + 94 调用点 + A 模态声明式渲染）—— 0.6.15 只清了 D 系列
+  bug 层（D-3 全勾），D-1/D-2/D-4 仍是串行大改面；
+- bench UI Collapsible Accordion 清点行 Missing（09-28-ui-overhaul 后续观察项）—— 待排查；
+- 权限提示真机观察（AC10）· maskSettleTimeoutMs 是否暴露面板（用户裁决）· AMO 签名（缺凭据）。
