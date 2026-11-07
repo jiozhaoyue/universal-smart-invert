@@ -218,6 +218,18 @@ function main() {
   if (!meta.description) fail('@description not found in userscript header');
   const version = sanitizeVersion(meta.version);
 
+  // v0.6.15: @description 内嵌的版本号必须跟 @version 同步（约定: 三条 description 都以
+  //   "(<版本>, " 起头）。0.6.14→0.6.15 的 bump 实测漏改过一次, manifest.description 静默
+  //   带着旧版本号 —— 把这条约定变成构建期断言, 漂移即响红。
+  for (const [k, v] of Object.entries(meta)) {
+    if (k === 'description' || k.indexOf('description:') === 0) {
+      if (v.indexOf('(' + version + ',') === -1) {
+        fail('header ' + k + ' 的内嵌版本号与 @version ' + version + ' 不同步（约定格式 "(<版本>, "）: '
+          + v.slice(0, 60) + '… —— bump 版本时请同步改三条 @description');
+      }
+    }
+  }
+
   // Core body: strip the metadata block, keep everything else byte-for-byte.
   const body = source
     .replace(/\/\/ ==UserScript==[\s\S]*?\/\/ ==\/UserScript==/, '')
