@@ -94,7 +94,8 @@ node scripts/build-extension.js && node scripts/pack.js
 > 目标：直角化 + 达标描边 + 死 token 复活 + 页签方形 + 去卡片。
 > 依据：`design.md` §3.3、`research/03` §2。
 
-- [ ] token 块（`v6.4-TOKENS-START/END`，`universal-smart-invert.user.js:3910-3964`）：
+- [x] token 块（`v6.4-TOKENS-START/END`，`universal-smart-invert.user.js:3910-3964`）：
+      〔11-07 回填核实: 外层框补勾 —— 四个子项全部落地（commit `fd9a4a2`，0.6.11 批），逐项在案〕
       - [x] `--svi-border`：`#316e7d` → **`#35798a`**（3.428:1；同色系偏离 DR 最小的达标值）
             —— 已落地，块内注释写明偏离理由与实测比值
       - [x] 新增 `--svi-border-w-inner: .0625rem`（对齐 DR `@size-border-inner`）—— 已落地
@@ -240,12 +241,15 @@ node scripts/panel-shot.js                      # 截图留证
       **原生 input 保留 → hasPicker 现任绿灯断言不动，属本条免门主修路径，未触碰用户同意门**〕
 - [ ] 取色器控件按 `design.md` §3.3 重做：**hex 文本框 + 预览块 + 重置 + 离散色板**
       （点选，非拖拽；键盘可用）
+      〔11-07 登记: 仍**未做** —— 0.6.13 主修已消除可用性缺陷（隐形取色器不再满屏），
+      形态重做属增强; 0.6.15 批维持主修路径，未触碰本门〕
 - [ ] 移除 `colorList` 路径的原生 `<input type=color>`
 - [ ] **⚠ 必须回报用户的门**：同批修改 `test-browser.js:999`（`hasPicker` 采集）与
       `:1140`（`assert.strictEqual(report.ui.hasPicker, true, …)`）——
       这是**现任绿灯断言**，删取色器必然让它变红。
       **不得静默放宽**：改动前向用户说明并取得同意；
       若用户不接受，退路 = 只做定位修复、不改控件形态（原生 input 保留）
+      〔11-07 登记: 该门**未过**，两行未改; 0.6.15 交接文档仍列为待用户裁决项〕
 
 **验证命令**：
 
@@ -286,19 +290,42 @@ node test-browser.js
 
 ### D-3 归零 D 系列不一致
 
-- [ ] **D7（严重）**：扩展 options 页 4 条滑杆死控件 —— 二选一并论证：
+- [x] **D7（严重）**：扩展 options 页 4 条滑杆死控件 —— 二选一并论证：
       ① options 侧拖这 4 值也置 `presetId='custom'`（与 A 同构）；
       ② schema 的 presetId 下拉补 `custom` 项并让 A/C 取值路径一致。
       **必须选一条并写进 spec**，不得留作两种行为。
-- [ ] **D1**：popup 不再自算合成值、不再只写全局键 —— 统一走 `registry[key].write`
-- [ ] **D2**：popup 的 `imgFxMode` 选项集改为**读 schema**（4 → 8）
-- [ ] **D3**：`presetId` 名称三处统一（`纯黑` vs `夜间纯黑` 二选一，以 `DEFAULT_PREFS`/schema 为准）
-- [ ] **D4**：`hoverRestore` 双行 —— **加互指说明**（`:14505-14508` 注释自陈是有意为 peek 保留的同键开关），
+      〔11-07 落地 (0.6.15, `2fd29cf`) = **①②并用**：拖杆联动置 custom + schema 补「自定义」项
+      （custom 是 :114 注释里的合法第三态，回显需要）；选回预设时把四键重置为预设值
+      （构建期抽出 `SVI_PRESET_PARAMS`，与 `onUserSelectPreset` 同语义）。行为回归 =
+      test-extension 7d-3（拖杆→custom 落盘 + 选回预设→参数重置回显，双向实证）〕
+- [x] **D1**：popup 不再自算合成值、不再只写全局键 —— 统一走 `registry[key].write`
+      〔11-07 落地 (0.6.15) = 语义等价实现：`UIController.setImagesEffective` 单点承载
+      作用域感知写（胶囊与 popup 通道两入口同一实现，无 registry 时的「统一走一处」）；
+      开=全局主门必开+清站点否决; 关=有覆盖走站点外科关、无覆盖走全局。行为回归 =
+      test-extension 6g 四路径。registry 化仍归 D-1/D-2 主线〕
+- [x] **D2**：popup 的 `imgFxMode` 选项集改为**读 schema**（4 → 8）
+      〔11-07 落地 (0.6.15)：构建期 `<!-- SVI_SCHEMA_OPTIONS:key -->` 占位从 schema 注入
+      （imgFxMode 与 imagePolicy 同机制），popup.html 不再手写第二份选项集；
+      占位缺失/重复注入即构建失败〕
+- [x] **D3**：`presetId` 名称三处统一（`纯黑` vs `夜间纯黑` 二选一，以 `DEFAULT_PREFS`/schema 为准）
+      〔11-07 落地 (0.6.15)：`PRESETS['amoled'].name` → 「夜间纯黑」，面板按钮自动随真源〕
+- [x] **D4**：`hoverRestore` 双行 —— **加互指说明**（`:14505-14508` 注释自陈是有意为 peek 保留的同键开关），
       统一 label，**不强行合并**
-- [ ] **D5**：默认值收敛为唯一 `DEFAULT_PREFS`；snapshot 响应与 popup 不再各写一份
-- [ ] **D8**：A 胶囊与 B popup 对 `imageInvert` 显示一致（同为全局读，或同为合成读 + 作用域徽标）
-- [ ] **D9**：`scheduleStart/End` 的 `kind` 分叉登记并统一
-- [ ] 站点覆盖键面**不扩**（`#policy`/`#hover`/`presetId` 标注为全局；要本站化须先回报用户）
+      〔11-07 落地 (0.6.15)：两行 hint 互指（「悬停显示原图」注明与 peek 同一开关）;
+      label 保留各自语境名 —— 不强行合并, 与本条后半句一致〕
+- [x] **D5**：默认值收敛为唯一 `DEFAULT_PREFS`；snapshot 响应与 popup 不再各写一份
+      〔11-07 落地 (0.6.15)：snapshot 回退字面量 → `DEFAULT_PREFS.imagePolicy/imgFxMode/presetId`;
+      popup.js 回退 → 构建期注入 `SVI_DEFAULTS`（占位缺失即构建失败）〕
+- [x] **D8**：A 胶囊与 B popup 对 `imageInvert` 显示一致（同为全局读，或同为合成读 + 作用域徽标）
+      〔11-07 落地 (0.6.15)：**同为合成读**（"合成读 + 作用域感知写"变体 —— 胶囊 :syncVisuals
+      与 popup imageOn 本就读合成态, 写侧也改成能真正送达合成态的作用域感知写,
+      免去徽标 UI）; schema hint 同步改写为准确语义〕
+- [x] **D9**：`scheduleStart/End` 的 `kind` 分叉登记并统一
+      〔11-07 登记 (0.6.15)：schema 行内注释登记「面板 buildScheduleSection 运行时内联 vs
+      设置页 kind:"hour" 同构重建，行为一致、形态分叉，刻意保留」——"统一"按登记项口径
+      执行为**登记**，未强行改形〕
+- [x] 站点覆盖键面**不扩**（`#policy`/`#hover`/`presetId` 标注为全局；要本站化须先回报用户）
+      〔11-07 核实：0.6.15 未新增任何站点覆盖键；popup policy/hover/presetId 仍写全局键〕
 
 ### D-4 新守卫（替换弱守护）
 
