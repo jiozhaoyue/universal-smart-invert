@@ -448,6 +448,15 @@ const HEADER_VERSION = (fs.readFileSync(path.join(__dirname, 'universal-smart-in
   .match(/@version\s+(\S+)/) || [])[1] || '';
 assert.ok(HEADER_VERSION, 'userscript header must declare @version');
 assert.strictEqual(svi.version, HEADER_VERSION, 'script version must track the @version header');
+// v0.6.15: README FAQ 的「当前 **<版本>**」必须跟 @version 同步 —— 该句此前停在 0.6.9,
+// 靠人肉记忆 bump 实测漂了 6 个批次。README 版本行成为门禁对象, 漂移即响红。
+{
+  const readme = fs.readFileSync(path.join(__dirname, 'README.md'), 'utf8');
+  const readmeVer = (readme.match(/`@version` 一致（当前 \*\*([0-9.]+)\*\*）/) || [])[1];
+  assert.ok(readmeVer, 'README FAQ 必须保留「`@version` 一致（当前 **<版本>**）」版本行');
+  assert.strictEqual(readmeVer, HEADER_VERSION,
+    'README FAQ 的当前版本 ' + readmeVer + ' 必须与 @version ' + HEADER_VERSION + ' 同步 —— bump 版本时请一并更新');
+}
 
 // —— 7a. v3 → v4 迁移: 剥离运行时键, 保留偏好, 旧键不动 (R7) ——
 const v4raw = storageData['universal_smart_invert_v4'];
