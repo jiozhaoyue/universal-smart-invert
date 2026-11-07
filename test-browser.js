@@ -827,7 +827,16 @@ async function main() {
   const profileDir = process.env.SVI_PROFILE_DIR
     ? path.resolve(process.env.SVI_PROFILE_DIR)
     : path.join(__dirname, '.chrome-test-profile');
-  try { fs.rmSync(profileDir, { recursive: true, force: true }); } catch (e) { /* ignore */ }
+  // 清理必须**有界重试 + 失败要喊出来**: 背靠背连跑时, 上一进程的 chromeProc.kill() 之后
+  // Windows 可能几百 ms 才释放文件锁 —— rmSync 撞锁静默失败会让上一轮的 localStorage
+  // (手动覆盖等) 泄进本轮, Scenario 1 的"全新存储"前提被无声破坏 (11-07 实测复现一次:
+  // camo-nosize 被判 keep/manual, 即 src 键覆盖残留; 修法 = 重试 + 喊话, 不再静默吞)。
+  let wiped = false;
+  for (let attempt = 1; attempt <= 4 && !wiped; attempt++) {
+    try { fs.rmSync(profileDir, { recursive: true, force: true }); wiped = true; }
+    catch (e) { console.warn(`[Browser] profile 清理第 ${attempt} 次失败 (${e.code || e.message}), 400ms 后重试...`); await new Promise((r) => setTimeout(r, 400)); }
+  }
+  if (!wiped) console.warn('[Browser] ⚠ profile 清理 4 次均失败 —— 上一轮存储可能泄漏进本轮, 后续 Scenario 1 若红请先怀疑这里');
   const chromeProc = spawn(CHROME_PATH, [
     `--remote-debugging-port=${CDP_PORT}`,
     '--headless=new',
@@ -1103,8 +1112,16 @@ async function main() {
 
     // 跨域 SVG 链路偶发留痕: 见过元素既无 checked 也无 failed 的一次 (属真实偶发,
     // 修法须有现场才能定)。断言失败前把两条的完整属性图打出来, 让红自带成因。
+    // 11-07 增补: keep/manual 类红必须同时打出**全部手动覆盖键** —— 决策表里 reason='manual'
+    // 只可能来自 manualOverrides(src 键)或元素 data-svi-manual(attr 已在 attrs 全量留痕);
+    // 没有这份键表就无法归因写入方 (11-07 soak 复现一次 nosize=keep/manual, 元素无 attr,
+    // 但 bench 无任何场景对该 src Alt+点击过 —— 键表是定位写入者的唯一线索)。
     if (!report['img-camo'].inverted || !report['img-camo-nosize'].inverted) {
-      console.error('[Diag] CORS SVG 现场: ' + JSON.stringify({ sized: report['img-camo'], nosize: report['img-camo-nosize'], engine: report.engine }, null, 1));
+      console.error('[Diag] CORS SVG 现场: ' + JSON.stringify({
+        sized: report['img-camo'], nosize: report['img-camo-nosize'], engine: report.engine,
+        profileKey: (function () { try { return window.__svi.profileKey(); } catch (e) { return 'err'; } })(),
+        manualOverrides: (function () { try { return window.__svi.prefs.manualOverrides || {}; } catch (e) { return 'err'; } })(),
+      }, null, 1));
     }
 
     // Assertions — original image engine behaviors must not regress
