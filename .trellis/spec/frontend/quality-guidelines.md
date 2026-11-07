@@ -1035,3 +1035,32 @@ bench 的 localStorage 在**同一轮内跨导航持久**：前面场景种下�
 - **代价须知**:`a > img` 会被 `detectChromeContext` 判为「封面链接」而 skip,
   所以**缩略图自身被 skip 时无结论可继承** —— 继承只在缩略图本身被判 invert/keep 时生效
   (典型:正文上下文里的照片)。这是取舍不是缺陷:宁可不继承,也不把封面卡片的判断强加给大图浮层。
+
+## 手动结论与撤销的修序铁律(2026-11-07 新增)
+
+### 先落手动表态,再 revert —— 顺序反了,撤销永远不生效
+
+`ACTIONS.<id>.revert` 内部走 `applyFlagAction(wantOn=false, reason:'pixel')` → `arbitrate`,
+而**仲裁对手动结论幂等占优**(`data-svi-manual-<id>` 在场即按它翻)。若调用方"先 revert
+再写手动表态",revert 读到的是**旧**表态('mask'/'hide')→ verdict 翻回 invert → 刚摘掉的
+attr 被原样打回。实测后果:`toggleMask` 的关、`toggleHide` 的恢复(Alt+Shift+点击三态
+第二态)、`restoreAllHidden`(Alt+Shift+Z)三条路径**自 v5.0 起从未真正生效**——
+因为依赖它们的手动入口此前全是 `this.` 死调用(见下),缺陷被连锁掩埋。
+
+**正确顺序**:off 前**先落** `'clear'`/`'show'` 表态,再 revert(仲裁读到"用户要开"才放行);
+on 路径不受影响 —— apply 的 reason `'manual'` 在 `ARBITRATE_BYPASS` 内直写。
+**旁注**:`'clear'`/`'show'` 表态会被仲裁**粘住**(此后自动候选一律 keep)—— 这正是
+"用户决定 wins"的设计;再次手动 on 靠的是 on 路径的 BYPASS 直写,不靠清除表态。
+
+### 跨类 `this.` 死调用 = 一整条用户路径静默死亡
+
+方法在 A 类、调用写成 B 类的 `this.method()` → 每次 TypeError。若发生在键盘/菜单等
+事件处理器里,**后续语句全部不可达**(本仓实例:Esc 永远关不掉模态、Alt+M / Alt+Shift+Z
+自 v5.0 起从未生效)。**工具**: `node dev/audit-dead-calls.js`(各类体 `this.` 调用 vs
+本类定义差集,零依赖);test.js 有 R15 静态守卫锚定已知委托形态。教训:
+1. 新增跨类调用一律走既有委托别名(`window.__svi_image_engine` 等),配 `typeof` 门 + try/catch;
+2. **删"只写不读"字段前先找它是不是唯一初始化点**——`sessionHidden`/`hoverTarget` 曾只
+   初始化在 UI 构造器上,引擎侧 undefined,导致引擎自己的 `sessionHidden.add` 被自身
+   try/catch 静默吞掉数月。字段先**归位到真主**,再删错误副本;
+3. 修复死调用会**解锁**其后从未执行过的路径——那些路径里的缺陷是第一次暴露,
+   必须连同验证(bench Scenario 35/36/37 即为此设)。
