@@ -4,6 +4,8 @@
 // reuses the settings panel's own handlers, so semantics cannot diverge.
 'use strict';
 
+/* SVI_DEFAULTS_INJECT */
+
 const $ = (id) => document.getElementById(id);
 
 let tabId = null;
@@ -50,8 +52,9 @@ async function loadSnapshot() {
   // 反色页签
   $('ver').textContent = 'v' + (snap.version || '');
   $('power').checked = snap.siteActive !== false;
-  $('policy').value = snap.imagePolicy || 'balanced';
-  $('imgfx').value = snap.imgFxMode || 'full';
+  // v0.6.15 (D5): 回退值引构建期注入的 SVI_DEFAULTS —— 此前这里内联第三份默认值字面量。
+  $('policy').value = snap.imagePolicy || SVI_DEFAULTS.imagePolicy;
+  $('imgfx').value = snap.imgFxMode || SVI_DEFAULTS.imgFxMode;
   $('imginv').checked = snap.imageOn !== false;
   $('hover').checked = snap.hoverRestore !== false;
   $('chip-soft-gray').classList.toggle('on', snap.presetId !== 'amoled');

@@ -147,23 +147,16 @@
   <section class="panel" id="panel-filter" data-panel="filter" role="tabpanel">
     <div class="sec-title">反色预设</div>
     <div class="chips">
-      <span class="chip" id="chip-soft-gray">柔和灰</span>
-      <span class="chip" id="chip-amoled">夜间纯黑</span>
+      <button type="button" class="chip" id="chip-soft-gray">柔和灰</button>
+      <button type="button" class="chip" id="chip-amoled">夜间纯黑</button>
     </div>
     <div class="row"><label>智能图片策略</label>
-      <select id="policy">
-        <option value="balanced">平衡</option>
-        <option value="conservative">保守</option>
-        <option value="aggressive">激进</option>
-      </select>
+      <!-- v0.6.15 (D2/D5): 下拉选项集由构建期从 SVI_SETTINGS_SCHEMA 注入，勿在此手写第二份 -->
+      <select id="policy"><!-- SVI_SCHEMA_OPTIONS:imagePolicy --></select>
     </div>
     <div class="row"><label>图片特效模式</label>
-      <select id="imgfx">
-        <option value="full">完整反色</option>
-        <option value="luma">亮度反色</option>
-        <option value="grayscale">灰度化</option>
-        <option value="sepia">怀旧泛黄</option>
-      </select>
+      <!-- 同上：此前手写第二份选项集漂移成 4/8（选 key/rect 后弹窗静默回显「完整反色」） -->
+      <select id="imgfx"><!-- SVI_SCHEMA_OPTIONS:imgFxMode --></select>
     </div>
     <div class="mini"><label>图片反色</label><input type="checkbox" id="imginv"></div>
     <div class="mini"><label>悬停显示原图</label><input type="checkbox" id="hover"></div>

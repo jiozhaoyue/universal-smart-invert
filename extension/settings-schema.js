@@ -6,7 +6,7 @@
   // 注意：这里的标签文案**照搬面板自身的行定义**（构建期机械抽取，非另写一份），R2 面板重建后两处同源。
   const SVI_SETTINGS_SCHEMA = [
     { id: "appearance", title: "外观与画面", items: [
-      { key: "presetId", kind: "select", label: "反色预设", hint: "整体配色取向", options: [["soft-gray", "柔和灰"], ["amoled", "夜间纯黑"]] },
+      { key: "presetId", kind: "select", label: "反色预设", hint: "整体配色取向", options: [["soft-gray", "柔和灰"], ["amoled", "夜间纯黑"], ["custom", "自定义"]] },
       { key: "hoverRestore", kind: "toggle", label: "悬停显示原图", hint: "悬停已反色图片时临时显示原图，移出后恢复反色视图" },
       { key: "brightness", kind: "slider", label: "画面亮度", hint: "反色后的暗化微调", min: 0.5, max: 1.5, step: 0.01, unit: "" },
       { key: "contrast", kind: "slider", label: "画面对比度", hint: "文字线条锐利度", min: 0.5, max: 1.5, step: 0.01, unit: "" },
@@ -21,7 +21,7 @@
     { id: "image", title: "图片反色", items: [
       // 面板**没有**给这个总开关建行：它由面板头部的胶囊快捷按钮「图片:开/关」承载（同一处 state 写点）。
       // 这里补上设置项 —— 标签取自 DEFAULT_PREFS 对该字段的注释，没有自造语义。
-      { key: "imageInvert", kind: "toggle", label: "图片反色（总开关）", hint: "与面板头部「图片:开/关」胶囊按钮是同一个开关；本站覆盖（三态）仍可单独否决它" },
+      { key: "imageInvert", kind: "toggle", label: "图片反色（总开关）", hint: "全局总开关，本站覆盖（三态）可单独否决它。面板胶囊按钮 / 弹窗勾选走作用域感知写：常规态就是本开关；本站已被覆盖时它们的开合落在站点作用域" },
       { key: "imagePolicy", kind: "select", label: "智能图片策略", hint: "手动 Alt+点击 与学习规则始终优先", options: [["balanced", "平衡", "默认。正文与大图反色，封面网格与页面骨架跳过。"], ["conservative", "保守", "仅正文上下文与不小于 200 像素的大图参与。"], ["aggressive", "激进", "仅按尺寸判断，最接近早期版本的行为。"]] },
       { key: "imgGeneralLight", kind: "toggle", label: "全浅色通用自适应检测", hint: "任何高明度浅底图表均自动识别反色" },
       { key: "maskAware", kind: "toggle", label: "暗色遮罩感知", hint: "祖先有暗色蒙层且合成后已足够暗时不再反色图片，避免破坏原有合成观感；关闭立即回到旧行为并重扫" },
@@ -122,6 +122,8 @@
     ] },
     { id: "schedule", title: "定时模式", items: [
       { key: "scheduleEnabled", kind: "toggle", label: "定时启停", hint: "仅在设定时段自动启用反色，时段外自动停用 (每分钟热切换)" },
+      // v0.6.15 (design.md D9) 登记: scheduleStart/End 在面板侧是 buildScheduleSection 运行时内联的
+      //   0~23 裸 select（非行工厂），设置页侧走 kind:"hour" 同构重建 —— 行为一致、形态分叉，刻意保留。
       { key: "scheduleStart", kind: "hour", label: "开始时刻", hint: "进入启用时段的小时" },
       { key: "scheduleEnd", kind: "hour", label: "结束时刻", hint: "退出启用时段的小时 (可跨零点)" },
     ] },
@@ -309,6 +311,21 @@ const SVI_IMG_COLOR_PRESETS = [
     "color": "#F0F8FF"
   }
 ];
+const SVI_PRESET_PARAMS = {
+  "soft-gray": {
+    "brightness": 0.92,
+    "contrast": 0.9,
+    "saturate": 1,
+    "hueRotate": 180
+  },
+  "amoled": {
+    "brightness": 0.75,
+    "contrast": 1.1,
+    "saturate": 1,
+    "hueRotate": 180
+  }
+};
 window.SVI_SETTINGS_SCHEMA = SVI_SETTINGS_SCHEMA;
 window.SVI_DEFAULTS = SVI_DEFAULTS;
 window.SVI_IMG_COLOR_PRESETS = SVI_IMG_COLOR_PRESETS;
+window.SVI_PRESET_PARAMS = SVI_PRESET_PARAMS;

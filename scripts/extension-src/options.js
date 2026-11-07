@@ -220,6 +220,14 @@
 
   const round = (n, d) => { const p = Math.pow(10, d); return Math.round(n * p) / p; };
 
+  // v0.6.15 (design.md D7): 画面微调四键 —— 脚本侧 getActiveFilter 只在 presetId==='custom'
+  //   时消费它们（A 面板的同款滑杆动一下就 onCustomParamChange 置 custom）。本页此前只写裸键、
+  //   从不写 presetId，四条滑杆是死控件：能拖能存盘、零效果。写滑杆时联动置 custom（下方），
+  //   选回预设时反向联动：把四键重置成预设值（与 onUserSelectPreset 同语义）。
+  const TUNE_KEYS = ['brightness', 'contrast', 'saturate', 'hueRotate'];
+  const PRESET_PARAMS = (typeof window.SVI_PRESET_PARAMS === 'object' && window.SVI_PRESET_PARAMS) || null;
+  const rowCtl = {}; // item.key → 行控件句柄（sync 回显用；buildItem 填充）
+
   // ============================================================
   // 4. 按 schema 渲染（每个 item → 一个 SviControls 控件）
   // ============================================================
@@ -233,14 +241,33 @@
       const num = () => { const n = Number(readVal(item)); return isFinite(n) ? n : (Number(item.min) || 0); };
       return C.sliderRow(item.label, item.hint,
         () => round(num() * sc, 3),
-        (v) => writeVal(item, sc === 1 ? v : round(v / sc, 4)),
+        (v) => {
+          writeVal(item, sc === 1 ? v : round(v / sc, 4));
+          // v0.6.15 (D7): 微调四键写值时联动置 custom，让 getActiveFilter 真正消费这组值
+          if (TUNE_KEYS.indexOf(item.key) !== -1 && getPath(prefs, 'presetId') !== 'custom') {
+            setPath(prefs, 'presetId', 'custom');
+            const pc = rowCtl.presetId;
+            if (pc && pc.sync) pc.sync(); // 「反色预设」下拉回显为「自定义」
+          }
+        },
         item.min, item.max, item.step, item.unit || '');
     },
     select(item) {
       const opts = (item.options || []).map((o) => ({ v: o[0], label: o[1], describe: o[2] || '' }));
       return C.selectRow(item.label, item.hint, opts,
         () => String(readVal(item)),
-        (v) => writeVal(item, v));
+        (v) => {
+          writeVal(item, v);
+          // v0.6.15 (D7): 选回预设时重置四键为该预设值（与脚本侧 onUserSelectPreset 同语义，
+          //   否则「选回预设 → 拖滑杆 → custom」会用陈旧参数拼滤镜）；同时回显四条滑杆。
+          if (item.key === 'presetId' && PRESET_PARAMS && PRESET_PARAMS[v]) {
+            for (const k of TUNE_KEYS) {
+              setPath(prefs, k, PRESET_PARAMS[v][k]);
+              const rc = rowCtl[k];
+              if (rc && rc.sync) rc.sync();
+            }
+          }
+        });
     },
     // 时刻：面板里也是运行时构造的 0~23 数组（buildScheduleSection 内联），此处同构重建
     hour(item) {
@@ -327,6 +354,7 @@
       return C.infoLine('未实现的控件类型: ' + item.kind + '（' + item.key + '）', 'svi-msg svi-msg-error');
     }
     const ctl = make(item);
+    rowCtl[item.key] = ctl; // v0.6.15 (D7): presetId ↔ 微调四键联动时按键回显
     const rowEl = ctl.row || ctl.el;
     if (rowEl && rowEl.dataset) rowEl.dataset.sviKey = item.key; // E2E / 单测的稳定锚点
     return ctl;
@@ -336,6 +364,7 @@
     if (!root) return 0;
     root.textContent = '';
     synced = [];
+    for (const k of Object.keys(rowCtl)) delete rowCtl[k]; // 重建后旧句柄全部作废
     let count = 0;
     for (const group of SCHEMA) {
       const card = C.collapsible(group.title, group.items.length + ' 项', false);

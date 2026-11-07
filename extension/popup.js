@@ -4,6 +4,147 @@
 // reuses the settings panel's own handlers, so semantics cannot diverge.
 'use strict';
 
+const SVI_DEFAULTS = {
+  "enabled": true,
+  "autoDetect": true,
+  "imageInvert": true,
+  "presetId": "soft-gray",
+  "imgGeneralLight": true,
+  "imgPresets": {
+    "white": true,
+    "gray": true,
+    "cream": true,
+    "coolBlue": true
+  },
+  "imgCustomColor": "#ffffff",
+  "imgTolerance": 35,
+  "imgLumCutoff": 180,
+  "imgAreaThreshold": 48,
+  "minImgSize": 48,
+  "brightness": 0.92,
+  "contrast": 0.9,
+  "saturate": 1,
+  "hueRotate": 180,
+  "transitionMs": 0,
+  "sampleIntervalMs": 250,
+  "whiteThreshold": 60,
+  "lumThreshold": 210,
+  "exitHysteresisMs": 1500,
+  "settingsOpen": false,
+  "advancedOpen": false,
+  "pos": {
+    "x": null,
+    "y": null,
+    "edge": "right"
+  },
+  "siteMode": "all",
+  "siteBlacklist": [],
+  "siteWhitelist": [],
+  "siteOverrides": {},
+  "rulesEnabled": true,
+  "shieldColors": [],
+  "manualOverrides": {},
+  "statsEnabled": true,
+  "bgReplace": false,
+  "bgExcludeSelectors": [],
+  "imgFxMode": "full",
+  "imgFxParams": {
+    "lumCutoff": 190,
+    "satCutoff": 0.3,
+    "keyColor": "#ffffff",
+    "keyTol": 60
+  },
+  "videoFxMode": "off",
+  "timelineMode": "reference",
+  "learnHits": 2,
+  "storeBackend": "auto",
+  "imagePolicy": "balanced",
+  "hoverRestore": true,
+  "eagerScanBudget": 80,
+  "fontOverride": false,
+  "fontFamilyPreset": "sans",
+  "textStroke": 0,
+  "pageDarkEngine": "auto",
+  "bgTone": "pure-black",
+  "bgBrightness": 1,
+  "bgContrast": 1,
+  "scheduleEnabled": false,
+  "scheduleStart": 21,
+  "scheduleEnd": 7,
+  "flashGuard": true,
+  "maskAware": true,
+  "videoTune": {
+    "enabled": false,
+    "brightness": 1,
+    "contrast": 1,
+    "saturate": 1,
+    "warmth": 0,
+    "grayscale": 0
+  },
+  "settingsLayout": "center",
+  "settingsWidth": 420,
+  "elementRules": [],
+  "localFirstDecide": true,
+  "actions": {
+    "hide": {
+      "enabled": false,
+      "scope": "session"
+    },
+    "mask": {
+      "enabled": false
+    },
+    "dim": {
+      "enabled": false
+    }
+  },
+  "maskStyle": "dim",
+  "maskHoverOpacity": 0.15,
+  "maskBlur": 8,
+  "pageDimOpacity": 0.35,
+  "undoEnabled": true,
+  "undoStackSize": 30,
+  "actionToast": true,
+  "errorSentinel": true,
+  "learnGrading": false,
+  "learnStrongHits": 5,
+  "learnDemote": true,
+  "shapePrior": false,
+  "shapeMinHosts": 3,
+  "calibrateAuto": true,
+  "calibrateMinSamples": 5,
+  "falseInvertRate": 0.3,
+  "frameSequence": true,
+  "frameWindow": 3,
+  "sceneDelta": 0.35,
+  "flashWindowRatio": 0.5,
+  "flashWhiteSkip": true,
+  "animatedDetect": true,
+  "animMixedPolicy": "keep",
+  "animAllLightRatio": 0.9,
+  "frameSampleCap": 60,
+  "animDecodeBudgetMs": 40,
+  "animRecheckMs": 30,
+  "flashGuardLevel": "document",
+  "maskPending": true,
+  "maskBudgetMs": 1200,
+  "maskMaxElements": 80,
+  "maskSettleTimeoutMs": 800,
+  "siteInvertRate": 0.35,
+  "siteMinSeen": 5,
+  "regionSegment": false,
+  "regionGridN": 16,
+  "regionMinAreaRatio": 0.03,
+  "regionKRects": 3,
+  "regionRender": false,
+  "regionHeartbeatMs": 1000,
+  "regionOverlayMax": 8,
+  "regionStaticOnly": false,
+  "regionCorrect": false,
+  "regionCalibrate": false,
+  "regionCalibrateMinSamples": 5,
+  "regionCalibrateStep": 0.005
+};
+
 const $ = (id) => document.getElementById(id);
 
 let tabId = null;
@@ -50,8 +191,9 @@ async function loadSnapshot() {
   // 反色页签
   $('ver').textContent = 'v' + (snap.version || '');
   $('power').checked = snap.siteActive !== false;
-  $('policy').value = snap.imagePolicy || 'balanced';
-  $('imgfx').value = snap.imgFxMode || 'full';
+  // v0.6.15 (D5): 回退值引构建期注入的 SVI_DEFAULTS —— 此前这里内联第三份默认值字面量。
+  $('policy').value = snap.imagePolicy || SVI_DEFAULTS.imagePolicy;
+  $('imgfx').value = snap.imgFxMode || SVI_DEFAULTS.imgFxMode;
   $('imginv').checked = snap.imageOn !== false;
   $('hover').checked = snap.hoverRestore !== false;
   $('chip-soft-gray').classList.toggle('on', snap.presetId !== 'amoled');

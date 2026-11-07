@@ -8,7 +8,8 @@
  *   - extension/popup.*, options.*    = copied from scripts/extension-src/, with the design token
  *                                       block injected into every HTML (v6.4)
  *   - extension/ui-controls.js        = SviControls library block (v6.4 R1a)
- *   - extension/settings-schema.js    = settings schema + DEFAULT_PREFS + light colour cards (v6.4 R1a/R1b)
+ *   - extension/settings-schema.js    = settings schema + DEFAULT_PREFS + light colour cards
+ *                                       + PRESET_PARAMS (v6.4 R1a/R1b; params v0.6.15 D7)
  *   - extension/options.html 额外注入整份面板 CSS（去掉 token 块，v6.4 R1b）——
  *     它整页都由 SviControls 搭出来，控件样式只能有一个实现点。
  *
@@ -365,38 +366,12 @@ function main() {
     return stripped;
   })();
 
-  const HTML_FILES = ['popup.html', 'popup.js', 'options.html', 'options.js'];
-  const popupSrcDir = path.join(__dirname, 'extension-src');
-  for (const f of HTML_FILES) {
-    const from = path.join(popupSrcDir, f);
-    if (!fs.existsSync(from)) fail('popup/options source missing: ' + path.relative(ROOT, from));
-    let out = fs.readFileSync(from, 'utf8');
-    if (f.endsWith('.html')) {
-      if (out.indexOf('/* SVI_TOKEN_INJECT */') < 0) {
-        fail(f + ' is missing the /* SVI_TOKEN_INJECT */ placeholder — tokens must be injected, never hand-written');
-      }
-      out = out.replace('/* SVI_TOKEN_INJECT */', tokenBlock.trim());
-    }
-    // 面板 CSS 占位只在需要的页面出现: options 必须有（它整页都由控件库搭出来）；
-    // popup 是 320px 宽的紧凑自绘页，不消费它，故不强制。
-    if (out.indexOf('/* SVI_PANEL_CSS_INJECT */') >= 0) {
-      out = out.replace('/* SVI_PANEL_CSS_INJECT */', panelCss);
-    } else if (f === 'options.html') {
-      fail('options.html is missing the /* SVI_PANEL_CSS_INJECT */ placeholder — 控件样式必须注入, 不得手写第二套');
-    }
-    fs.writeFileSync(path.join(OUT_DIR, f), out, 'utf8');
-  }
-
-  // 09-29 (R3.3): 后台脚本产物 —— 与 popup/options 同源 (真源在 scripts/extension-src/,
-  //   extension/ 目录整体由构建产出, 不手改)。缺源即构建失败。
-  const swFrom = path.join(popupSrcDir, 'sw.js');
-  if (!fs.existsSync(swFrom)) fail('sw.js source missing: ' + path.relative(ROOT, swFrom));
-  fs.writeFileSync(path.join(OUT_DIR, 'sw.js'), fs.readFileSync(swFrom, 'utf8'), 'utf8');
-
   // v6.4 R1: 控件库与设置项 schema 同样是「真源在用户脚本、构建时抽出」——
   //   `v6.4-CONTROLS-START/END`（SviControls 控件库，块内零外部依赖，抽到扩展页即可直接用）
   //   与 `v6.4-SETTINGS-SCHEMA-START/END`（设置项单一真源，供 options 页渲染）。
   //   两者**缺标记即构建失败**，防止有人手写第二份控件库 / 第二份设置清单把同源机制绕过去。
+  //   v0.6.15 (D2): 这两块要**先于** HTML 产物处理抽出 —— popup.html 的下拉选项集
+  //   也改为构建期从 schema 注入（此前手写第二份选项集漂移成 4/8）。
   const extractBlock = (what, startMark, endMark) => {
     const re = new RegExp('/\\* ' + startMark + ' \\*/([\\s\\S]*?)/\\* ' + endMark + ' \\*/');
     const m = re.exec(source);
@@ -430,6 +405,82 @@ function main() {
     fail('IMG_COLOR_PRESETS 形状不符（每项需要 id / name / color）');
   }
 
+  // v0.6.15 (D7): 预设参数表 —— options 页选回预设时要把四个画面微调键重置成预设值
+  //   （与脚本侧 onUserSelectPreset 同语义）。PRESETS 同为纯字面量，构建期求值抽出。
+  const ppMatch = /const PRESETS = (\{[\s\S]*?\n  \});/.exec(source);
+  if (!ppMatch) fail('PRESETS not found in userscript');
+  let presetsTable = null;
+  try {
+    presetsTable = new Function('return (' + ppMatch[1] + ')')();
+  } catch (e) {
+    fail('PRESETS 求值失败（它应保持纯字面量）: ' + e.message);
+  }
+  const presetParams = {};
+  for (const p of Object.values(presetsTable)) {
+    const missing = ['brightness', 'contrast', 'saturate', 'hueRotate'].filter((k) => typeof p[k] !== 'number');
+    if (missing.length) fail('PRESETS.' + p.id + ' 缺参数 ' + missing.join('/') + ' —— options 页选回预设要重置它们');
+    presetParams[p.id] = { brightness: p.brightness, contrast: p.contrast, saturate: p.saturate, hueRotate: p.hueRotate };
+  }
+
+  // v0.6.15 (D2): schema select 项的选项集 → popup.html 占位注入。
+  const schemaList = (() => {
+    try { return new Function(schemaBlock + '\nreturn SVI_SETTINGS_SCHEMA;')(); } catch (e) { return null; }
+  })();
+  if (!Array.isArray(schemaList) || !schemaList.length) fail('SVI_SETTINGS_SCHEMA 求值失败（schema 块应为纯声明）');
+  const schemaItemByKey = new Map();
+  for (const g of schemaList) for (const it of g.items) schemaItemByKey.set(it.key, it);
+
+  const HTML_FILES = ['popup.html', 'popup.js', 'options.html', 'options.js'];
+  const popupSrcDir = path.join(__dirname, 'extension-src');
+  let injectedImgFxOptions = 0;
+  for (const f of HTML_FILES) {
+    const from = path.join(popupSrcDir, f);
+    if (!fs.existsSync(from)) fail('popup/options source missing: ' + path.relative(ROOT, from));
+    let out = fs.readFileSync(from, 'utf8');
+    if (f.endsWith('.html')) {
+      if (out.indexOf('/* SVI_TOKEN_INJECT */') < 0) {
+        fail(f + ' is missing the /* SVI_TOKEN_INJECT */ placeholder — tokens must be injected, never hand-written');
+      }
+      out = out.replace('/* SVI_TOKEN_INJECT */', tokenBlock.trim());
+      // v0.6.15 (D2): popup 下拉选项集从 schema 注入 —— 占位必须存在（手写选项集 = 第二份真源）
+      if (f === 'popup.html' && out.indexOf('<!-- SVI_SCHEMA_OPTIONS:imgFxMode -->') < 0) {
+        fail('popup.html is missing the <!-- SVI_SCHEMA_OPTIONS:imgFxMode --> placeholder — 下拉选项集必须由 schema 注入, 不得手写第二份');
+      }
+      out = out.replace(/<!-- SVI_SCHEMA_OPTIONS:([A-Za-z0-9_.]+) -->/g, (whole, key) => {
+        const item = schemaItemByKey.get(key);
+        if (!item || item.kind !== 'select' || !Array.isArray(item.options)) {
+          fail('SVI_SCHEMA_OPTIONS:' + key + ' —— schema 里没有这个 select 项（popup.html 占位键拼错?）');
+        }
+        if (key === 'imgFxMode') injectedImgFxOptions++;
+        return item.options.map((o) => '<option value="' + o[0] + '">' + o[1] + '</option>').join('\n        ');
+      });
+      if (f === 'popup.html' && injectedImgFxOptions !== 1) {
+        fail('popup.html 的 imgFxMode 占位注入了 ' + injectedImgFxOptions + ' 次（应为 1）—— 占位写重了?');
+      }
+    }
+    if (f === 'popup.js') {
+      // v0.6.15 (D5): popup 的默认值回退改引构建期注入的 SVI_DEFAULTS —— 消灭第三份字面量
+      if (out.indexOf('/* SVI_DEFAULTS_INJECT */') < 0) {
+        fail('popup.js is missing the /* SVI_DEFAULTS_INJECT */ placeholder — 默认值必须构建期注入, 不得手写第二份');
+      }
+      out = out.replace('/* SVI_DEFAULTS_INJECT */', 'const SVI_DEFAULTS = ' + JSON.stringify(defaults, null, 2) + ';');
+    }
+    // 面板 CSS 占位只在需要的页面出现: options 必须有（它整页都由控件库搭出来）；
+    // popup 是 320px 宽的紧凑自绘页，不消费它，故不强制。
+    if (out.indexOf('/* SVI_PANEL_CSS_INJECT */') >= 0) {
+      out = out.replace('/* SVI_PANEL_CSS_INJECT */', panelCss);
+    } else if (f === 'options.html') {
+      fail('options.html is missing the /* SVI_PANEL_CSS_INJECT */ placeholder — 控件样式必须注入, 不得手写第二套');
+    }
+    fs.writeFileSync(path.join(OUT_DIR, f), out, 'utf8');
+  }
+
+  // 09-29 (R3.3): 后台脚本产物 —— 与 popup/options 同源 (真源在 scripts/extension-src/,
+  //   extension/ 目录整体由构建产出, 不手改)。缺源即构建失败。
+  const swFrom = path.join(popupSrcDir, 'sw.js');
+  if (!fs.existsSync(swFrom)) fail('sw.js source missing: ' + path.relative(ROOT, swFrom));
+  fs.writeFileSync(path.join(OUT_DIR, 'sw.js'), fs.readFileSync(swFrom, 'utf8'), 'utf8');
+
   const schemaOut = 'settings-schema.js';
   const controlsOut = 'ui-controls.js';
   fs.writeFileSync(path.join(OUT_DIR, controlsOut),
@@ -443,9 +494,12 @@ function main() {
     // chipsOf 的候选项（浅色色卡）：id / 名称 / 色值，末尾不带 rgb 判定数据
     + 'const SVI_IMG_COLOR_PRESETS = '
     + JSON.stringify(colorPresets.map((c) => ({ id: c.id, name: c.name, color: c.color })), null, 2) + ';\n'
+    // v0.6.15 (D7): 预设参数表 —— options 页选回预设时重置画面微调四键（onUserSelectPreset 同语义）
+    + 'const SVI_PRESET_PARAMS = ' + JSON.stringify(presetParams, null, 2) + ';\n'
     + 'window.SVI_SETTINGS_SCHEMA = SVI_SETTINGS_SCHEMA;\n'
     + 'window.SVI_DEFAULTS = SVI_DEFAULTS;\n'
-    + 'window.SVI_IMG_COLOR_PRESETS = SVI_IMG_COLOR_PRESETS;\n', 'utf8');
+    + 'window.SVI_IMG_COLOR_PRESETS = SVI_IMG_COLOR_PRESETS;\n'
+    + 'window.SVI_PRESET_PARAMS = SVI_PRESET_PARAMS;\n', 'utf8');
 
   // Icons are produced by scripts/gen-icons.js; verify presence so the
   // manifest never references missing files in an unpacked load.

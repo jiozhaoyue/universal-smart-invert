@@ -4,7 +4,7 @@
 // @name:en      Universal Smart Video & Image Invert
 // @name:ext     全网通用智能视频与图片反色 (Universal Smart Invert)
 // @namespace    https://github.com/jiozhaoyue/universal-smart-invert
-// @version      0.6.14
+// @version      0.6.15
 // @description  全网通用智能视频与图片反色脚本 (0.6.14, AGPL-3.0 开源)。视频/图片/背景图/Canvas 智能反色, 判定以连通区域为单位; 0.6 线新增区域反色 (按连通区域自动判定, 默认关闭)、界面全量同源重构与扩展形态。 保留v5.0页面媒体治理层(统一元素动作表 invert/keep/hide/mask/dim/peek、元素屏蔽 Alt+Shift+点击、遮罩 Alt+M 三档风格可调、全页压暗、悬停复原通用门, 全部默认关闭且可开关)与v4.6全部能力(本地优先判定/Alt+点击一次生效/暗色遮罩感知)。
 // @description:zh-CN 全网通用智能视频与图片反色脚本 (0.6.14, AGPL-3.0 开源)。新增: 区域反色 (按连通区域自动判定, 默认关闭)、界面全量同源重构、扩展形态与发版流水线; 保留 v5.0 页面媒体治理层与 v4.6 全部能力。
 // @description:en Universal smart video and image invert userscript (0.6.14, AGPL-3.0 licensed). Smart inversion for video, images, background images and canvas, decided at connected-region granularity. The 0.6 line adds region inversion (per connected region, off by default), a fully unified UI rebuild, and the browser-extension form with its release pipeline. Retains the v5.0 page-media governance layer (unified element-action table invert/keep/hide/mask/dim/peek, element blocking Alt+Shift+click, masks Alt+M with three adjustable styles, whole-page dimming, generic hover-restore gate — all off by default and individually switchable) and every v4.6 capability (local-first decisions, once-per-click Alt+click, dark-veil awareness).
@@ -41,7 +41,7 @@
   // ==========================================
   // 1. 配置与常量定义
   // ==========================================
-  const SCRIPT_VERSION = '0.6.14';
+  const SCRIPT_VERSION = '0.6.15';
   const PREFS_KEY = 'universal_smart_invert_v4';   // v2.0 遗留偏好键 (迁移源, 迁移后原样保留以便回滚)
   const LEGACY_KEY = 'universal_smart_invert_v3';  // v1.x 旧键 (仅读取迁移, 保留不删以便回滚)
   const STATS_KEY = 'universal_smart_invert_stats_v1'; // v2.0 遗留统计键 (保留写入以兼容回滚)
@@ -59,7 +59,9 @@
     },
     'amoled': {
       id: 'amoled',
-      name: '纯黑',
+      // v0.6.15 (design.md D3): 名称三处统一 —— schema 下拉 / popup 色卡都叫「夜间纯黑」,
+      //   唯独 PRESETS.name 是「纯黑」, 面板按钮因此显示短名。以 schema 为准。
+      name: '夜间纯黑',
       brightness: 0.75,
       contrast: 1.10,
       saturate: 1.00,
@@ -12659,7 +12661,7 @@
   // 注意：这里的标签文案**照搬面板自身的行定义**（构建期机械抽取，非另写一份），R2 面板重建后两处同源。
   const SVI_SETTINGS_SCHEMA = [
     { id: "appearance", title: "外观与画面", items: [
-      { key: "presetId", kind: "select", label: "反色预设", hint: "整体配色取向", options: [["soft-gray", "柔和灰"], ["amoled", "夜间纯黑"]] },
+      { key: "presetId", kind: "select", label: "反色预设", hint: "整体配色取向", options: [["soft-gray", "柔和灰"], ["amoled", "夜间纯黑"], ["custom", "自定义"]] },
       { key: "hoverRestore", kind: "toggle", label: "悬停显示原图", hint: "悬停已反色图片时临时显示原图，移出后恢复反色视图" },
       { key: "brightness", kind: "slider", label: "画面亮度", hint: "反色后的暗化微调", min: 0.5, max: 1.5, step: 0.01, unit: "" },
       { key: "contrast", kind: "slider", label: "画面对比度", hint: "文字线条锐利度", min: 0.5, max: 1.5, step: 0.01, unit: "" },
@@ -12674,7 +12676,7 @@
     { id: "image", title: "图片反色", items: [
       // 面板**没有**给这个总开关建行：它由面板头部的胶囊快捷按钮「图片:开/关」承载（同一处 state 写点）。
       // 这里补上设置项 —— 标签取自 DEFAULT_PREFS 对该字段的注释，没有自造语义。
-      { key: "imageInvert", kind: "toggle", label: "图片反色（总开关）", hint: "与面板头部「图片:开/关」胶囊按钮是同一个开关；本站覆盖（三态）仍可单独否决它" },
+      { key: "imageInvert", kind: "toggle", label: "图片反色（总开关）", hint: "全局总开关，本站覆盖（三态）可单独否决它。面板胶囊按钮 / 弹窗勾选走作用域感知写：常规态就是本开关；本站已被覆盖时它们的开合落在站点作用域" },
       { key: "imagePolicy", kind: "select", label: "智能图片策略", hint: "手动 Alt+点击 与学习规则始终优先", options: [["balanced", "平衡", "默认。正文与大图反色，封面网格与页面骨架跳过。"], ["conservative", "保守", "仅正文上下文与不小于 200 像素的大图参与。"], ["aggressive", "激进", "仅按尺寸判断，最接近早期版本的行为。"]] },
       { key: "imgGeneralLight", kind: "toggle", label: "全浅色通用自适应检测", hint: "任何高明度浅底图表均自动识别反色" },
       { key: "maskAware", kind: "toggle", label: "暗色遮罩感知", hint: "祖先有暗色蒙层且合成后已足够暗时不再反色图片，避免破坏原有合成观感；关闭立即回到旧行为并重扫" },
@@ -12775,6 +12777,8 @@
     ] },
     { id: "schedule", title: "定时模式", items: [
       { key: "scheduleEnabled", kind: "toggle", label: "定时启停", hint: "仅在设定时段自动启用反色，时段外自动停用 (每分钟热切换)" },
+      // v0.6.15 (design.md D9) 登记: scheduleStart/End 在面板侧是 buildScheduleSection 运行时内联的
+      //   0~23 裸 select（非行工厂），设置页侧走 kind:"hour" 同构重建 —— 行为一致、形态分叉，刻意保留。
       { key: "scheduleStart", kind: "hour", label: "开始时刻", hint: "进入启用时段的小时" },
       { key: "scheduleEnd", kind: "hour", label: "结束时刻", hint: "退出启用时段的小时 (可跨零点)" },
     ] },
@@ -13538,10 +13542,10 @@
       this.imgBtn.textContent = '图片:开';
       this.imgBtn.addEventListener('click', (e) => {
         e.stopPropagation();
-        state.imageInvert = !state.imageInvert;
-        updateImageFilterCss();
-        this.syncVisuals();
-        savePrefs();
+        // v0.6.15 (D1/D8): 展示是合成读，写也必须能达成合成态 —— 否则本站覆盖否决时
+        //   这个按钮「点了没用」（点前点后按钮文字纹丝不动）。写法见 setImagesEffective。
+        const imgOnNow = !!state.imageInvert && getSiteProfile().imageInvert !== false;
+        this.setImagesEffective(!imgOnNow);
       });
 
       // 背景替换按钮: 切换当前站点的覆盖开关 (站点级)
@@ -13618,8 +13622,49 @@
       this.initDraggable();
     }
 
+    // v0.6.15 (design.md D1/D8): 图片反色快捷开关的**作用域感知写** —— 修「点了没用」死控态。
+    //   展示侧（胶囊按钮 / popup 勾选）读的是合成态（全局 && 本站未否决），写侧原来却只写全局键：
+    //   本站强制关时点「开」→ 全局翻转但合成态纹丝不动（真死控）。
+    //   合成态是 AND 语义（全局是主门，站点覆盖只能否决），故写侧按「最近作用域能真正送达」取舍：
+    //   · 点「开」：全局关着必须先开（主门）；站点否决（强制关）清回继承。一次点击必达本页开。
+    //   · 点「关」：已有站点覆盖（强制开）→ 本站强制关（外科式，不动全局，修复前会波及全站）；
+    //              常规态 → 全局总开关（既有契约不变形）。
+    //   读/写两侧口径一致（D8: 胶囊与 popup 同读合成态）；popup 直发期望值时幂等短路。
+    setImagesEffective(desiredOn) {
+      desiredOn = desiredOn !== false;
+      const host = profileKey();
+      const ov = state.siteOverrides[host];
+      const siteForced = !!(ov && ov.imageInvert !== undefined);
+      const globalOn = state.imageInvert !== false;
+      const effNow = globalOn && (!siteForced || ov.imageInvert !== false);
+      if (effNow === desiredOn) return; // 合成态已到位（幂等路径）
+      if (desiredOn) {
+        if (!globalOn) { state.imageInvert = true; savePrefs(); } // AND 主门: 全局关着必须先开
+        if (siteForced && ov.imageInvert === false) {
+          delete ov.imageInvert; // 站点否决 → 清回继承
+          if (!Object.keys(ov).length) delete state.siteOverrides[host];
+          savePrefs();
+        }
+      } else if (siteForced && ov.imageInvert !== false) {
+        ov.imageInvert = false; // 已有站点覆盖 → 本站强制关（外科式，不动全局）
+        savePrefs();
+      } else if (!siteForced && globalOn) {
+        state.imageInvert = false; // 常规态: 全局总开关（既有契约不变）
+        savePrefs();
+      }
+      // （本站强制关且合成态已关 → 无事可做）
+      updateImageFilterCss();
+      try { window.__svi_image_engine && window.__svi_image_engine.clearCacheAndRescan(); } catch (e) { /* ignore */ }
+      this.syncVisuals();
+      if (this.capCards) this.refreshCapCards();
+      showToast(desiredOn ? '本页图片反色已开启' : '本页图片反色已关闭');
+    }
+
     toggleSiteBgReplace() {
-      const host = location.hostname;
+      // v0.6.15: 覆盖键与 getSiteProfile / cycleTriState 同源 (profileKey) —— 裸用
+      //   location.hostname 在 file: 页面上得 '' , 而读取侧永远走 profileKey() 的 'file:',
+      //   覆盖会写进一个永远读不到的 '' 键 (本站背景开关在 file: 页面失效)。
+      const host = profileKey();
       const profile = getSiteProfile();
       const ov = state.siteOverrides[host] || (state.siteOverrides[host] = {});
       ov.bgReplace = !profile.bgReplace;
@@ -13891,7 +13936,9 @@
       sec.add(presetChipRow);
       this.rowSyncs.push(() => presetChipRow.sync());
 
-      const hoverRow = SviControls.toggleRow('悬停显示原图', '悬停已反色图片时临时显示原图，移出后恢复反色视图',
+      // v0.6.15 (design.md D4): 这一行与 v5.0 的「悬停复原 (peek)」行是**同一个偏好键**（单一真源
+      //   是既有 hoverRestore，刻意不新增开关）—— 两行互指，避免同键双行被误判成手误。
+      const hoverRow = SviControls.toggleRow('悬停显示原图', '悬停已反色图片时临时显示原图，移出后恢复反色视图（与动作区的「悬停复原 (peek)」是同一个开关）',
         () => state.hoverRestore !== false,
         (v) => {
           state.hoverRestore = v;
@@ -14693,7 +14740,7 @@
       sec.add(dimOpRow);
       this.rowSyncs.push(() => dimOpRow.sync());
 
-      // —— peek: 悬停复原 (与既有「悬停显示原图」同一偏好, 单一真源) ——
+      // —— peek: 悬停复原 (与既有「悬停显示原图」同一偏好, 单一真源; 两行互指见 D4 登记) ——
       const peekRow = SviControls.toggleRow('悬停复原 (peek)',
         '通用门：被遮罩的元素与图片反色在鼠标移入时临时还原。与「图片反色 · 悬停显示原图」是同一个开关。作用域：全页 · 生效时机：立即',
         () => actionEnabled('peek'),
@@ -17291,9 +17338,11 @@
               imageOn: state.imageInvert !== false && getSiteProfile().imageInvert !== false,
               videoOn: getSiteProfile().videoInvert !== false,
               bgReplace: getSiteProfile().bgReplace === true,
-              imagePolicy: state.imagePolicy || 'balanced',
-              imgFxMode: state.imgFxMode || 'full',
-              presetId: state.presetId || 'soft-gray',
+              // v0.6.15 (design.md D5): 回退值改引 DEFAULT_PREFS —— 此前这里内联了第二份默认值
+              //   字面量，改默认值时会漏同步。popup 侧的字面量回退同批收敛（构建期注入 SVI_DEFAULTS）。
+              imagePolicy: state.imagePolicy || DEFAULT_PREFS.imagePolicy,
+              imgFxMode: state.imgFxMode || DEFAULT_PREFS.imgFxMode,
+              presetId: state.presetId || DEFAULT_PREFS.presetId,
               hoverRestore: state.hoverRestore !== false,
               counts: {
                 img: document.images ? document.images.length : 0,
@@ -17333,10 +17382,9 @@
               savePrefs();
               updateImageFilterCss();
             } else if (key === 'imageInvert') {
-              state.imageInvert = v !== false;
-              savePrefs();
-              updateImageFilterCss();
-              try { window.__svi_image_engine && window.__svi_image_engine.clearCacheAndRescan(); } catch (e) { /* ignore */ }
+              // v0.6.15 (D1): popup 勾选读的是合成态（imageOn），写也必须作用域感知，
+              //   否则本站覆盖否决时勾选永远「点了没用」。语义与胶囊按钮同一处实现。
+              uiController.setImagesEffective(v !== false);
             } else {
               sendResponse({ ok: false, error: 'unknown key: ' + key });
               return undefined;

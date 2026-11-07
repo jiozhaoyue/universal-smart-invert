@@ -901,6 +901,62 @@ function startServer() {
     assert.strictEqual(snapAfter.overriddenSites, 0, '清除后快照的覆盖站点数应归零');
     console.log('    svi-site-reset → 本站覆盖已清空 ✓');
 
+    // 6g. v0.6.15 (design.md D1/D8): 图片反色快捷开关的**作用域感知写** —— 修「本站覆盖否决时点了没用」。
+    //   修复前读合成态、写只写全局键：本站强制关时点「开」，全局翻转但合成态纹丝不动（真死控）。
+    //   三条路径逐一实证（写走 popup 通道 / 三态卡点击 = 真实入口，全程脚本内原子操作，
+    //   不直接改 state —— 直接种会被前序步骤遗留的 storage.onChanged 重载窗口洗掉，实测踩过）。
+    //   注：合成态是 AND 语义（全局 = 主门，站点覆盖只能否决），「本站强制开」赢不过全局关 ——
+    //   故点「开」时全局主门必须跟开；点「关」时才走最近作用域（有覆盖=外科关，无覆盖=全局关）：
+    //   ① 本站强制关 + 全局开 → 发 desired=开 → 覆盖清回继承，合成态真变开（修复前恒 false）；
+    //   ② 本站强制关 + 全局关 → 发 desired=开 → 全局主门跟开 + 否决清回继承（修复前恒 false）；
+    //   ③ 本站强制开 + 全局开 → 发 desired=关 → 只落「本站强制关」，全局键纹丝不动（修复前写全局, 波及全站）；
+    //   ④ 常规态 → 发 desired=关 → 仍写全局键、零覆盖（既有「总开关」契约不变形）。
+    {
+      const ctx6g = await pickExtWorld();
+      const ovKeys = () => P.ev('JSON.stringify(Object.keys((window.__svi.prefs.siteOverrides || {})[location.hostname] || {}))', ctx6g.id);
+      const cycleTo = (n) => P.ev(`(() => { for (let i = 0; i < ${n}; i++) window.__svi.ui.cycleTriState('imageInvert'); return true; })()`, ctx6g.id);
+      // ① 三态点两下: inherit → 强制开 → 强制关（全局保持默认开）
+      await cycleTo(2);
+      let snap6g = await relay({ type: 'svi-get-snapshot' });
+      assert.strictEqual(snap6g.imageOn, false, '① 前提: 本站强制关 → 快照 imageOn 应为 false');
+      await relay({ type: 'svi-set-pref', key: 'imageInvert', value: true });
+      assert.strictEqual(await ovKeys(), '[]', '① 覆盖必须被清回继承（全局主门已给到位）');
+      snap6g = await relay({ type: 'svi-get-snapshot' });
+      assert.strictEqual(snap6g.imageOn, true, '① 点「开」必须真变开（修复前这里恒 false）');
+      // ② 全局关（常规态写全局键）→ 三态再点两下回到强制关 → 发「开」→ 主门跟开 + 否决清除
+      await relay({ type: 'svi-set-pref', key: 'imageInvert', value: false });
+      await cycleTo(2);
+      snap6g = await relay({ type: 'svi-get-snapshot' });
+      assert.strictEqual(snap6g.imageOn, false, '② 前提: 本站强制关 + 全局关 → imageOn 应为 false');
+      await relay({ type: 'svi-set-pref', key: 'imageInvert', value: true });
+      assert.strictEqual(await ovKeys(), '[]', '② 站点否决必须被清回继承');
+      const g2 = await P.ev('window.__svi.prefs.imageInvert !== false', ctx6g.id);
+      assert.strictEqual(g2, true, '② 全局主门必须跟开（AND 语义下不开主门, 本页永远到不了「开」）');
+      snap6g = await relay({ type: 'svi-get-snapshot' });
+      assert.strictEqual(snap6g.imageOn, true, '② 点「开」必须真变开（修复前恒 false）');
+      // ③ 三态点一下: inherit → 强制开 → 发「关」→ 只落本站强制关, 全局不动（外科式）
+      await cycleTo(1);
+      snap6g = await relay({ type: 'svi-get-snapshot' });
+      assert.strictEqual(snap6g.imageOn, true, '③ 前提: 本站强制开 + 全局开 → imageOn 应为 true');
+      await relay({ type: 'svi-set-pref', key: 'imageInvert', value: false });
+      assert.strictEqual(await ovKeys(), '["imageInvert"]', '③ 必须落「本站强制关」覆盖');
+      const g3 = await P.ev('window.__svi.prefs.imageInvert !== false', ctx6g.id);
+      assert.strictEqual(g3, true, '③ 全局键必须保持开（外科式关, 修复前会波及全站）');
+      snap6g = await relay({ type: 'svi-get-snapshot' });
+      assert.strictEqual(snap6g.imageOn, false, '③ 点「关」必须真变关');
+      // ④ 三态点一下（强制关 → 回继承）→ 常规态点关 = 全局总开关（既有契约不变形）
+      await cycleTo(1);
+      await relay({ type: 'svi-set-pref', key: 'imageInvert', value: false });
+      const o4 = JSON.parse(await P.ev('JSON.stringify({ ov: Object.keys(window.__svi.prefs.siteOverrides || {}), off: window.__svi.prefs.imageInvert === false })', ctx6g.id));
+      assert.strictEqual(o4.off, true, '④ 常规态点「关」必须写全局键');
+      assert.strictEqual(o4.ov.length, 0, '④ 常规态不得冒出本站覆盖, 实测 ' + JSON.stringify(o4.ov));
+      // 收尾: 全局回开（fixture 复位, 不许把状态漏给后续场景）
+      await relay({ type: 'svi-set-pref', key: 'imageInvert', value: true });
+      snap6g = await relay({ type: 'svi-get-snapshot' });
+      assert.strictEqual(snap6g.imageOn, true, '6g 收尾: imageOn 必须复位为 true');
+      console.log('    6g 作用域感知写: ①强制关→点开✓ ②强制关+全局关→点开(主门跟开)✓ ③强制开→点关(外科式,全局不动)✓ ④常规态仍写全局✓ (D1/D8)');
+    }
+
     // ---------- 场景 7：扩展设置页（options）端到端（v6.4 R1b） ----------
     //  为什么必须放在真浏览器里：html 的 token/面板 CSS 由构建注入、控件由抽出的 SviControls 搭、
     //  写入走 chrome.storage 的 svi:prefs 协议 —— 这三件事在 Node 桩里都证明不了。
@@ -1114,6 +1170,49 @@ function startServer() {
     const statusText = await O.ev('(document.getElementById("status") || {}).textContent || ""');
     assert.ok(/已保存/.test(statusText), '落盘后状态行应报告已保存, 实测: ' + JSON.stringify(statusText));
     console.log('    改 maskBlur=' + NEW_BLUR + ' → svi:prefs 已更新 (状态行: ' + statusText + ') ✓');
+
+    // 7d-3. v0.6.15 (design.md D7): 四条画面微调滑杆此前是**死控件**（options 只写裸键，而脚本侧
+    //   getActiveFilter 只在 presetId==='custom' 时消费它们 —— 能拖能存盘、零效果）。两条联动都实证：
+    //   ① 拖「画面亮度」→ presetId 联动置 custom（页面内回显 + 落盘），改动从此真生效；
+    //   ② 下拉选回预设 → 四键被重置成预设值（与脚本侧 onUserSelectPreset 同语义），滑杆就地回显。
+    const d7a = await O.ev(`(() => {
+      const num = document.querySelector('[data-svi-key="brightness"] input[type=number]');
+      num.value = '1.23';
+      num.dispatchEvent(new Event('input', { bubbles: true }));   // 与用户输入同一条事件路径
+      return document.querySelector('[data-svi-key="presetId"] select').value;
+    })()`);
+    assert.strictEqual(d7a, 'custom', '拖「画面亮度」必须联动置 presetId=custom（D7 修复核心）, 实测 ' + JSON.stringify(d7a));
+    const d7b = await waitFor(async () => {
+      const raw = await readPrefsRaw();
+      if (!raw) return null;
+      let obj = null; try { obj = JSON.parse(raw); } catch (e) { return null; }
+      return (obj.presetId === 'custom' && Number(obj.brightness) === 1.23) ? obj : null;
+    }, 8000, 'brightness=1.23 + presetId=custom 落盘（D7）');
+    const d7c = await O.ev(`(() => {
+      const sel = document.querySelector('[data-svi-key="presetId"] select');
+      sel.value = 'amoled';
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+      const g = (k) => Number(document.querySelector('[data-svi-key="' + k + '"] input[type=number]').value);
+      return { preset: sel.value, brightness: g('brightness'), contrast: g('contrast') };
+    })()`);
+    assert.strictEqual(d7c.preset, 'amoled', '选回预设必须写入 presetId');
+    assert.strictEqual(d7c.brightness, 0.75, '选回「夜间纯黑」必须把亮度重置成预设值 0.75（onUserSelectPreset 同语义）, 实测 ' + d7c.brightness);
+    assert.strictEqual(d7c.contrast, 1.1, '对比度也必须随预设重置为 1.1');
+    // 收尾: 选回 soft-gray（预设参数复位 → 与 fixture 默认值一致, 不把状态漏给后续步骤）
+    const d7d = await O.ev(`(() => {
+      const sel = document.querySelector('[data-svi-key="presetId"] select');
+      sel.value = 'soft-gray';
+      sel.dispatchEvent(new Event('change', { bubbles: true }));
+      return sel.value;
+    })()`);
+    assert.strictEqual(d7d, 'soft-gray', '收尾: presetId 必须复位为 soft-gray');
+    await waitFor(async () => {
+      const raw = await readPrefsRaw();
+      if (!raw) return null;
+      let obj = null; try { obj = JSON.parse(raw); } catch (e) { return null; }
+      return (obj.presetId === 'soft-gray' && Number(obj.brightness) === 0.92) ? obj : null;
+    }, 8000, 'presetId=soft-gray + brightness=0.92 落盘（D7 收尾）');
+    console.log('    7d-3 D7 联动: 拖亮度→custom✓ / 选回预设→参数重置✓ / 收尾复位✓');
 
     // 7d-2. v6.4 R2b 新增的两个**复合控件**必须真的能写（渲染对 ≠ 能用；这条防「画了个壳」）
     //   色卡列表: 设探针色 → 点「添加屏蔽颜色」; 元素规则: 填选择器 → 点「添加规则」
