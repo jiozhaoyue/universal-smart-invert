@@ -5483,6 +5483,32 @@ setTimeout(() => {
       'R15: 菜单「区域遮罩（拖拽）」必须显式委托 __svi_image_engine.armRegionMask');
   }
 
+  // ---- 3b-2. D1 写点收口守卫（v0.6.15, spec ui-design-tokens §4.2）: 图片反色快捷开关的
+  //      `state.imageInvert =` 直写只允许出现在 setImagesEffective 体内 —— 那是作用域感知写
+  //      的唯一实现点（AND 语义: 开=全局主门必开+清站点否决, 关=有覆盖外科关/无覆盖全局）。
+  //      胶囊按钮与 popup 通道历史上都直写过全局键 → 本站覆盖否决时永远「点了没用」；
+  //      新增界面入口必须复用 setImagesEffective, 不得开第三处直写。行为回归锚点: test-extension 6g。
+  {
+    const stripC2 = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+    const codeD1 = stripC2(src);
+    const mD1 = /setImagesEffective\(desiredOn\) \{([\s\S]*?)\n    \}\n/.exec(codeD1);
+    assert.ok(mD1, 'D1 守卫: 必须能定位 setImagesEffective 方法体（剥注释后）');
+    const rest = codeD1.slice(0, mD1.index) + codeD1.slice(mD1.index + mD1[0].length);
+    const badSites = [];
+    const reD1 = /state\.imageInvert\s*=[^=]/g;
+    let mmD1;
+    while ((mmD1 = reD1.exec(rest)) !== null) {
+      badSites.push(rest.slice(Math.max(0, mmD1.index - 40), mmD1.index + 40));
+    }
+    assert.deepStrictEqual(badSites, [],
+      'D1 守卫: state.imageInvert 直写只允许出现在 setImagesEffective 体内（spec ui-design-tokens §4.2）, 场外直写现场 ' + JSON.stringify(badSites));
+    // 方法体内必须仍有直写分支 —— 防方法被掏空后本守卫退化成空真
+    assert.ok(reD1.test(mD1[1]),
+      'D1 守卫: setImagesEffective 体内必须仍有 state.imageInvert 直写分支（主门/常规态两分支）');
+    assert.ok(!codeD1.includes('state.imageInvert = !state.imageInvert'),
+      'D1 守卫: 不得复活「读反即写」的旧胶囊直写形态（必须是作用域感知写）');
+  }
+
   // ---- 3c. 全类死调用审计（R15 家族的系统性防线; 逻辑与 dev/audit-dead-calls.js 一致）----
   //      逐类取类体, 差集 = 「this.method() 调用 − 本类定义的方法」。非空即跨类死调用 ——
   //      该家族的实测代价: Esc 永远关不掉模态、Alt+M / Alt+Shift+Z 自 v5.0 起从未生效
