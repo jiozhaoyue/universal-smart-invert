@@ -213,8 +213,12 @@ node scripts/panel-shot.js                      # 截图留证
 
 > 依据：`design.md` §3.5、`research/03` §5。
 
-- [ ] **主修（最小且首选）**：`.svi-color-picker-controls`（`:4989`）补 `position: relative`，
+- [x] **主修（最小且首选）**：`.svi-color-picker-controls`（`:4989`）补 `position: relative`，
       或让 `colorList`（`:13081`）改用 `.svi-color-input-wrap` 包裹（与 `pickerRow` 同构）
+      〔11-07 落地 = **两者中的后者**（同构 wrap）：单补 position:relative 会让隐形 input 连
+      「添加」钮一起盖住（添加永远点不到，修出一个新缺陷）—— wrap 方案让隐形 input 只盖
+      预览色块（点色块开取色器），「添加」钮可点；预览圆同步 native.value。
+      **原生 input 保留 → hasPicker 现任绿灯断言不动，属本条免门主修路径，未触碰用户同意门**〕
 - [ ] 取色器控件按 `design.md` §3.3 重做：**hex 文本框 + 预览块 + 重置 + 离散色板**
       （点选，非拖拽；键盘可用）
 - [ ] 移除 `colorList` 路径的原生 `<input type=color>`

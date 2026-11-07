@@ -4284,6 +4284,53 @@ async function main() {
       '35 全程: Esc 链与关闭路径不得产生任何页面异常 (R15 修前的 TypeError 正是这里红)');
     console.log('[Test] Scenario 35: 关闭模型通过 (药丸=button / [data-svi-close] 生效 / Esc 链四级零异常)');
 
+    // ============================================================
+    // Scenario 36 (09-28-ui-overhaul Step C 主修): colorList 取色器定位 (R3)
+    //   修前红证据 (research/03 §5): .svi-color-picker-controls 无 position:relative,
+    //   隐形 <input type=color> absolute 铺满视口 → 任何点击被吞 ("面板莫名取色器、关不掉")。
+    //   修法 = 与 pickerRow 同构的 .svi-color-input-wrap 包裹 (点预览色块开取色器,
+    //   「添加」钮可点); 原生 input 保留 → hasPicker 现任绿灯断言不动 (免门路径)。
+    // ============================================================
+    console.log('[Test] Scenario 36: colorList 取色器定位 (R3 主修) ...');
+    await sendCdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/action-page` });
+    await new Promise((r) => setTimeout(r, 1500));
+    const errBefore36 = pageErrorCount;
+    const r3 = await evalInPage(`(() => {
+      const svi = window.__svi;
+      svi.ui.openSettingsModal();
+      const sec = document.getElementById('svi-sec-shield');
+      if (!sec) return { found: false };
+      // 动态找含该区块的页签 (区块可能在非默认页签下)
+      if (sec.offsetParent === null) {
+        for (const t of document.querySelectorAll('.svi4-tab')) { t.click(); if (sec.offsetParent !== null) break; }
+      }
+      const ctl = sec.querySelector('.svi-color-picker-controls');
+      if (!ctl) return { found: false };
+      ctl.scrollIntoView({ block: 'center' });
+      const native = ctl.querySelector('input[type="color"]');
+      const addBtn = ctl.querySelector('.svi-mini-btn');
+      if (!native || !addBtn) return { found: false };
+      const nr = native.getBoundingClientRect();
+      // 命中测试: 「添加」钮中心点上真正接收点击的元素必须是 addBtn 自己
+      //   (修前是铺满视口的隐形 input —— 这就是"点哪都开取色器"的机理)
+      const ar = addBtn.getBoundingClientRect();
+      const hit = document.elementFromPoint(ar.left + ar.width / 2, ar.top + ar.height / 2);
+      return {
+        found: true,
+        rect: { w: Math.round(nr.width), h: Math.round(nr.height) },
+        notViewport: nr.width < 200 && nr.height < 80,
+        hitIsAdd: addBtn === hit || addBtn.contains(hit),
+        inWrap: !!native.closest('.svi-color-input-wrap'),
+      };
+    })()`);
+    assert.strictEqual(r3.found, true, '36: colorList 控件必须在场 (shieldColors → svi-sec-shield)');
+    assert.strictEqual(r3.inWrap, true, '36: 隐形 input 必须被 .svi-color-input-wrap 圈住 (与 pickerRow 同构)');
+    assert.strictEqual(r3.notViewport, true,
+      '36: AC2-② — 取色器 getBoundingClientRect 不得等于视口尺寸 (修前铺满视口), got ' + JSON.stringify(r3.rect));
+    assert.strictEqual(r3.hitIsAdd, true, '36: 「添加」钮中心必须真命中 addBtn (修前被铺满视口的隐形 input 吞掉)');
+    assert.strictEqual(pageErrorCount, errBefore36, '36: 取色器路径不得产生页面异常');
+    console.log('[Test] Scenario 36: R3 主修通过 (取色器 confined in wrap / 添加钮可点)');
+
     console.log('\n🎉 ALL BROWSER AUTOMATION TESTS PASSED 100% SUCCESFULLY!\n');
 
     await new Promise((r) => setTimeout(r, 400)); // Windows 重定向: 等待 stdout 刷盘再退出

@@ -3,7 +3,7 @@
  * universal-smart-invert — browser extension content script
  * GENERATED FILE — DO NOT EDIT.
  * Built by scripts/build-extension.js from universal-smart-invert.user.js
- * Source version: 0.6.12
+ * Source version: 0.6.13
  *
  * Prelude contract (see scripts/build-extension.js header):
  *   - EXT_MODE (wrapper scope)   → core claims coexistence kind 'ext'
@@ -119,7 +119,7 @@
   // ==========================================
   // 1. 配置与常量定义
   // ==========================================
-  const SCRIPT_VERSION = '0.6.12';
+  const SCRIPT_VERSION = '0.6.13';
   const PREFS_KEY = 'universal_smart_invert_v4';   // v2.0 遗留偏好键 (迁移源, 迁移后原样保留以便回滚)
   const LEGACY_KEY = 'universal_smart_invert_v3';  // v1.x 旧键 (仅读取迁移, 保留不删以便回滚)
   const STATS_KEY = 'universal_smart_invert_stats_v1'; // v2.0 遗留统计键 (保留写入以兼容回滚)
@@ -13272,10 +13272,23 @@
       };
       const box = this.h('div', { class: 'svi-color-list' });
       const native = this.h('input', { type: 'color', class: 'svi-color-input-native', value: o.value || '#ffffff' });
+      // Step C 主修 (09-28-ui-overhaul R3): 隐形 <input type=color> 是 absolute + inset:0,
+      //   它会被**最近的 positioned 祖先**圈住 —— 旧结构把它直接放进无 position 的
+      //   .svi-color-picker-controls → 圈不住, 铺满整个视口, 任何点击都被它吞掉
+      //   （"面板莫名取色器、关不掉"的实测根因, research/03 §5）。
+      //   只给容器补 position:relative 也不行 —— 那会连「添加」钮一起盖住（添加永远点不到）。
+      //   故与 pickerRow 同构: 用 .svi-color-input-wrap（自带 position:relative）包住
+      //   native + 预览色块 —— 点色块开取色器, 「添加」钮可点。原生 input 保留
+      //   （hasPicker 现任绿灯断言不动, 属 design §3.5 的免门主修路径）。
+      const previewCircle = this.h('div', { class: 'svi-color-preview-circle' });
+      previewCircle.style.background = native.value;
+      native.addEventListener('input', () => { previewCircle.style.background = native.value; });
+      const wrap = this.h('div', { class: 'svi-color-input-wrap' }, native,
+        this.h('div', { class: 'svi-color-preview-box' }, previewCircle));
       const addBtn = this.h('button', { class: 'svi-mini-btn', text: addLabel });
       const form = this.h('div', { class: 'svi-color-picker-row' },
         this.h('div', { class: 'svi-color-picker-label' }, this.h('span', { text: addLabel })),
-        this.h('div', { class: 'svi-color-picker-controls' }, native, addBtn));
+        this.h('div', { class: 'svi-color-picker-controls' }, wrap, addBtn));
       const row = this.h('div', { class: 'svi-modal-row' }, this.labelBox(label, hint), box, form);
 
       const render = () => {
