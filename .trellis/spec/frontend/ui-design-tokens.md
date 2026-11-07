@@ -116,3 +116,46 @@ token 定义在 `universal-smart-invert.user.js` 的 `:root` 里，用注释标�
 
 **交互纪律**：本项目的 UI 不引入任何绘制型手势（无套索 / 无拖拽画框 / 无笔刷）；
 快捷键录入靠键盘事件，区域纠正靠单击（见 `region-mask-contract.md` §7）。
+
+---
+
+## 4. 跨面写入纪律（v0.6.15 D 系列沉淀，2026-11-07）
+
+三处界面（面板模态 / 扩展 popup / 扩展 options）写同一个偏好键时，**读写口径必须对称**，
+否则出现「读的是合成态、写的是全局键」这类死控态（0.6.15 修复的两例实证）：
+
+### 4.1 画面微调四键 ↔ presetId 的耦合（D7，行为契约）
+
+`getActiveFilter()` 只在 `presetId === 'custom'` 时消费
+`brightness / contrast / saturate / hueRotate` 四键。因此**任何界面**写这四键都必须联动置
+`presetId = 'custom'`，否则滑杆是死控件（能拖能存盘、零效果）：
+
+| 界面 | 联动点 |
+| :-- | :--- |
+| 面板模态 | 滑杆 onSet → `stateMachine.onCustomParamChange()`（既有实现） |
+| options 页 | `KINDS.slider` 内 `TUNE_KEYS` 判定 → `setPath(prefs, 'presetId', 'custom')` |
+
+反向联动同语义：**任何界面**把 `presetId` 写回已知预设时，必须同时把四键重置为该预设值
+（面板走 `onUserSelectPreset`；options 页用构建期抽出的 `SVI_PRESET_PARAMS`，与前者同源）。
+`SVI_PRESET_PARAMS` 由 `scripts/build-extension.js` 从 `PRESETS` 求值抽出，**不得**在扩展页手写第二份。
+
+### 4.2 图片反色快捷开关的作用域感知写（D1/D8，行为契约）
+
+胶囊按钮「图片:开/关」与 popup 勾选的**读侧统一是合成态**
+（`state.imageInvert !== false && getSiteProfile().imageInvert !== false`）。
+写侧必须能真正送达合成态（AND 语义：全局是主门，站点覆盖只能否决），
+唯一实现点是 `UIController.setImagesEffective(desiredOn)`，两个入口（胶囊 / popup 通道）都走它：
+
+- 点「开」：全局关着必须先开（主门）；站点否决（强制关）清回继承。一次点击必达本页开。
+- 点「关」：已有站点覆盖（强制开）→ 本站强制关（外科式，不动全局）；常规态 → 全局总开关
+  （既有契约不变形）。
+
+**不得**再出现绕过 `setImagesEffective` 直接 `state.imageInvert = !state.imageInvert` 的第三处
+快捷开关写点；新增界面入口时同样复用它。行为回归锚点：`test-extension.js` 场景 6g（四路径）。
+
+### 4.3 选项集与默认值：构建期注入，不手写第二份
+
+popup 下拉的选项集用 `<!-- SVI_SCHEMA_OPTIONS:<key> -->` 占位由构建期从 `SVI_SETTINGS_SCHEMA`
+注入（占位缺失 / 重复注入即构建失败）；popup 的默认值回退用 `/* SVI_DEFAULTS_INJECT */` 注入的
+`SVI_DEFAULTS`。**禁止**在 popup.html / popup.js 里手写选项集或默认值字面量 —— 那是第二份真源，
+漂移只是时间问题（imgFxMode 4/8 漂移的实证）。

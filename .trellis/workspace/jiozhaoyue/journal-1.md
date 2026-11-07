@@ -873,3 +873,24 @@ Topics: [.trellis/research/09-28-ui-overhaul-darkreader-parity/legacy/implement.
   bug 层（D-3 全勾），D-1/D-2/D-4 仍是串行大改面；
 - bench UI Collapsible Accordion 清点行 Missing（09-28-ui-overhaul 后续观察项）—— 待排查；
 - 权限提示真机观察（AC10）· maskSettleTimeoutMs 是否暴露面板（用户裁决）· AMO 签名（缺凭据）。
+
+
+## Session 24: 跨面写入纪律沉淀 spec (D7 耦合 + 作用域感知写 + 选项集/默认值构建期注入)
+<!-- trellis-session: v=2 fp=953b1d710fc91d7c -->
+
+**Date**: 2026-11-07
+**Task**: 跨面写入纪律沉淀 spec (D7 耦合 + 作用域感知写 + 选项集/默认值构建期注入)
+**Branch**: `main`
+
+### Summary
+
+0.6.15 修完 D 系列后把三条行为契约写进 ui-design-tokens.md §4 (implement.md D7 要求「必须写进 spec」): 4.1 画面微调四键只在 presetId==='custom' 时被 getActiveFilter 消费 → 任何界面写四键必须联动置 custom, 写回预设必须重置四键 (SVI_PRESET_PARAMS 构建期抽出, 禁手写第二份); 4.2 图片反色快捷开关读侧统一合成态, 写侧唯一实现点 UIController.setImagesEffective (AND 语义: 开=主门必开+清否决, 关=有覆盖外科关/无覆盖全局), 禁第三处直写 state.imageInvert 的入口; 4.3 popup 选项集/默认值一律构建期注入占位 (SVI_SCHEMA_OPTIONS / SVI_DEFAULTS_INJECT), 禁手写字面量。同批: accordion 观察项闭合 (hasAccordion 从未采集→sectionCount), AC9 探针预存在红修复 (statEntries 派生期望)。
+Topics: [.trellis/spec/frontend/ui-design-tokens.md](../../spec/frontend/ui-design-tokens.md)
+
+### Git Commits
+
+(No commits - planning session)
+
+### Status
+
+[OK] **Completed**
