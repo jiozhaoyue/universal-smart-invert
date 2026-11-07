@@ -791,3 +791,35 @@ Session 19: v6-4 第二轮交付完成（R3 清零 + R4 文档）并归档；修
 ### Next Steps
 
 - ① 按用户裁决**不打 tag、不触发 release 流水线**：版本号已就位（0.6.6），发版动作等单独下令（注意 0.6.6 数值低于 5.0.0，管理器不视作升级、老用户需手动覆盖安装一次；若接入 CWS，商店要求版本严格递增）。② 残留抖动仍在同一族（固定等待同步防抖/分片写）：test-extension 的 CDP 超时 / rAF 60 帧停滞 / 场景 8 与站点重置竞态、test-browser:981 White diagram 偶发、一次未复现的武装轮询超时（现已带现场值可诊断）——建议整族换成有界轮询再收。③ 真正做到「首屏插入前遮罩」需要同步信号（localStorage 门判定镜像），本轮已裁决排除，日后可单独立项。④ 旁注：工作区曾出现一个不属于本会话的 scripts/probe-media.js（通用媒体探针），一度被 git add -A 扫入提交，已从提交中撤出、原样留为未跟踪。
+
+
+## Session 22: 浮层适配收口 0.6.11 + UI Step B/C 主修 0.6.12-0.6.13 + F5 Firefox 跨域证据 + R15 同族全类审计修复 0.6.14
+<!-- trellis-session: v=2 fp=2a6d93a6be38c793 -->
+
+**Date**: 2026-11-07
+**Task**: 浮层适配收口 0.6.11 + UI Step B/C 主修 0.6.12-0.6.13 + F5 Firefox 跨域证据 + R15 同族全类审计修复 0.6.14
+**Branch**: `main`
+
+### Summary
+
+接手 09-29-viewer-plugin-adapt 在途改动并收口:① 三实现面(深色占盒遮罩/原图链接继承/扩展 SW 取字节)六门禁全绿,bump 0.6.11 提交推送 e5852ef;补齐 02-verdict-table.md 与 implement.md 复选框(逐项核实)。② UI 重构 Step B 关闭模型(62aa25e, 0.6.12):药丸 div→button、面板卡 [data-svi-close]、Esc 四级链(修前 this.cancelRegionMask 死调用使 Esc 永远关不掉模态),test.js R15 静态守卫 + bench Scenario 35。③ Step C 主修(9942569, 0.6.13):colorList 隐形取色器铺满视口(R3)以 pickerRow 同构 wrap 圈住,免门路径未触碰 hasPicker 现任断言,bench Scenario 36。④ test-firefox.js 补 F5(109abb0):第二源站无 CORS,Firefox 后台脚本取字节通道端到端实证,2C 双引擎证据闭环。⑤ dev/audit-dead-calls.js 全类审计(ab e2d20, 0.6.14)揪出 R15 同族:Alt+M/Alt+Shift+Z/恢复菜单三处死调用自 v5.0 从未生效 + 三处同族修序缺陷(先 revert 再落手动表态被仲裁翻回)+ sessionHidden/hoverTarget 初始化归位引擎;Scenario 37 CDP 真实按键实证 Alt+M 三态/Alt+Shift+Z 恢复首次生效。教训沉淀 quality-guidelines.md(修序铁律 + 死调用家族)。37 场景全绿,五批全部推送 origin main。
+Topics: [.trellis/research/09-28-ui-overhaul-darkreader-parity/legacy/implement.md](../../research/09-28-ui-overhaul-darkreader-parity/legacy/implement.md)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `e5852ef` | feat(overlay): 浮层反色适配 —— 深色占盒遮罩 + 原图链接继承 + 扩展跨域取字节通道 (0.6.11) |
+| `62aa25e` | fix(ui): Step B 关闭模型 —— 药丸 button 化 + 面板卡关闭入口 + Esc 链修复 (0.6.12) |
+| `9942569` | fix(ui): Step C 主修 —— colorList 取色器铺满视口以 pickerRow 同构 wrap 圈住 (0.6.13) |
+| `109abb0` | test(firefox): F5 跨域取字节用例 —— 关闭 G1 在 Firefox 侧的最后证据缺口 |
+| `abe2d20` | fix(ui): R15 同族全类审计 —— Alt+M / Alt+Shift+Z / 临时屏蔽恢复自 v5.0 起从未生效, 全部修复 (0.6.14) |
+| `4c5ee19` | docs(spec): 手动结论修序铁律 + 跨类死调用家族教训 |
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- Step C 取色器形态重做(需用户过同意门:动 hasPicker 现任断言);Step D 单一真源(串行大改面);权限提示真机观察(AC10);maskSettleTimeoutMs 是否暴露面板(用户裁决);AMO 签名(缺凭据);bench UI Collapsible Accordion 清点行 Missing 属 09-28-ui-overhaul 后续步骤观察项
