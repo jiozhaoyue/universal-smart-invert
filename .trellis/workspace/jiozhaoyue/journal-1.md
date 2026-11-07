@@ -896,3 +896,46 @@ Topics: [.trellis/spec/frontend/ui-design-tokens.md](../../spec/frontend/ui-desi
 ### Status
 
 [OK] **Completed**
+
+
+## Session 25: Session 25: D 系列修复 0.6.15 + 防漂移门禁化 + 作用域徽标 0.6.16 (五批全推送, 门禁全绿)
+<!-- trellis-session: v=2 fp=413723bbf3b33d4f -->
+
+**Date**: 2026-11-07
+**Task**: Session 25: D 系列修复 0.6.15 + 防漂移门禁化 + 作用域徽标 0.6.16 (五批全推送, 门禁全绿)
+**Branch**: `main`
+
+### Summary
+
+接 Session 22 交接清单完成全天工作, 四个功能/修复批次 + spec 沉淀, 全部提交推送。【0.6.15 主批 2fd29cf】design.md 诊断的 D 系列六项跨面不一致全修: D7 options 四条画面滑杆死控件(getActiveFilter 只在 presetId==='custom' 消费)→拖杆联动置 custom+选回预设反向重置四键(SVI_PRESET_PARAMS 构建期抽出); schema presetId 补「自定义」项。D2 popup imgFxMode 选项集手写漂移 4/8→构建期 SVI_SCHEMA_OPTIONS 占位注入(缺占位/重复注入即构建失败)。D1/D8 胶囊与 popup 勾选读合成态写只写全局键→本站覆盖否决时「点了没用」→UIController.setImagesEffective 作用域感知写唯一实现点(开=全局主门必开+清否决, 关=有覆盖外科关/无覆盖全局); 行为回归 test-extension 6g 四路径。D3 纯黑→夜间纯黑; D5 默认值三份真源收敛(SVI_DEFAULTS 构建期注入 popup); D4 双行互指; D9 hour 分叉登记。顺带: file: 页 toggleSiteBgReplace 覆盖键与 profileKey 同源。【防漂移批 9599ce8/42d5138】bench hasAccordion 字段从未采集恒 Missing→改报 sectionCount 真实计数; AC9 探针 check-panel-overflow 预存在红修复(statsCells 期望从 statEntries() 真源派生, __svi 增只读句柄)。【spec 沉淀 6e83cc7】ui-design-tokens.md §4 跨面写入纪律(四键↔presetId 耦合/作用域感知写/选项集默认值构建期注入)。【门禁化批 7220db7/8e23221/7d8bbeb/7255239】@description 内嵌版本号与 @version 同步断言(负向对照过); D1 写点收口守卫(state.imageInvert 直写只许在 setImagesEffective 体内); README 三处过时修真(纯黑/93项/当前0.6.9)+版本行与设置项计数升级为 test.js 门禁。【0.6.16 功能批 6b9a23a】popup 图片反色旁「本站」作用域徽标(快照 imageInvertScoped additive, D8 徽标变体), 6g 增徽标翻转断言。教训: ①管道吃退出码陷阱本会话自己也踩了(node x.js | tail 把 exit 1 掩成 0, implement.md Step 0 早有记载)——门禁必须用真实退出码; ②waitFor 的 if(v) 判定是 falsy-0 陷阱(哨兵 0 被当没等到, 轮询假超时); ③P.ev 不带 ctxId 落主世界无 __svi, 隔离世界必须传 ctxId; ④直改 state 种覆盖会被 storage.onChanged 重放洗掉, 测试种子要走真实入口(cycleTriState/popup 通道)。全天门禁多轮全绿(37 场景 bench/真扩展 E2E/lint 0 errors/pack CRC), 五批共 13 commits 推送 origin main。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `2fd29cf` | fix(ui): D 系列跨面不一致修复 —— options 死滑杆复活 + popup 选项集同源注入 + 图片开关作用域感知写 (0.6.15) |
+| `a739347` | docs(task): implement.md 复选框逐项核实回填 —— Step A 外层框 + D 系列六项落地注记 |
+| `9599ce8` | test(harness): bench UI 清点行修真 —— hasAccordion 字段从未采集恒 Missing, 改报 .svi-modal-section 真实计数 |
+| `42d5138` | fix(probe): check-panel-overflow 预存在红修复 —— statsCells 期望从 statEntries() 真源派生 (01-VERIFY P8) |
+| `6e83cc7` | docs(spec): 跨面写入纪律沉淀 ui-design-tokens.md §4 (D7 写进 spec 的义务闭合) |
+| `7220db7` | fix(release): @description 内嵌版本号与 @version 同步断言 (三条描述, 负向对照过) |
+| `8e23221` | test(guard): D1 写点收口守卫 —— state.imageInvert 直写只许在 setImagesEffective 体内 |
+| `7d8bbeb` | docs(readme): 三处过时修真 (纯黑→夜间纯黑 / 93项→94项 / FAQ 0.6.9→0.6.15) + 版本行升级为门禁 |
+| `7255239` | test(guard): README 设置项计数与 schema 真源同步断言 (负向对照过) |
+| `6b9a23a` | feat(popup): 0.6.16 作用域徽标 —— 图片反色旁「本站」小徽标 (D8 徽标变体) |
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- **Step C 取色器形态重做**（需用户过同意门：动 hasPicker 现任断言）—— 0.6.13 主修已消可用性缺陷，形态重做属增强，仍待裁决；
+- **Step D 单一真源主体**（SVI_KEY_REGISTRY + 94 调用点 + A 模态声明式渲染 + D-4 四轴守卫）—— 串行大改面，主代理主导；0.6.15 只清了 bug 层（D-3 全勾）；
+- **权限提示真机观察**（AC10）· **AMO 签名**（缺凭据）· maskSettleTimeoutMs 是否暴露面板（用户裁决）；
+- **观察项（新）**：test-extension 6f 清除后的 storage 写竞速复活 `enabled` 键（R1b 家族窗口期实测再现，已改有界轮询收敛+红带现场；产品逻辑未动）——若再现可考虑 Store.flush 写串行化；
+- **观察项（新）**：lint 3 warnings = 双引擎 manifest 登记例外 + icon() 冻结常量 innerHTML（合规，保持现状）。
+
+### Status
+
+[OK] **Completed**

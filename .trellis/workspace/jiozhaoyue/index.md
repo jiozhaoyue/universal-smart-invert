@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 24
+- **Total Sessions**: 25
 - **Last Active**: 2026-11-07
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~896 | Active |
+| `journal-1.md` | ~918 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 25 | 2026-11-07 | Session 25: D 系列修复 0.6.15 + 防漂移门禁化 + 作用域徽标 0.6.16 (五批全推送, 门禁全绿) | - | `main` |
 | 24 | 2026-11-07 | 跨面写入纪律沉淀 spec (D7 耦合 + 作用域感知写 + 选项集/默认值构建期注入) | - | `main` |
 | 23 | 2026-11-07 | D 系列跨面不一致修复 0.6.15: options 死滑杆复活 + popup 选项集同源注入 + 图片开关作用域感知写 | - | `main` |
 | 22 | 2026-11-07 | 浮层适配收口 0.6.11 + UI Step B/C 主修 0.6.12-0.6.13 + F5 Firefox 跨域证据 + R15 同族全类审计修复 0.6.14 | - | `main` |
