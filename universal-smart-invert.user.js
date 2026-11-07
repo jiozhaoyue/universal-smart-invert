@@ -17050,6 +17050,10 @@
     get profile() { return getSiteProfile(); },
     resolveProfile: getSiteProfile,
     resolveSiteProfile,
+    // v0.6.15: 结构化统计条目真源的只读句柄 —— check-panel-overflow.js 用它派生
+    //   statsCells 期望数（01-VERIFY P8「去硬编码」: 布局探针不得写死条目数,
+    //   真源漂移后硬编码值会变成预存在红）。包装成箭头函数保住 this。
+    statEntries: () => StatsManager.statEntries(),
     hostMatchesPattern,
     classifySmallElement,
     // v4.6 本地优先判定 (单测契约): 证据分档与临时结论判定

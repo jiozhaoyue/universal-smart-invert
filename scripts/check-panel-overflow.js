@@ -78,6 +78,13 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   await evalJson(`window.__svi.ui.openSettingsModal()`);
   await sleep(400);
 
+  // 0.6.15 (01-VERIFY P8「去硬编码」): statsCells 期望数从 statEntries() 真源派生, 不再写死。
+  //   真源漂移（v5-3 加条目 11→12）后, 硬编码值就是一颗预存在红 —— 处方见
+  //   .trellis/research/09-28-ui-overhaul-darkreader-parity/legacy/implement.md §实现期发现 5。
+  const expectedStats = await evalJson(`window.__svi.statEntries().length`);
+  if (!expectedStats) { console.error('statEntries handle missing — userscript too old?'); process.exit(1); }
+  console.log(`statsCells expectation derived from statEntries() source: ${expectedStats}`);
+
   const measureExpr = `(function () {
     const win = document.querySelector('.svi-modal-window');
     if (!win) return { modal: false };
@@ -120,7 +127,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
       r.viewport = width;
       results.push(r);
       const bad = !r.modal || r.hScroll || (r.overflows && r.overflows.length) ||
-        (layout === 'center' && r.statsCells !== 11) || r.storePreviews !== 0;
+        (layout === 'center' && r.statsCells !== expectedStats) || r.storePreviews !== 0;
       if (bad) failures++;
       console.log(JSON.stringify(r));
     }
