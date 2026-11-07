@@ -1776,7 +1776,24 @@ async function main() {
     // ============================================================
     console.log('[Test] Scenario 9: navigating to /media-page (media coverage) ...');
     await sendCdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/media-page` });
-    await new Promise((r) => setTimeout(r, 6000));
+    // 0.6.7 纪律: 6s 固定等待改有界轮询 —— 谓词覆盖**全部六条判定通道** (canvas / 独立海报 /
+    // 卡片豁免计数 / shadow img / SVG image / input image), 全部落定才读报告 —— 否则负向断言
+    // (卡片海报不反色) 与计数断言会读到半途状态, 制造"读早"新抖动。
+    assert.ok(await waitForExpr(`(() => {
+      const cv = document.getElementById('light-canvas');
+      const pv = document.getElementById('poster-video');
+      const shRoot = (document.getElementById('shadow-host') || {}).shadowRoot;
+      const shim = shRoot && shRoot.getElementById('shadow-img');
+      const si = document.getElementById('svg-image');
+      const ii = document.getElementById('input-image');
+      let cnt = 0;
+      try { cnt = window.__svi.exportStats().counters.posterCoverGuarded || 0; } catch (e) {}
+      return !!(cv && cv.getAttribute('data-svi-inverted') === 'true'
+        && pv && pv.dataset.sviPoster === 'light' && cnt >= 1
+        && shim && shim.getAttribute('data-svi-inverted') === 'true'
+        && si && si.getAttribute('data-svi-inverted') === 'true'
+        && ii && ii.getAttribute('data-svi-inverted') === 'true');
+    })()`, 15000, 250), 'Scenario 9: media 页六条判定通道必须在 15s 内全部落定');
     const mediaRes = (await sendCdp('Runtime.evaluate', {
       expression: `(() => {
         const cv = document.getElementById('light-canvas');
