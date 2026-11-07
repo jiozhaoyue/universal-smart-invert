@@ -422,8 +422,12 @@ node scripts/build-extension.js && node scripts/pack.js
    > 列为**下一步第一件事**：让脚本从用户脚本的 `statEntries()` 真源**派生**期望条数，而不是写死 —— 这是
    > **加强**而非放宽断言，改完必须重跑该脚本自证。
    >
-   > 注：`scripts/check-panel-overflow.js` **不在** AGENTS.md「all green required before commit」
-   > 的六条门禁清单内（它在 PRD 里对应 AC9），故不阻断 Step A 的提交。
+      > 注：`scripts/check-panel-overflow.js` **不在** AGENTS.md「all green required before commit」
+      > 的六条门禁清单内（它在 PRD 里对应 AC9），故不阻断 Step A 的提交。
+      >
+      > **✚ 已修复（2026-11-07, 0.6.15 批, commit `42d5138`）**：按本处方落地 —— `window.__svi`
+      > 增 `statEntries` 只读句柄，探针开机后从真源派生期望数（12），句柄缺失显式失败；
+      > 实跑 PASS。本条从「下一步第一件事」转为已闭合。
 
 6. **[未验证]** `test-extension.js` / `web-ext lint` / `pack.js` / `panel-shot.js` 在本次 13:50 收尾窗口内
    **未跑**（不是通过）。`node test.js` / `node --check` / `build-extension.js` / `test-browser.js` 已跑且绿。

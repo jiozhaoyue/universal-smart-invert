@@ -851,6 +851,16 @@ Topics: [.trellis/research/09-28-ui-overhaul-darkreader-parity/legacy/implement.
 |------|---------|
 | `2fd29cf` | fix(ui): D 系列跨面不一致修复 —— options 死滑杆复活 + popup 选项集同源注入 + 图片开关作用域感知写 (0.6.15) |
 | `a739347` | docs(task): implement.md 复选框逐项核实回填 —— Step A 外层框 + D 系列六项落地注记 (0.6.15) |
+| `9599ce8` | test(harness): bench UI 清点行修真 —— v5 手风琴行读从未采集的 hasAccordion 字段恒 Missing, 改报 .svi-modal-section 真实计数 (14) |
+| `42d5138` | fix(probe): check-panel-overflow 预存在红修复 —— statsCells 期望从 statEntries() 真源派生 (01-VERIFY P8 去硬编码) |
+
+> 同批追加两件（上表 9599ce8 / 42d5138）：① bench 清点行 `hasAccordion` 字段从未被采集
+> （`results.ui` 里根本没这个键）→ 恒打印 Missing，交接清单里的「accordion 观察项」真相即此，
+> 已改报真实 `.svi-modal-section` 计数（14，只报事实不写死期望——刚吃过硬编码计数漂移的亏）；
+> ② AC9 探针 `check-panel-overflow.js` 的预存在红（statsCells 12 vs 硬编码 11）按 implement.md
+> §实现期发现 5 的处方修复：`window.__svi` 增 `statEntries` 只读句柄、探针派生期望数，实跑 PASS。
+> lint 3 warnings 复核：1 条双引擎 manifest 登记例外 + 2 条同一 icon() 冻结常量 innerHTML 的
+> 两个产物副本（符合书面纪律, 保持现状）。死调用审计复扫归零。
 
 ### Status
 
