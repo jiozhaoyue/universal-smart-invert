@@ -889,7 +889,9 @@ Topics: [.trellis/spec/frontend/ui-design-tokens.md](../../spec/frontend/ui-desi
 
 ### Git Commits
 
-(No commits - planning session)
+| Hash | Message |
+|------|---------|
+| `6e83cc7` | docs(spec): 跨面写入纪律沉淀 ui-design-tokens.md §4 —— 四键↔presetId 耦合 + 作用域感知写 + 选项集默认值构建期注入 (D7 写进 spec 的义务闭合) |
 
 ### Status
 
