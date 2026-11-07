@@ -815,6 +815,15 @@ Topics: [.trellis/research/09-28-ui-overhaul-darkreader-parity/legacy/implement.
 | `109abb0` | test(firefox): F5 跨域取字节用例 —— 关闭 G1 在 Firefox 侧的最后证据缺口 |
 | `abe2d20` | fix(ui): R15 同族全类审计 —— Alt+M / Alt+Shift+Z / 临时屏蔽恢复自 v5.0 起从未生效, 全部修复 (0.6.14) |
 | `4c5ee19` | docs(spec): 手动结论修序铁律 + 跨类死调用家族教训 |
+| `99baa53` | docs(journal): Session 22 回填 commit 表 + 交接文档 |
+| `9ddb5e3` | docs: README 胶囊关闭方式 + 交接文档浸泡数据 |
+| `661ffd3` | test(guard): R15c 全类死调用审计固化为永久门禁 |
+| `b845fd3` | docs: dev 审计工具注明与 R15c 同口径 |
+| `da10714` | test(harness): profile 清理有界重试 + CORS 偶发红自带覆盖键表 |
+| `62a058b` | test(harness): test-extension 固定等待族收口（7 处有界轮询） |
+| `214652f` | test(harness): bench Scenario 8 三处固定等待收口 |
+| `d74bdff` | docs(spec): profile 清理重试+喊话配方 与 有界落盘轮询配方 |
+| `5fba46b` | test(harness): bench Scenario 9 六通道谓词有界轮询收口 |
 
 ### Status
 
