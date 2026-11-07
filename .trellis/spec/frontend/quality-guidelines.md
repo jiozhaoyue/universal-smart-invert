@@ -1064,3 +1064,23 @@ on 路径不受影响 —— apply 的 reason `'manual'` 在 `ARBITRATE_BYPASS` 
    try/catch 静默吞掉数月。字段先**归位到真主**,再删错误副本;
 3. 修复死调用会**解锁**其后从未执行过的路径——那些路径里的缺陷是第一次暴露,
    必须连同验证(bench Scenario 35/36/37 即为此设)。
+
+## 测试脚手架的存储前提与有界落盘(2026-11-07 增补)
+
+### 固定 profile 的清理失败必须"重试 + 喊话", 不得静默容错
+
+bench 用固定 profile 目录并"每次运行前清空" —— 这个前提撑着 Scenario 1 的"全新存储"
+断言。背靠背连跑时, 上一进程的文件锁会让 `rmSync` 静默失败(异常被 catch 吞掉)→
+上一轮 localStorage 整体泄进本轮。实测后果: Scenario 1 的跨域图被上一轮遗留的
+`manualOverrides` 键判成 `keep/manual`(markManual 是该 reason 的唯一写入者, 而任何
+场景都没碰过那个 src)—— 表面像产品缺陷, 实为脚手架前提被无声破坏。
+**配方**: 清理 4 次重试(400ms 间隔)+ 仍失败则 console.warn 喊话; 红时 [Diag] 打出
+`manualOverrides` 全量键表归因写入方(test-browser Scenario 1 已装)。
+
+### "写偏好 → 导航/重载 → 读回"一律有界轮询, 不得固定 sleep
+
+`savePrefs()` 的防抖(300ms)+ 分片落盘与后续导航存在竞速; 固定睡 900/1200/1500ms 是
+拿概率赌余量。**配方**(test-extension `persistWaitSrc` / `waitFor`, bench `waitForExpr`):
+分片感知读原始存储(与 readPrefsRaw 同规则)→ 轮询到期望值才放行 → 断言"必须真的落盘"。
+旧缺陷若复发, 轮询超时红比固定睡后读一次更可归属。例外: 帧计数**测量窗口**的固定
+等待是合法的(需要时间积累样本), 与同步等待是两回事。
