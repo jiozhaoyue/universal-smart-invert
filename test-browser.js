@@ -1006,6 +1006,9 @@ async function main() {
           hasModal: !!document.querySelector('.svi-modal-mask'),
           chipsCount: document.querySelectorAll('.svi-color-chip').length,
           hasPicker: !!document.querySelector('.svi-color-input-native'),
+          // v6.4 R2 重建后面板模态的分组是常开 .svi-modal-section（v5 时代的手风琴已不存在 ——
+          //   旧清点行读一个从未采集的 hasAccordion 字段, 恒打印 Missing; 0.6.15 改报真实计数）
+          sectionCount: document.querySelectorAll('.svi-modal-section').length,
           hasElementRuleForm: !!document.querySelector('.svi-er-form'),
           actionBtnCount: document.querySelectorAll('.svi-action-btn').length,
           hasSiteSection: !!document.getElementById('svi-sec-site'),
@@ -1102,7 +1105,7 @@ async function main() {
     console.log(`UI Settings Modal:           ${report.ui.hasModal ? '✓ Present' : '✗ Missing'}`);
     console.log(`UI Color Chips (Presets):    ${report.ui.chipsCount} chips loaded`);
     console.log(`UI Color Picker:             ${report.ui.hasPicker ? '✓ Present' : '✗ Missing'}`);
-    console.log(`UI Collapsible Accordion:    ${report.ui.hasAccordion ? '✓ Present' : '✗ Missing'}`);
+    console.log(`UI Modal Sections:           ${report.ui.sectionCount} (.svi-modal-section; v5 手风琴清点行已废 —— 旧字段从未采集, 恒 Missing)`);
     console.log(`UI Section Icon SVGs:        ${report.ui.sectionIconSvgs} (R2d: >= 9) | button/title icons: ${report.ui.btnIconSvgs}`);
     console.log(`UI Panel Action Buttons:     ${report.ui.actionBtnCount} (Expected: 4, incl. 背景替换)`);
     console.log(`Modal Site Section:          ${report.ui.hasSiteSection ? '✓ Present' : '✗ Missing'}`);
